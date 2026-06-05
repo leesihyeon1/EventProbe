@@ -310,6 +310,10 @@ body {
 .tab-content { display: none; padding: 12px 16px; background: var(--bg-secondary); }
 .tab-content.active { display: block; }
 
+/* 응답 패널 탭 show/hide */
+.res-tab-content          { display: none !important; }
+.res-tab-content.active   { display: block !important; }
+
 /* ── Key-Value Editor ── */
 .kv-editor { display: flex; flex-direction: column; gap: 4px; }
 

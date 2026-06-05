@@ -204,10 +204,14 @@ function switchReqTab(tab) {
 
 function switchResTab(tab) {
   state.activeResTab = tab;
-  document.querySelectorAll('.res-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  document.querySelectorAll('[data-tab]').forEach(c => {
-    if (c.classList.contains('res-tab-content')) c.classList.toggle('active', c.dataset.tab === tab);
-  });
+  // 탭 버튼 active 토글
+  document.querySelectorAll('.res-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === tab)
+  );
+  // 탭 콘텐츠 show/hide
+  document.querySelectorAll('.res-tab-content').forEach(c =>
+    c.classList.toggle('active', c.dataset.tab === tab)
+  );
 }
 
 /* ── Send Request ── */
