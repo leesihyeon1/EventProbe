@@ -798,6 +798,67 @@ function switchView(view) {
   document.querySelectorAll('.topbar-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   드래그 리사이저 — 응답 패널 ↔ 보안 분석 패널 가로 크기 조정
+   ══════════════════════════════════════════════════════════════════ */
+function initPaneResizer() {
+  const divider     = document.getElementById('paneDivider');
+  const resArea     = document.getElementById('responseArea');
+  const analysisEl  = document.getElementById('analysisPanel');
+  if (!divider || !resArea || !analysisEl) return;
+
+  // 저장된 너비 복원
+  const saved = localStorage.getItem('analysisPanelWidth');
+  if (saved) analysisEl.style.width = saved + 'px';
+
+  let dragging = false;
+  let startX   = 0;
+  let startW   = 0;
+
+  divider.addEventListener('mousedown', e => {
+    dragging = true;
+    startX   = e.clientX;
+    startW   = analysisEl.getBoundingClientRect().width;
+    divider.classList.add('dragging');
+    document.body.style.cursor    = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    // 마우스를 왼쪽으로 이동 → 분석 패널 넓어짐
+    // 오른쪽으로 드래그 → 분석 패널 좁아짐 / 왼쪽으로 드래그 → 넓어짐
+    const delta  = startX - e.clientX;
+    const areaW  = resArea.getBoundingClientRect().width;
+    const newW   = Math.min(Math.max(startW + delta, 260), areaW - 200);
+    analysisEl.style.width = newW + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('dragging');
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+    // 너비 저장
+    localStorage.setItem('analysisPanelWidth',
+      analysisEl.getBoundingClientRect().width);
+  });
+
+  // 마우스 휠로 크기 조정 (Ctrl + 휠)
+  resArea.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const areaW = resArea.getBoundingClientRect().width;
+    const curW  = analysisEl.getBoundingClientRect().width;
+    const step  = e.deltaY > 0 ? -20 : 20;  // 아래 = 좁힘, 위 = 넓힘
+    const newW  = Math.min(Math.max(curW + step, 220), areaW - 200);
+    analysisEl.style.width = newW + 'px';
+    localStorage.setItem('analysisPanelWidth', newW);
+  }, { passive: false });
+}
+
 /* ── Init ── */
 document.addEventListener('DOMContentLoaded', () => {
   loadSidebar();
@@ -818,4 +879,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('bulkCategory').addEventListener('change', e => {
     loadBulkPayloadList(e.target.value);
   });
+
+  // 패널 리사이저 초기화
+  initPaneResizer();
 });

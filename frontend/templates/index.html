@@ -105,9 +105,9 @@
         </div>
 
         <!-- 응답 영역 -->
-        <div class="response-area">
+        <div class="response-area" id="responseArea">
           <!-- 응답 패널 -->
-          <div class="response-panel">
+          <div class="response-panel" id="responsePanel">
             <div class="panel-header">
               <span>응답</span>
               <div style="display:flex;align-items:center;gap:10px">
@@ -126,8 +126,11 @@
             <div class="response-body res-tab-content" data-tab="req-summary" id="reqSummaryBody" style="font-family:var(--font-mono);font-size:12px;line-height:1.7"></div>
           </div>
 
+          <!-- 드래그 리사이저 -->
+          <div class="pane-divider" id="paneDivider" title="드래그하여 크기 조절"></div>
+
           <!-- 분석 패널 -->
-          <div class="analysis-panel">
+          <div class="analysis-panel" id="analysisPanel">
             <div class="panel-header">
               <span>보안 분석</span>
               <span id="analysisVerdict"></span>
