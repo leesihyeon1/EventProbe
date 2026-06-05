@@ -1542,26 +1542,65 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .alert-filter-tab {
-  padding: 3px 9px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-tertiary);
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-muted);
   font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
   transition: all .15s;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.alert-filter-tab:hover { color: var(--text-primary); border-color: var(--border-light); }
-.alert-filter-tab.active {
+.alert-filter-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 전체 탭 active */
+.alert-filter-tab[data-filter="all"].active {
   background: rgba(88,166,255,.15);
   color: var(--accent);
-  border-color: rgba(88,166,255,.4);
+  border-color: rgba(88,166,255,.3);
+  font-weight: 600;
+}
+
+/* 위험도별 active 색상 */
+.alert-filter-tab[data-filter="high"].active {
+  background: rgba(248,81,73,.15);
+  color: var(--danger);
+  border-color: rgba(248,81,73,.3);
+  font-weight: 600;
+}
+.alert-filter-tab[data-filter="medium"].active {
+  background: rgba(255,166,87,.15);
+  color: var(--orange);
+  border-color: rgba(255,166,87,.3);
+  font-weight: 600;
+}
+.alert-filter-tab[data-filter="low"].active {
+  background: rgba(63,185,80,.12);
+  color: var(--success);
+  border-color: rgba(63,185,80,.3);
+  font-weight: 600;
+}
+.alert-filter-tab[data-filter="informational"].active {
+  background: rgba(139,148,158,.12);
+  color: var(--text-secondary);
+  border-color: var(--border-light);
   font-weight: 600;
 }
 

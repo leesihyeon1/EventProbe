@@ -1067,12 +1067,13 @@ function renderAlerts(alerts) {
   section.id = 'alertSection';
 
   // 필터 탭 구성 (건수 있는 것만)
+  const dot = (color) => `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>`;
   const filterTabs = [
-    { key:'all',           label:`전체 ${alerts.length}` },
-    { key:'high',          label:`🔴 High ${counts.high}`,         show: counts.high > 0 },
-    { key:'medium',        label:`🟠 Medium ${counts.medium}`,     show: counts.medium > 0 },
-    { key:'low',           label:`🟡 Low ${counts.low}`,           show: counts.low > 0 },
-    { key:'informational', label:`🔵 정보 ${counts.informational}`, show: counts.informational > 0 },
+    { key:'all',           label:`전체 <b>${alerts.length}</b>` },
+    { key:'high',          label:`${dot('var(--danger)')} High <b>${counts.high}</b>`,         show: counts.high > 0 },
+    { key:'medium',        label:`${dot('var(--orange)')} Medium <b>${counts.medium}</b>`,     show: counts.medium > 0 },
+    { key:'low',           label:`${dot('var(--success)')} Low <b>${counts.low}</b>`,          show: counts.low > 0 },
+    { key:'informational', label:`${dot('var(--text-muted)')} 정보 <b>${counts.informational}</b>`, show: counts.informational > 0 },
   ].filter(t => t.key === 'all' || t.show);
 
   const filterTabHtml = filterTabs.map(t => `
