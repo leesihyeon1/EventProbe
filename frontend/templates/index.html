@@ -119,8 +119,23 @@
             <div class="kv-editor" id="paramsKv"></div>
           </div>
 
-          <div class="tab-content req-tab-content" data-tab="headers" style="max-height:140px;overflow-y:auto">
-            <div class="kv-editor" id="headersKv"></div>
+          <div class="tab-content req-tab-content" data-tab="headers" style="max-height:200px;overflow-y:auto">
+            <!-- Headers 모드 전환 토글 -->
+            <div class="headers-mode-bar">
+              <button class="hdr-mode-btn active" id="hdrModeKv" onclick="switchHeaderMode('kv')">Key-Value</button>
+              <button class="hdr-mode-btn" id="hdrModeRaw" onclick="switchHeaderMode('raw')">Raw</button>
+              <span id="hdrSyncHint" style="font-size:10px;color:var(--text-muted);margin-left:auto">전환 시 자동 변환</span>
+            </div>
+            <!-- Key-Value 편집기 -->
+            <div id="headersKvWrap">
+              <div class="kv-editor" id="headersKv"></div>
+            </div>
+            <!-- Raw 편집기 -->
+            <div id="headersRawWrap" style="display:none;padding:8px 12px">
+              <textarea id="headersRawEditor" class="code-editor"
+                placeholder="Content-Type: application/json&#10;Authorization: Bearer token123&#10;X-Custom-Header: value"
+                style="min-height:100px;font-size:12px"></textarea>
+            </div>
           </div>
 
           <div class="tab-content req-tab-content" data-tab="body">

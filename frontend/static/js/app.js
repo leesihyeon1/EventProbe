@@ -60,6 +60,62 @@ function httpColor(code) {
   return 'var(--text-muted)';
 }
 
+/* ── Headers 모드 전환 (KV ↔ Raw) ── */
+let headerMode = 'kv';   // 'kv' | 'raw'
+
+function switchHeaderMode(mode) {
+  if (mode === headerMode) return;
+
+  if (mode === 'raw') {
+    // KV → Raw : 현재 KV를 "Key: Value\n" 형식 텍스트로 변환
+    const raw = state.kvHeaders
+      .filter(r => r.key)
+      .map(r => `${r.key}: ${r.value}`)
+      .join('\n');
+    document.getElementById('headersRawEditor').value = raw;
+    document.getElementById('headersKvWrap').style.display  = 'none';
+    document.getElementById('headersRawWrap').style.display = 'block';
+  } else {
+    // Raw → KV : 텍스트를 파싱해서 KV 배열로 변환
+    const raw = document.getElementById('headersRawEditor').value;
+    state.kvHeaders = parseRawHeaders(raw);
+    renderKvEditor('headersKv', state.kvHeaders);
+    document.getElementById('headersKvWrap').style.display  = 'block';
+    document.getElementById('headersRawWrap').style.display = 'none';
+  }
+
+  headerMode = mode;
+  document.getElementById('hdrModeKv').classList.toggle('active', mode === 'kv');
+  document.getElementById('hdrModeRaw').classList.toggle('active', mode === 'raw');
+}
+
+function parseRawHeaders(raw) {
+  return raw.split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'))
+    .map(line => {
+      const idx = line.indexOf(':');
+      if (idx === -1) return { key: line.trim(), value: '' };
+      return {
+        key:   line.slice(0, idx).trim(),
+        value: line.slice(idx + 1).trim(),
+      };
+    })
+    .filter(r => r.key);
+}
+
+// sendRequest 전 호출 — 현재 모드에서 헤더 객체를 읽어옴
+function getHeadersObj() {
+  if (headerMode === 'raw') {
+    const raw = document.getElementById('headersRawEditor').value;
+    const parsed = parseRawHeaders(raw);
+    const o = {};
+    parsed.forEach(r => { if (r.key) o[r.key] = r.value; });
+    return o;
+  }
+  return kvToObj(state.kvHeaders);
+}
+
 /* ── KV Editor ── */
 function renderKvEditor(containerId, rows) {
   const el = document.getElementById(containerId);
@@ -235,7 +291,7 @@ async function sendRequest() {
     const reqPayload = {
       method,
       url,
-      headers: kvToObj(state.kvHeaders),
+      headers: getHeadersObj(),
       params: kvToObj(state.kvParams),
       body,
       payload: state.selectedPayload?.payload,
@@ -1327,7 +1383,8 @@ function restoreHistory(id) {
   document.getElementById('urlInput').value    = item.url;
   document.getElementById('methodSelect').value = item.method;
 
-  // Headers / Params 복원
+  // Headers / Params 복원 (KV 모드로 전환 후 채움)
+  if (headerMode !== 'kv') switchHeaderMode('kv');
   state.kvHeaders = Object.entries(item.headers || {}).map(([k,v]) => ({key:k, value:v}));
   state.kvParams  = Object.entries(item.params  || {}).map(([k,v]) => ({key:k, value:v}));
   renderKvEditor('headersKv', state.kvHeaders);
