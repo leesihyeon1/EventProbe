@@ -117,11 +117,13 @@
               </div>
             </div>
             <div class="tab-bar" style="background:var(--bg-primary)">
-              <div class="tab res-tab active" data-tab="body" onclick="switchResTab('body')">Body</div>
-              <div class="tab res-tab" data-tab="headers" onclick="switchResTab('headers')">Headers</div>
+              <div class="tab res-tab active" data-tab="body" onclick="switchResTab('body')">Response Body</div>
+              <div class="tab res-tab" data-tab="res-headers" onclick="switchResTab('res-headers')">Response Headers</div>
+              <div class="tab res-tab" data-tab="req-summary" onclick="switchResTab('req-summary')">Request</div>
             </div>
             <pre class="response-body res-tab-content active" data-tab="body" id="responseBody"><span style="color:var(--text-muted)">응답이 여기에 표시됩니다</span></pre>
-            <pre class="response-body res-tab-content" data-tab="headers" id="responseHeadersBody"></pre>
+            <pre class="response-body res-tab-content" data-tab="res-headers" id="responseHeadersBody"></pre>
+            <div class="response-body res-tab-content" data-tab="req-summary" id="reqSummaryBody" style="font-family:var(--font-mono);font-size:12px;line-height:1.7"></div>
           </div>
 
           <!-- 분석 패널 -->

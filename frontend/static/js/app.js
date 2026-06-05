@@ -205,7 +205,9 @@ function switchReqTab(tab) {
 function switchResTab(tab) {
   state.activeResTab = tab;
   document.querySelectorAll('.res-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  document.querySelectorAll('.res-tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === tab));
+  document.querySelectorAll('[data-tab]').forEach(c => {
+    if (c.classList.contains('res-tab-content')) c.classList.toggle('active', c.dataset.tab === tab);
+  });
 }
 
 /* ── Send Request ── */
@@ -226,7 +228,7 @@ async function sendRequest() {
   document.getElementById('analysisContent').innerHTML = '<div class="empty-state"><div class="msg">분석 중...</div></div>';
 
   try {
-    const result = await API.request({
+    const reqPayload = {
       method,
       url,
       headers: kvToObj(state.kvHeaders),
@@ -234,7 +236,10 @@ async function sendRequest() {
       body,
       payload: state.selectedPayload?.payload,
       category: state.selectedCategory?.id,
-    });
+    };
+
+    const result = await API.request(reqPayload);
+    result._req = reqPayload;   // 요청 원본 첨부
 
     state.lastResult = result;
     renderResponse(result);
@@ -258,7 +263,7 @@ function renderResponse(result) {
   document.getElementById('resTime').textContent = `${result.response_time}ms`;
   document.getElementById('resSize').textContent = formatBytes(result.body_size);
 
-  // 바디
+  // 응답 바디
   const bodyEl = document.getElementById('responseBody');
   if (result.body) {
     let formatted = result.body;
@@ -268,10 +273,85 @@ function renderResponse(result) {
     bodyEl.textContent = '(응답 없음)';
   }
 
-  // 헤더
+  // 응답 헤더
   const hdrEl = document.getElementById('responseHeadersBody');
   hdrEl.textContent = Object.entries(result.headers || {})
     .map(([k,v]) => `${k}: ${v}`).join('\n');
+
+  // 요청 요약 (보낸 내용)
+  renderRequestSummary(result._req);
+}
+
+function renderRequestSummary(req) {
+  if (!req) return;
+  const el = document.getElementById('reqSummaryBody');
+
+  const method  = req.method?.toUpperCase() || '-';
+  const url     = req.url || '-';
+  const params  = Object.entries(req.params || {});
+  const headers = Object.entries(req.headers || {});
+  const body    = req.body || null;
+
+  // 최종 URL 조립 (params 포함)
+  let fullUrl = url;
+  if (params.length) {
+    const qs = params.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    fullUrl += (url.includes('?') ? '&' : '?') + qs;
+  }
+
+  el.innerHTML = `
+    <!-- Request Line -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Request Line</div>
+      <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;word-break:break-all">
+        <span style="color:var(--accent);font-weight:700">${escapeHtml(method)}</span>
+        <span style="color:var(--text-primary);margin-left:8px">${escapeHtml(fullUrl)}</span>
+        <span style="color:var(--text-muted);margin-left:6px">HTTP/1.1</span>
+      </div>
+    </div>
+
+    <!-- 전송 헤더 -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">
+        Request Headers
+        <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0"> (${headers.length}개)</span>
+      </div>
+      ${headers.length ? `
+        <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px">
+          ${headers.map(([k,v]) => `
+            <div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid var(--border)">
+              <span style="color:var(--purple);min-width:160px;flex-shrink:0">${escapeHtml(k)}</span>
+              <span style="color:var(--text-secondary)">${escapeHtml(v)}</span>
+            </div>`).join('')}
+        </div>` :
+        `<div style="color:var(--text-muted);font-size:11px;padding:4px 2px">(헤더 없음)</div>`}
+    </div>
+
+    <!-- Query Params -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">
+        Query Parameters
+        <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0"> (${params.length}개)</span>
+      </div>
+      ${params.length ? `
+        <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px">
+          ${params.map(([k,v]) => `
+            <div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid var(--border)">
+              <span style="color:var(--orange);min-width:160px;flex-shrink:0">${escapeHtml(k)}</span>
+              <span style="color:var(--text-secondary)">${escapeHtml(v)}</span>
+            </div>`).join('')}
+        </div>` :
+        `<div style="color:var(--text-muted);font-size:11px;padding:4px 2px">(파라미터 없음)</div>`}
+    </div>
+
+    <!-- Request Body -->
+    <div>
+      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Request Body</div>
+      ${body ? `
+        <pre style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;margin:0">${escapeHtml((() => { try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; } })())}</pre>` :
+        `<div style="color:var(--text-muted);font-size:11px;padding:4px 2px">(바디 없음)</div>`}
+    </div>
+  `;
 }
 
 function formatBytes(bytes) {
