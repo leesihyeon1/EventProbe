@@ -1368,6 +1368,14 @@ async function runMultiTargetTest() {
     const data = await res.json();
     hideLoadingOverlay();
     renderMultiTargetResults(data);
+    // 리포트 생성을 위해 전체 결과 평탄화해서 저장
+    const flatResults = (data.targets || []).flatMap(t => t.results || []);
+    state.bulkResults = {
+      results: flatResults,
+      summary: generateClientSummary(flatResults),
+      _isMultiTarget: true,
+      _targetCount: data.target_count || (data.targets || []).length,
+    };
     switchView('results');
   } catch(e) {
     hideLoadingOverlay();
@@ -1686,11 +1694,15 @@ function generateReport() {
 function renderReport(data) {
   const { results, summary } = data;
   const container = document.getElementById('reportContent');
+  if (!results || !results.length) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="msg">리포트를 생성할 결과가 없습니다</div></div>';
+    return;
+  }
 
-  const bypassList = results.filter(r => r.analysis.verdict === 'bypass');
-  const passedList = results.filter(r => r.analysis.verdict === 'passed');
-  const leakList   = results.filter(r => r.analysis.error_leaks?.length > 0);
-  const sensitiveList = results.filter(r => r.analysis.sensitive_data?.length > 0);
+  const bypassList = results.filter(r => r.analysis?.verdict === 'bypass');
+  const passedList = results.filter(r => r.analysis?.verdict === 'passed');
+  const leakList   = results.filter(r => r.analysis?.error_leaks?.length > 0);
+  const sensitiveList = results.filter(r => r.analysis?.sensitive_data?.length > 0);
 
   const overallRisk = sensitiveList.length || bypassList.length ? 'CRITICAL'
     : leakList.length ? 'HIGH'
@@ -1701,7 +1713,7 @@ function renderReport(data) {
 
   container.innerHTML = `
     <div class="report-section">
-      <h3>📊 종합 요약</h3>
+      <h3>📊 종합 요약 ${data._isMultiTarget ? `<span style="font-size:11px;color:var(--text-muted);font-weight:400">— 다중 타겟 ${data._targetCount}개 통합</span>` : ''}</h3>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
         <div class="summary-card">
           <div class="num" style="color:${riskColor[overallRisk]}">${overallRisk}</div>
