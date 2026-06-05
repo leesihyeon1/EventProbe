@@ -104,7 +104,7 @@ async function loadSidebar() {
 
   state.payloads.categories.forEach(cat => {
     const group = document.createElement('div');
-    group.className = 'category-group open';
+    group.className = 'category-group';  // 기본 닫힌 상태
     group.dataset.catId = cat.id;
 
     group.innerHTML = `
