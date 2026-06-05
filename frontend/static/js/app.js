@@ -1767,6 +1767,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') sendRequest();
   });
 
+  // 메서드 변경 시 페이로드 삽입 위치 자동 전환
+  document.getElementById('methodSelect').addEventListener('change', e => {
+    const bodyMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    const target = document.getElementById('injectTarget');
+    if (bodyMethods.includes(e.target.value)) {
+      target.value = 'body';
+      // Body 탭도 자동 전환
+      switchReqTab('body');
+    } else {
+      target.value = 'param';
+      switchReqTab('params');
+    }
+  });
+
   // Sidebar search
   document.getElementById('sidebarSearchInput').addEventListener('input', e => {
     filterSidebar(e.target.value);
