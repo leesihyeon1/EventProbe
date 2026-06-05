@@ -573,6 +573,11 @@
     </div>
     <div class="modal-footer">
       <span style="font-size:11px;color:var(--text-muted);margin-right:auto">💾 브라우저에 자동 저장 · 요청 전송 시 자동 적용</span>
+      <button class="btn btn-secondary" style="font-size:11px;padding:5px 10px" onclick="exportAlertRules()">⬇️ 내보내기</button>
+      <label class="btn btn-secondary" style="font-size:11px;padding:5px 10px;cursor:pointer;margin:0">
+        ⬆️ 가져오기
+        <input type="file" id="alertRuleImportInput" accept=".json" style="display:none" onchange="importAlertRules(this)">
+      </label>
       <button class="btn btn-secondary" onclick="closeAlertRuleModal()">닫기</button>
     </div>
   </div>

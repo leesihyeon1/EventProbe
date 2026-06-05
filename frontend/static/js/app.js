@@ -997,6 +997,58 @@ function deleteAlertRule(ruleId) {
   toast('삭제됨', 'success');
 }
 
+/* ── Alert 룰 내보내기 ── */
+function exportAlertRules() {
+  const rules = loadAlertRules();
+  if (!rules.length) { toast('내보낼 룰이 없습니다', 'error'); return; }
+  const data = JSON.stringify({ alert_rules: rules }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const ts   = new Date().toISOString().slice(0, 10);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `eventprobe_alert_rules_${ts}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('내보내기 완료', 'success');
+}
+
+/* ── Alert 룰 가져오기 ── */
+function importAlertRules(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      const imported = data.alert_rules;
+      if (!Array.isArray(imported)) throw new Error('올바른 형식이 아닙니다 (alert_rules 배열 필요)');
+
+      const existing = loadAlertRules();
+      const conflicts = imported.filter(nr => existing.some(er => er.name === nr.name));
+      let msg = `${imported.length}개 룰을 가져올까요?`;
+      if (conflicts.length) msg += `\n\n⚠️ "${conflicts.map(r=>r.name).join(', ')}" 룰이 이미 존재합니다. 덮어쓰시겠습니까?`;
+      if (!confirm(msg)) { input.value = ''; return; }
+
+      // 병합: 동일 이름 덮어쓰기, 새 항목 추가
+      imported.forEach(nr => {
+        nr.id = genId();
+        const idx = existing.findIndex(er => er.name === nr.name);
+        if (idx >= 0) existing[idx] = nr;
+        else existing.push(nr);
+      });
+
+      saveAlertRules(existing);
+      renderAlertRuleList();
+      toast(`가져오기 완료: ${imported.length}개 룰`, 'success');
+    } catch(err) {
+      toast('가져오기 실패: ' + err.message, 'error');
+    }
+    input.value = '';
+  };
+  reader.readAsText(file);
+}
+
 /* ── Render ZAP-style Alerts ── */
 function renderAlerts(alerts) {
   const container = document.getElementById('analysisContent');
