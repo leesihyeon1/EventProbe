@@ -37,6 +37,7 @@
     <div class="sidebar-tab-bar">
       <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">⚔️ 페이로드</div>
       <div class="sidebar-tab" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</div>
+      <button class="sidebar-edit-btn" onclick="event.stopPropagation();openCustomModal()" title="커스텀 페이로드 편집">✏️</button>
     </div>
 
     <!-- 페이로드 패널 -->
@@ -413,6 +414,75 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ══════════════════════════════ CUSTOM PAYLOAD MODAL ══════════════════════ -->
+<div class="modal-overlay hidden" id="customModal">
+  <div class="modal" style="width:780px;max-height:85vh">
+    <div class="modal-header">
+      <h2>✏️ 커스텀 페이로드 관리</h2>
+      <button class="btn btn-secondary" onclick="closeCustomModal()">✕ 닫기</button>
+    </div>
+
+    <div style="display:flex;flex:1;overflow:hidden;min-height:0">
+
+      <!-- 왼쪽: 카테고리 목록 -->
+      <div style="width:220px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column">
+        <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">카테고리</span>
+          <button class="btn btn-primary" style="font-size:11px;padding:3px 8px" onclick="addCustomCategory()">+ 추가</button>
+        </div>
+        <div id="customCategoryList" style="overflow-y:auto;flex:1"></div>
+      </div>
+
+      <!-- 오른쪽: 페이로드 편집 영역 -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+        <!-- 카테고리 미선택 상태 -->
+        <div id="customNoCategory" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">
+          <div style="text-align:center">
+            <div style="font-size:32px;margin-bottom:8px">←</div>
+            <div style="font-size:13px">카테고리를 선택하세요</div>
+          </div>
+        </div>
+
+        <!-- 카테고리 선택 후 편집 영역 -->
+        <div id="customEditArea" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <!-- 카테고리 헤더 편집 -->
+          <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg-tertiary);display:flex;align-items:center;gap:10px">
+            <input id="customCatIcon" class="form-input" style="width:52px;text-align:center;font-size:16px" placeholder="🎯">
+            <input id="customCatName" class="form-input" style="flex:1" placeholder="카테고리 이름">
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="saveCategoryMeta()">저장</button>
+            <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="deleteCustomCategory()">삭제</button>
+          </div>
+
+          <!-- 페이로드 목록 -->
+          <div id="customPayloadList" style="flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:6px"></div>
+
+          <!-- 새 페이로드 추가 폼 -->
+          <div style="border-top:1px solid var(--border);padding:12px 14px;background:var(--bg-secondary)">
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">페이로드 추가</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <input id="newPayloadName" class="form-input" placeholder="이름 (예: 기본 우회)">
+              <select id="newPayloadRisk" class="form-select">
+                <option value="critical">🔴 Critical</option>
+                <option value="high">🟠 High</option>
+                <option value="medium" selected>🟡 Medium</option>
+                <option value="low">🟢 Low</option>
+              </select>
+            </div>
+            <textarea id="newPayloadValue" class="code-editor" rows="2" placeholder="페이로드 값 (예: ' OR 1=1--)"></textarea>
+            <input id="newPayloadDesc" class="form-input" style="margin-top:6px" placeholder="설명 (선택)">
+            <button class="btn btn-success" style="width:100%;margin-top:8px;font-size:12px" onclick="addCustomPayload()">+ 페이로드 추가</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <span style="font-size:11px;color:var(--text-muted);margin-right:auto">💾 변경사항은 브라우저에 자동 저장됩니다</span>
+      <button class="btn btn-secondary" onclick="closeCustomModal()">닫기</button>
+    </div>
   </div>
 </div>
 

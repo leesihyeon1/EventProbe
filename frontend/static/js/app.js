@@ -155,25 +155,42 @@ function kvToObj(arr) {
 /* ── Sidebar ── */
 async function loadSidebar() {
   state.payloads = await API.payloads();
+
+  // 커스텀 페이로드 병합
+  loadCustomPayloads();
+  const allCategories = [
+    ...state.payloads.categories,
+    ...customState.categories.filter(c => c.payloads.length > 0).map(c => ({
+      ...c, _custom: true
+    })),
+  ];
+  // 벌크 모달용 전체 목록 저장
+  state.payloads._allCategories = allCategories;
+
   const container = document.getElementById('sidebarList');
   container.innerHTML = '';
 
-  state.payloads.categories.forEach(cat => {
+  allCategories.forEach(cat => {
     const group = document.createElement('div');
-    group.className = 'category-group';  // 기본 닫힌 상태
+    group.className = 'category-group';
     group.dataset.catId = cat.id;
+
+    const customBadge = cat._custom
+      ? `<span style="font-size:9px;color:var(--accent);background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.3);border-radius:4px;padding:1px 5px;margin-right:2px">커스텀</span>`
+      : '';
 
     group.innerHTML = `
       <div class="category-header" onclick="toggleCategory(this)">
-        <span>${cat.icon}</span>
+        <span>${cat.icon || '📝'}</span>
         <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${cat.name}</span>
+        ${customBadge}
         <span class="category-badge">${cat.payloads.length}</span>
         <span class="category-chevron">▶</span>
       </div>
       <div class="payload-list">
         ${cat.payloads.map(p => `
           <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
-            <span class="risk-dot ${p.risk}"></span>
+            <span class="risk-dot ${p.risk || 'medium'}"></span>
             <span class="payload-name" title="${escapeHtml(p.payload)}">${p.name}</span>
           </div>`).join('')}
       </div>`;
@@ -206,8 +223,9 @@ function selectPayload(catId, payloadId) {
   const el = document.querySelector(`.payload-item[data-pid="${payloadId}"]`);
   if (el) el.classList.add('selected');
 
-  // 상태 업데이트
-  const cat = state.payloads.categories.find(c => c.id === catId);
+  // 상태 업데이트 (기본 + 커스텀 통합 탐색)
+  const allCats = state.payloads?._allCategories || state.payloads?.categories || [];
+  const cat     = allCats.find(c => c.id === catId);
   const payload = cat?.payloads.find(p => p.id === payloadId);
   if (!payload) return;
 
@@ -1313,6 +1331,218 @@ function initPaneResizer() {
 /* ══════════════════════════════════════════════════════════════════
    사이드바 탭 전환
    ══════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════
+   커스텀 페이로드 관리
+   ══════════════════════════════════════════════════════════════════ */
+const CUSTOM_KEY = 'eventprobe_custom_payloads';
+let customState = { categories: [], selectedCatId: null };
+
+function loadCustomPayloads() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{"categories":[]}');
+    customState.categories = d.categories || [];
+  } catch { customState.categories = []; }
+}
+
+function saveCustomPayloads() {
+  localStorage.setItem(CUSTOM_KEY, JSON.stringify({ categories: customState.categories }));
+}
+
+function genId() {
+  return 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+/* ── 모달 열기/닫기 ── */
+function openCustomModal() {
+  loadCustomPayloads();
+  renderCustomCategoryList();
+  selectCustomCategory(customState.selectedCatId);
+  document.getElementById('customModal').classList.remove('hidden');
+}
+
+function closeCustomModal() {
+  document.getElementById('customModal').classList.add('hidden');
+  // 사이드바에 커스텀 카테고리 반영
+  loadSidebar();
+}
+
+/* ── 카테고리 목록 렌더링 ── */
+function renderCustomCategoryList() {
+  const list = document.getElementById('customCategoryList');
+  if (!customState.categories.length) {
+    list.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">카테고리를 추가하세요</div>`;
+    return;
+  }
+  list.innerHTML = customState.categories.map(cat => `
+    <div class="custom-cat-item ${cat.id === customState.selectedCatId ? 'active' : ''}"
+         onclick="selectCustomCategory('${cat.id}')">
+      <span class="cat-icon">${escapeHtml(cat.icon || '📝')}</span>
+      <span class="cat-name">${escapeHtml(cat.name)}</span>
+      <span class="cat-count">${cat.payloads.length}</span>
+    </div>`).join('');
+}
+
+/* ── 카테고리 선택 ── */
+function selectCustomCategory(catId) {
+  customState.selectedCatId = catId;
+  const cat = customState.categories.find(c => c.id === catId);
+  document.getElementById('customNoCategory').style.display  = cat ? 'none'  : 'flex';
+  document.getElementById('customEditArea').style.display    = cat ? 'flex'  : 'none';
+  if (!cat) return;
+  document.getElementById('customCatIcon').value = cat.icon || '';
+  document.getElementById('customCatName').value = cat.name;
+  renderCustomPayloadList(cat);
+  // 카테고리 목록 active 갱신
+  document.querySelectorAll('.custom-cat-item').forEach(el =>
+    el.classList.toggle('active', el.onclick?.toString().includes(`'${catId}'`))
+  );
+  renderCustomCategoryList();
+}
+
+/* ── 카테고리 메타 저장 ── */
+function saveCategoryMeta() {
+  const cat = customState.categories.find(c => c.id === customState.selectedCatId);
+  if (!cat) return;
+  cat.icon = document.getElementById('customCatIcon').value.trim() || '📝';
+  cat.name = document.getElementById('customCatName').value.trim() || '새 카테고리';
+  saveCustomPayloads();
+  renderCustomCategoryList();
+  toast('카테고리 저장 완료', 'success');
+}
+
+/* ── 카테고리 추가 ── */
+function addCustomCategory() {
+  const newCat = {
+    id: genId(),
+    name: '새 카테고리',
+    icon: '📝',
+    color: '#58a6ff',
+    payloads: [],
+    custom: true,
+  };
+  customState.categories.push(newCat);
+  saveCustomPayloads();
+  renderCustomCategoryList();
+  selectCustomCategory(newCat.id);
+}
+
+/* ── 카테고리 삭제 ── */
+function deleteCustomCategory() {
+  if (!confirm('이 카테고리와 모든 페이로드를 삭제할까요?')) return;
+  customState.categories = customState.categories.filter(c => c.id !== customState.selectedCatId);
+  customState.selectedCatId = null;
+  saveCustomPayloads();
+  renderCustomCategoryList();
+  selectCustomCategory(null);
+  toast('카테고리 삭제됨', 'success');
+}
+
+/* ── 페이로드 목록 렌더링 ── */
+function renderCustomPayloadList(cat) {
+  const list = document.getElementById('customPayloadList');
+  if (!cat.payloads.length) {
+    list.innerHTML = `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:16px">페이로드를 추가하세요</div>`;
+    return;
+  }
+  list.innerHTML = cat.payloads.map((p, i) => `
+    <div class="custom-payload-item" id="cpi-${p.id}">
+      <div class="custom-payload-item-top">
+        <span class="risk-dot ${p.risk}" style="flex-shrink:0"></span>
+        <span class="custom-payload-name">${escapeHtml(p.name)}</span>
+        <div class="custom-payload-actions">
+          <button class="btn-edit" onclick="startEditPayload('${p.id}')">✏️ 편집</button>
+          <button class="btn-del"  onclick="deleteCustomPayload('${p.id}')">🗑</button>
+        </div>
+      </div>
+      <div class="custom-payload-value">${escapeHtml(p.payload)}</div>
+      ${p.description ? `<div class="custom-payload-desc">${escapeHtml(p.description)}</div>` : ''}
+    </div>`).join('');
+}
+
+/* ── 페이로드 추가 ── */
+function addCustomPayload() {
+  const name  = document.getElementById('newPayloadName').value.trim();
+  const value = document.getElementById('newPayloadValue').value.trim();
+  const risk  = document.getElementById('newPayloadRisk').value;
+  const desc  = document.getElementById('newPayloadDesc').value.trim();
+  if (!name)  { toast('이름을 입력하세요', 'error'); return; }
+  if (!value) { toast('페이로드 값을 입력하세요', 'error'); return; }
+
+  const cat = customState.categories.find(c => c.id === customState.selectedCatId);
+  if (!cat) return;
+
+  cat.payloads.push({ id: genId(), name, payload: value, description: desc, risk });
+  saveCustomPayloads();
+  renderCustomCategoryList();
+  renderCustomPayloadList(cat);
+
+  // 입력 초기화
+  document.getElementById('newPayloadName').value  = '';
+  document.getElementById('newPayloadValue').value = '';
+  document.getElementById('newPayloadDesc').value  = '';
+  toast('페이로드 추가됨', 'success');
+}
+
+/* ── 페이로드 인라인 편집 ── */
+function startEditPayload(payloadId) {
+  const cat = customState.categories.find(c => c.id === customState.selectedCatId);
+  const p   = cat?.payloads.find(x => x.id === payloadId);
+  if (!p) return;
+
+  const el = document.getElementById(`cpi-${payloadId}`);
+  el.innerHTML = `
+    <div class="custom-payload-edit-form">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <input class="form-input" id="ep-name-${p.id}"  value="${escapeHtml(p.name)}"  placeholder="이름">
+        <select class="form-select" id="ep-risk-${p.id}">
+          ${['critical','high','medium','low'].map(r =>
+            `<option value="${r}" ${r===p.risk?'selected':''}>${{critical:'🔴 Critical',high:'🟠 High',medium:'🟡 Medium',low:'🟢 Low'}[r]}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <textarea class="code-editor" id="ep-val-${p.id}" rows="2" style="font-size:12px">${escapeHtml(p.payload)}</textarea>
+      <input class="form-input" id="ep-desc-${p.id}" value="${escapeHtml(p.description||'')}" placeholder="설명 (선택)">
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="cancelEditPayload('${p.id}')">취소</button>
+        <button class="btn btn-primary"   style="font-size:11px;padding:4px 10px" onclick="saveEditPayload('${p.id}')">저장</button>
+      </div>
+    </div>`;
+}
+
+function saveEditPayload(payloadId) {
+  const cat = customState.categories.find(c => c.id === customState.selectedCatId);
+  const p   = cat?.payloads.find(x => x.id === payloadId);
+  if (!p) return;
+
+  const name  = document.getElementById(`ep-name-${payloadId}`).value.trim();
+  const value = document.getElementById(`ep-val-${payloadId}`).value.trim();
+  const risk  = document.getElementById(`ep-risk-${payloadId}`).value;
+  const desc  = document.getElementById(`ep-desc-${payloadId}`).value.trim();
+
+  if (!name || !value) { toast('이름과 값을 입력하세요', 'error'); return; }
+  p.name = name; p.payload = value; p.risk = risk; p.description = desc;
+  saveCustomPayloads();
+  renderCustomPayloadList(cat);
+  toast('수정 완료', 'success');
+}
+
+function cancelEditPayload(payloadId) {
+  const cat = customState.categories.find(c => c.id === customState.selectedCatId);
+  if (cat) renderCustomPayloadList(cat);
+}
+
+/* ── 페이로드 삭제 ── */
+function deleteCustomPayload(payloadId) {
+  if (!confirm('이 페이로드를 삭제할까요?')) return;
+  const cat = customState.categories.find(c => c.id === customState.selectedCatId);
+  if (!cat) return;
+  cat.payloads = cat.payloads.filter(p => p.id !== payloadId);
+  saveCustomPayloads();
+  renderCustomCategoryList();
+  renderCustomPayloadList(cat);
+  toast('삭제됨', 'success');
+}
+
 function switchSidebarTab(tab) {
   document.querySelectorAll('.sidebar-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.stab === tab)

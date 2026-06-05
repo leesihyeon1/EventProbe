@@ -162,6 +162,100 @@ body {
 .sidebar-scroll { overflow-y: auto; flex: 1; }
 
 /* ── 히스토리 툴바 ── */
+/* ── 사이드바 편집 버튼 ── */
+.sidebar-edit-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  transition: all .15s;
+  line-height: 1;
+}
+.sidebar-edit-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+/* ── 커스텀 페이로드 카테고리 항목 ── */
+.custom-cat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+  font-size: 12px;
+}
+.custom-cat-item:hover { background: var(--bg-hover); }
+.custom-cat-item.active {
+  background: rgba(88,166,255,.08);
+  border-left: 2px solid var(--accent);
+}
+.custom-cat-item .cat-icon { font-size: 14px; flex-shrink: 0; }
+.custom-cat-item .cat-name { flex: 1; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custom-cat-item .cat-count { font-size: 10px; color: var(--text-muted); background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; flex-shrink: 0; }
+
+/* ── 커스텀 페이로드 아이템 ── */
+.custom-payload-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color .1s;
+}
+.custom-payload-item:hover { border-color: var(--border-light); }
+.custom-payload-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.custom-payload-name { font-size: 12px; font-weight: 600; flex: 1; color: var(--text-primary); }
+.custom-payload-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--orange);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.custom-payload-desc { font-size: 11px; color: var(--text-muted); }
+.custom-payload-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.custom-payload-actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  transition: all .1s;
+}
+.custom-payload-actions .btn-edit:hover  { color: var(--accent); border-color: var(--accent); }
+.custom-payload-actions .btn-del:hover   { color: var(--danger); border-color: var(--danger); }
+
+/* ── 커스텀 페이로드 인라인 편집 ── */
+.custom-payload-edit-form {
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-dark);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .history-toolbar {
   display: flex;
   align-items: center;
