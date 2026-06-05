@@ -851,13 +851,34 @@ function generateClientSummary(results) {
 }
 
 /* ── 포트 스캔 ── */
+/* 포트 파싱: 쉼표 구분 + 범위(80-100) + 혼합(22,80-90,443) */
+function parsePorts(raw) {
+  const result = new Set();
+  raw.split(',').forEach(token => {
+    token = token.trim();
+    if (!token) return;
+    if (token.includes('-')) {
+      const [s, e] = token.split('-').map(n => parseInt(n.trim()));
+      if (!isNaN(s) && !isNaN(e) && s > 0 && e <= 65535 && s <= e) {
+        // 범위 최대 1000개까지만 허용
+        const limit = Math.min(e, s + 999);
+        for (let p = s; p <= limit; p++) result.add(p);
+      }
+    } else {
+      const n = parseInt(token);
+      if (!isNaN(n) && n > 0 && n <= 65535) result.add(n);
+    }
+  });
+  return [...result].sort((a, b) => a - b);
+}
+
 async function runPortScan() {
   const hostsRaw = document.getElementById('scanHosts').value.trim();
   if (!hostsRaw) { toast('호스트를 입력하세요', 'error'); return; }
 
   const hosts    = hostsRaw.split('\n').map(h => h.trim()).filter(Boolean);
   const portsRaw = document.getElementById('scanPorts').value.trim();
-  const ports    = portsRaw ? portsRaw.split(',').map(p => parseInt(p.trim())).filter(n => !isNaN(n) && n > 0 && n < 65536) : [];
+  const ports    = portsRaw ? parsePorts(portsRaw) : [];
   const timeout  = parseFloat(document.getElementById('scanTimeout').value) || 2;
 
   closeBulkModal();
