@@ -684,7 +684,7 @@ function openBulkModal() {
   if (currentUrl) {
     document.getElementById('bulkUrl').value    = currentUrl;
     document.getElementById('multiUrls').value  = currentUrl;
-    document.getElementById('scanHost').value   =
+    document.getElementById('scanHosts').value   =
       currentUrl.replace(/^https?:\/\//, '').split('/')[0];
   }
 
@@ -852,21 +852,22 @@ function generateClientSummary(results) {
 
 /* ── 포트 스캔 ── */
 async function runPortScan() {
-  const host = document.getElementById('scanHost').value.trim();
-  if (!host) { toast('호스트를 입력하세요', 'error'); return; }
+  const hostsRaw = document.getElementById('scanHosts').value.trim();
+  if (!hostsRaw) { toast('호스트를 입력하세요', 'error'); return; }
 
+  const hosts    = hostsRaw.split('\n').map(h => h.trim()).filter(Boolean);
   const portsRaw = document.getElementById('scanPorts').value.trim();
   const ports    = portsRaw ? portsRaw.split(',').map(p => parseInt(p.trim())).filter(n => !isNaN(n) && n > 0 && n < 65536) : [];
   const timeout  = parseFloat(document.getElementById('scanTimeout').value) || 2;
 
   closeBulkModal();
-  showLoadingOverlay(`${host} 포트 스캔 중...`);
+  showLoadingOverlay(`${hosts.length}개 호스트 포트 스캔 중...`);
 
   try {
     const res  = await fetch('/api/port-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host, ports, timeout }),
+      body: JSON.stringify({ hosts, ports, timeout }),
     });
     const data = await res.json();
     if (data.detail) throw new Error(data.detail);
@@ -880,58 +881,86 @@ async function runPortScan() {
 }
 
 function renderPortScanResults(data) {
-  // 요약 카드 업데이트
-  document.getElementById('summaryTotal').textContent   = data.total_scanned;
-  document.getElementById('summaryBlocked').textContent = data.open_count;
-  document.getElementById('summaryPassed').textContent  = data.risky_count;
-  document.getElementById('summaryBypass').textContent  = data.total_scanned - data.open_count;
-  document.getElementById('summaryRate').textContent    = data.open_count;
+  const hostList = data.hosts || [];
 
-  // 요약 라벨 임시 변경
+  // 요약 카드 업데이트 (포트 스캔 용도)
+  const totalScanned = hostList.reduce((s, h) => s + (h.total_scanned || 0), 0);
+  document.getElementById('summaryTotal').textContent   = data.host_count;
+  document.getElementById('summaryBlocked').textContent = data.total_open;
+  document.getElementById('summaryPassed').textContent  = data.total_risky;
+  document.getElementById('summaryBypass').textContent  = totalScanned;
+  document.getElementById('summaryRate').textContent    = data.total_open;
+
+  document.querySelector('.num-total   + .lbl').textContent = '대상 수';
   document.querySelector('.num-blocked + .lbl').textContent = '열린 포트';
-  document.querySelector('.num-passed + .lbl').textContent  = '위험 포트';
-  document.querySelector('.num-bypass + .lbl').textContent  = '닫힌 포트';
-  document.querySelector('.num-total + .lbl').textContent   = '스캔 수';
-  document.querySelector('.num-rate + .lbl').textContent    = '오픈';
+  document.querySelector('.num-passed  + .lbl').textContent = '위험 포트';
+  document.querySelector('.num-bypass  + .lbl').textContent = '스캔 포트 수';
+  document.querySelector('.num-rate    + .lbl').textContent = '오픈 합계';
 
   const container = document.querySelector('.results-view');
-  const existing  = document.getElementById('portScanArea');
-  if (existing) existing.remove();
-  const oldMulti = document.getElementById('multiResultsArea');
-  if (oldMulti) oldMulti.remove();
-
+  ['portScanArea', 'multiResultsArea'].forEach(id => document.getElementById(id)?.remove());
   const table = container.querySelector('.results-table');
   if (table) table.style.display = 'none';
 
   const area = document.createElement('div');
   area.id = 'portScanArea';
+
   area.innerHTML = `
-    <div style="margin-bottom:14px;padding:12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px">🔌 포트 스캔 결과</div>
-      <div style="font-size:12px;color:var(--text-secondary)">
-        대상: <strong>${escapeHtml(data.host)}</strong>
-        (IP: <code style="color:var(--accent)">${escapeHtml(data.ip)}</code>)
-        &nbsp;|&nbsp; 열린 포트: <strong style="color:var(--success)">${data.open_count}</strong>
-        &nbsp;|&nbsp; 위험 포트: <strong style="color:var(--danger)">${data.risky_count}</strong>
-      </div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+      🔌 <strong>${data.host_count}개</strong> 호스트 스캔 완료
+      &nbsp;|&nbsp; 열린 포트 합계: <strong style="color:var(--success)">${data.total_open}</strong>
+      &nbsp;|&nbsp; 위험 포트: <strong style="color:var(--danger)">${data.total_risky}</strong>
     </div>
-
-    ${data.risky_count > 0 ? `
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;font-weight:600;color:var(--danger);margin-bottom:6px">🔴 위험 포트</div>
-      <div class="port-scan-results">
-        ${data.open_ports.filter(p=>p.risk==='high').map(p => renderPortItem(p)).join('')}
-      </div>
-    </div>` : ''}
-
-    <div>
-      <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">전체 결과</div>
-      <div class="port-scan-results">
-        ${data.results.map(p => renderPortItem(p)).join('')}
-      </div>
-    </div>`;
+    ${hostList.map((h, i) => renderHostPortResult(h, i)).join('')}`;
 
   container.appendChild(area);
+}
+
+function renderHostPortResult(h, idx) {
+  if (h.error && !h.results) {
+    return `
+      <div class="target-result-block" style="border-color:rgba(248,81,73,.3)">
+        <div class="target-result-header" style="cursor:default">
+          <span style="font-size:11px;color:var(--text-muted)">#${idx+1}</span>
+          <span class="target-url">${escapeHtml(h.host)}</span>
+          <span class="tag tag-red" style="font-size:10px">오류</span>
+        </div>
+        <div class="target-result-body" style="padding:10px 14px;font-size:12px;color:var(--danger)">${escapeHtml(h.error)}</div>
+      </div>`;
+  }
+
+  const openPorts  = h.open_ports  || [];
+  const riskyPorts = openPorts.filter(p => p.risk === 'high');
+
+  return `
+    <div class="target-result-block" id="psb-${idx}">
+      <div class="target-result-header" onclick="toggleTargetBlock('psb-${idx}')">
+        <span style="font-size:11px;color:var(--text-muted)">#${idx+1}</span>
+        <span class="target-url">${escapeHtml(h.host)}</span>
+        <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(h.ip || '')}</span>
+        <div class="multi-summary-chips">
+          <span class="alert-count-chip chip-high">열림 ${h.open_count}</span>
+          ${riskyPorts.length ? `<span class="alert-count-chip" style="background:rgba(248,81,73,.1);color:var(--danger);border-color:rgba(248,81,73,.3)">위험 ${riskyPorts.length}</span>` : ''}
+          <span class="alert-count-chip chip-informational">스캔 ${h.total_scanned}</span>
+        </div>
+        <span class="target-chevron">▼</span>
+      </div>
+      <div class="target-result-body" style="padding:10px 14px">
+        ${riskyPorts.length ? `
+          <div style="margin-bottom:10px">
+            <div style="font-size:11px;font-weight:600;color:var(--danger);margin-bottom:5px">🔴 위험 포트</div>
+            <div class="port-scan-results">${riskyPorts.map(p => renderPortItem(p)).join('')}</div>
+          </div>` : ''}
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">전체 결과</div>
+          <div class="port-scan-results">${(h.results || []).map(p => renderPortItem(p)).join('')}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleTargetBlock(id) {
+  document.getElementById(id)?.classList.toggle('collapsed');
 }
 
 function renderPortItem(p) {

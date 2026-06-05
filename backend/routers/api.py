@@ -51,7 +51,7 @@ class MultiTargetRequest(BaseModel):
 
 # 포트 스캔
 class PortScanRequest(BaseModel):
-    host: str
+    hosts: list[str]           # 단일/다중 호스트 모두 지원
     ports: list[int] = []      # 빈 경우 기본 포트 목록 사용
     timeout: float = 2.0
 
@@ -386,40 +386,52 @@ def _port_note(port: int) -> str:
 
 @router.post("/port-scan")
 async def port_scan(req: PortScanRequest):
-    # 호스트명에서 scheme 제거
-    host = req.host.strip()
-    for scheme in ("http://", "https://", "ftp://"):
-        if host.startswith(scheme):
-            host = host[len(scheme):]
-    host = host.split("/")[0].split(":")[0]
-
-    if not host:
-        raise HTTPException(status_code=400, detail="유효한 호스트를 입력하세요")
-
-    # IP 해석
-    try:
-        ip = socket.gethostbyname(host)
-    except socket.gaierror:
-        raise HTTPException(status_code=400, detail=f"호스트 '{host}'를 해석할 수 없습니다")
+    if not req.hosts:
+        raise HTTPException(status_code=400, detail="호스트를 입력하세요")
 
     ports = req.ports if req.ports else DEFAULT_PORTS
 
-    # 동시 스캔 (최대 50개씩)
-    tasks   = [_check_port(ip, p, req.timeout) for p in ports]
-    raw     = await asyncio.gather(*tasks)
-    results = sorted(raw, key=lambda x: x["port"])
+    async def scan_one(raw_host: str) -> dict:
+        host = raw_host.strip()
+        for scheme in ("http://", "https://", "ftp://"):
+            if host.startswith(scheme):
+                host = host[len(scheme):]
+        host = host.split("/")[0].split(":")[0]
+        if not host:
+            return {"host": raw_host, "error": "유효하지 않은 호스트"}
+        try:
+            ip = socket.gethostbyname(host)
+        except socket.gaierror:
+            return {"host": host, "ip": None, "error": f"DNS 해석 실패: {host}",
+                    "total_scanned": 0, "open_count": 0, "risky_count": 0,
+                    "results": [], "open_ports": []}
+        tasks   = [_check_port(ip, p, req.timeout) for p in ports]
+        raw     = await asyncio.gather(*tasks)
+        results = sorted(raw, key=lambda x: x["port"])
+        open_ports  = [r for r in results if r["state"] == "open"]
+        risky_ports = [r for r in open_ports if r["risk"] == "high"]
+        return {
+            "host": host, "ip": ip, "error": None,
+            "total_scanned": len(ports),
+            "open_count": len(open_ports),
+            "risky_count": len(risky_ports),
+            "results": results,
+            "open_ports": open_ports,
+        }
 
-    open_ports  = [r for r in results if r["state"] == "open"]
-    risky_ports = [r for r in open_ports if r["risk"] == "high"]
+    host_results = []
+    for h in req.hosts:
+        if h.strip():
+            host_results.append(await scan_one(h))
+
+    total_open  = sum(r.get("open_count", 0)  for r in host_results)
+    total_risky = sum(r.get("risky_count", 0) for r in host_results)
 
     return {
-        "host": host,
-        "ip": ip,
-        "total_scanned": len(ports),
-        "open_count": len(open_ports),
-        "risky_count": len(risky_ports),
-        "results": results,
-        "open_ports": open_ports,
+        "host_count": len(host_results),
+        "total_open": total_open,
+        "total_risky": total_risky,
+        "hosts": host_results,
     }
 
 
