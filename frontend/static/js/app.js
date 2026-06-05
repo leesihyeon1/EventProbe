@@ -278,14 +278,14 @@ function switchReqTab(tab) {
 
 function switchResTab(tab) {
   state.activeResTab = tab;
-  // 탭 버튼 active 토글
   document.querySelectorAll('.res-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab)
   );
-  // 탭 콘텐츠 show/hide
   document.querySelectorAll('.res-tab-content').forEach(c =>
     c.classList.toggle('active', c.dataset.tab === tab)
   );
+  // Diff 탭 진입 시 렌더링
+  if (tab === 'diff') renderDiff();
 }
 
 /* ── Send Request ── */
@@ -330,6 +330,175 @@ async function sendRequest() {
     btn.disabled = false;
     btn.innerHTML = '▶ 전송';
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Diff — 베이스라인 저장 & 응답 비교
+   ══════════════════════════════════════════════════════════════════ */
+let baseline = null;   // { status_code, response_time, body_size, body, headers }
+
+function saveBaseline() {
+  if (!state.lastResult) { toast('먼저 요청을 전송하세요', 'error'); return; }
+  baseline = {
+    status_code:   state.lastResult.status_code,
+    response_time: state.lastResult.response_time,
+    body_size:     state.lastResult.body_size,
+    body:          state.lastResult.body || '',
+    headers:       state.lastResult.headers || {},
+  };
+  // 버튼 시각적 표시
+  const btn = document.getElementById('baselineBtn');
+  btn.textContent = '📌 베이스라인 ✓';
+  btn.style.borderColor = 'var(--success)';
+  btn.style.color       = 'var(--success)';
+  // Diff 탭에 뱃지 활성화
+  document.getElementById('diffBadge').style.display = 'inline';
+  toast('베이스라인 저장됨 — 다음 요청과 비교합니다', 'success');
+}
+
+function renderDiff() {
+  const view = document.getElementById('diffView');
+
+  if (!baseline) {
+    view.innerHTML = `
+      <div class="empty-state" style="height:100%">
+        <div class="icon">📌</div>
+        <div class="msg">먼저 기준 응답을 <strong>베이스라인 저장</strong> 하세요</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">기준 요청 전송 → 베이스라인 저장 → 페이로드 삽입 후 재전송</div>
+      </div>`;
+    return;
+  }
+
+  if (!state.lastResult) {
+    view.innerHTML = `<div class="empty-state" style="height:100%"><div class="msg">비교할 응답이 없습니다</div></div>`;
+    return;
+  }
+
+  const cur = state.lastResult;
+
+  // ── 메타 비교 ──────────────────────────────────────────────────
+  const metaItems = [
+    { label: '상태 코드',  base: baseline.status_code,   cur: cur.status_code,   fmt: v => v || '-' },
+    { label: '응답 시간',  base: baseline.response_time, cur: cur.response_time, fmt: v => v + 'ms' },
+    { label: '응답 크기',  base: baseline.body_size,     cur: cur.body_size,     fmt: formatBytes },
+  ];
+
+  const metaHtml = metaItems.map(m => {
+    const changed = m.base !== m.cur;
+    const diff = (typeof m.base === 'number' && typeof m.cur === 'number')
+      ? (() => {
+          const d = m.cur - m.base;
+          return (d > 0 ? '+' : '') + (m.label === '응답 크기' ? formatBytes(Math.abs(d)) : d + (m.label === '응답 시간' ? 'ms' : '')) + (d > 0 ? ' ↑' : d < 0 ? ' ↓' : '');
+        })()
+      : '';
+    return `
+      <div class="diff-meta-item">
+        <div class="diff-meta-label">${m.label}</div>
+        <div class="diff-meta-value ${changed ? 'changed' : 'same'}">
+          <span style="color:var(--text-muted)">${m.fmt(m.base)}</span>
+          <span style="color:var(--text-muted);margin:0 4px">→</span>
+          <span style="color:${changed ? 'var(--warning)' : 'var(--text-secondary)'}">${m.fmt(m.cur)}</span>
+          ${changed && diff ? `<span style="font-size:10px;color:${m.cur > m.base ? 'var(--danger)' : 'var(--success)'};margin-left:4px">${diff}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  // ── 바디 Diff 계산 (최대 400줄만 비교) ───────────────────────────
+  const DIFF_MAX = 400;
+  const baseLines = formatForDiff(baseline.body).split('\n').slice(0, DIFF_MAX);
+  const curLines  = formatForDiff(cur.body || '').split('\n').slice(0, DIFF_MAX);
+  const truncated = formatForDiff(baseline.body).split('\n').length > DIFF_MAX
+                 || formatForDiff(cur.body || '').split('\n').length > DIFF_MAX;
+  const diffLines = computeDiff(baseLines, curLines);
+
+  const addedCount   = diffLines.filter(l => l.type === 'added').length;
+  const removedCount = diffLines.filter(l => l.type === 'removed').length;
+
+  const diffHtml = addedCount === 0 && removedCount === 0
+    ? `<div class="diff-no-change">✅ 응답 바디 변경 없음</div>`
+    : diffLines.map((l, i) => `
+        <div class="diff-line ${l.type}">
+          <span class="diff-line-num">${l.type !== 'added' ? l.baseNum ?? '' : ''}</span>
+          <span class="diff-line-num">${l.type !== 'removed' ? l.curNum ?? '' : ''}</span>
+          <span class="diff-line-sign">${l.type === 'added' ? '+' : l.type === 'removed' ? '-' : ' '}</span>
+          <span class="diff-line-text">${escapeHtml(l.text)}</span>
+        </div>`).join('');
+
+  view.innerHTML = `
+    <div style="display:flex;flex-direction:column;height:100%">
+      <!-- 메타 비교 -->
+      <div class="diff-meta-bar">${metaHtml}</div>
+
+      <!-- 범례 -->
+      <div class="diff-legend">
+        <span><span style="display:inline-block;width:10px;height:10px;background:rgba(63,185,80,.3);border-radius:2px"></span> 추가 ${addedCount}줄</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:rgba(248,81,73,.3);border-radius:2px"></span> 제거 ${removedCount}줄</span>
+        <span style="margin-left:auto;color:var(--text-muted)">
+          베이스라인 <span class="baseline-indicator">📌</span> vs 현재 응답
+        </span>
+      </div>
+
+      <!-- 바디 Diff -->
+      ${truncated ? `<div style="padding:6px 14px;font-size:11px;color:var(--warning);background:rgba(210,153,34,.08);border-bottom:1px solid rgba(210,153,34,.2)">⚠️ 응답이 너무 커서 앞 ${DIFF_MAX}줄만 비교합니다</div>` : ''}
+      <div class="diff-body">${diffHtml}</div>
+    </div>`;
+}
+
+function formatForDiff(body) {
+  if (!body) return '';
+  try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; }
+}
+
+/* LCS 기반 간단 Diff 알고리즘 */
+function computeDiff(aLines, bLines) {
+  const MAX = 200;  // 성능 제한: LCS는 O(m*n)이므로 200줄로 제한
+  if (aLines.length > MAX || bLines.length > MAX) {
+    return simpleDiff(
+      aLines.slice(0, MAX * 2),
+      bLines.slice(0, MAX * 2)
+    );
+  }
+
+  const m = aLines.length, n = bLines.length;
+  // DP 테이블
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = aLines[i-1] === bLines[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+
+  // 역추적
+  const result = [];
+  let i = m, j = n, baseNum = m, curNum = n;
+  const ops = [];
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && aLines[i-1] === bLines[j-1]) {
+      ops.push({ type: 'same', text: aLines[i-1], baseNum: i, curNum: j });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+      ops.push({ type: 'added', text: bLines[j-1], curNum: j });
+      j--;
+    } else {
+      ops.push({ type: 'removed', text: aLines[i-1], baseNum: i });
+      i--;
+    }
+  }
+
+  return ops.reverse();
+}
+
+function simpleDiff(aLines, bLines) {
+  const result = [];
+  const maxLen = Math.max(aLines.length, bLines.length);
+  for (let i = 0; i < maxLen; i++) {
+    const a = aLines[i], b = bLines[i];
+    if (a === b)          result.push({ type: 'same',    text: a || '', baseNum: i+1, curNum: i+1 });
+    else {
+      if (a !== undefined) result.push({ type: 'removed', text: a, baseNum: i+1 });
+      if (b !== undefined) result.push({ type: 'added',   text: b, curNum: i+1 });
+    }
+  }
+  return result;
 }
 
 /* ── Render Response ── */
