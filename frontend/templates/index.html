@@ -480,7 +480,12 @@
     </div>
 
     <div class="modal-footer">
-      <span style="font-size:11px;color:var(--text-muted);margin-right:auto">💾 변경사항은 브라우저에 자동 저장됩니다</span>
+      <span style="font-size:11px;color:var(--text-muted);margin-right:auto">💾 브라우저에 자동 저장됩니다</span>
+      <button class="btn btn-secondary" style="font-size:11px;padding:5px 10px" onclick="exportCustomPayloads()" title="JSON 파일로 내보내기">⬇️ 내보내기</button>
+      <label class="btn btn-secondary" style="font-size:11px;padding:5px 10px;cursor:pointer;margin:0" title="JSON 파일 가져오기">
+        ⬆️ 가져오기
+        <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importCustomPayloads(this)">
+      </label>
       <button class="btn btn-secondary" onclick="closeCustomModal()">닫기</button>
     </div>
   </div>

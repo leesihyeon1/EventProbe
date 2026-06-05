@@ -1366,6 +1366,84 @@ function closeCustomModal() {
   loadSidebar();
 }
 
+/* ── 내보내기 (JSON 다운로드) ── */
+function exportCustomPayloads() {
+  loadCustomPayloads();
+  if (!customState.categories.length) {
+    toast('내보낼 커스텀 페이로드가 없습니다', 'error');
+    return;
+  }
+  const data = JSON.stringify({ categories: customState.categories }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const ts   = new Date().toISOString().slice(0,10);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `eventprobe_custom_payloads_${ts}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('내보내기 완료', 'success');
+}
+
+/* ── 가져오기 (JSON 파일 로드) ── */
+function importCustomPayloads(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.categories || !Array.isArray(data.categories)) {
+        throw new Error('올바른 형식이 아닙니다 (categories 배열 필요)');
+      }
+
+      const imported = data.categories.length;
+      const payloadCount = data.categories.reduce((s, c) => s + (c.payloads?.length || 0), 0);
+
+      // 기존 카테고리와 병합 (ID 충돌 방지: 동일 이름 덮어쓰기 확인)
+      const existing = customState.categories;
+      const conflicts = data.categories.filter(nc =>
+        existing.some(ec => ec.name === nc.name)
+      );
+
+      let msg = `${imported}개 카테고리 / ${payloadCount}개 페이로드를 가져올까요?`;
+      if (conflicts.length) {
+        msg += `\n\n⚠️ "${conflicts.map(c=>c.name).join(', ')}" 카테고리가 이미 존재합니다. 덮어쓰시겠습니까?`;
+      }
+
+      if (!confirm(msg)) {
+        input.value = '';
+        return;
+      }
+
+      // 병합: 동일 이름이면 덮어쓰기, 새 항목이면 추가
+      data.categories.forEach(nc => {
+        // 새 ID 부여 (충돌 방지)
+        nc.id = genId();
+        nc.payloads = (nc.payloads || []).map(p => ({ ...p, id: genId() }));
+        nc.custom = true;
+
+        const existIdx = customState.categories.findIndex(ec => ec.name === nc.name);
+        if (existIdx >= 0) {
+          customState.categories[existIdx] = nc;
+        } else {
+          customState.categories.push(nc);
+        }
+      });
+
+      saveCustomPayloads();
+      renderCustomCategoryList();
+      selectCustomCategory(customState.categories[0]?.id || null);
+      toast(`가져오기 완료: ${imported}개 카테고리, ${payloadCount}개 페이로드`, 'success');
+    } catch (err) {
+      toast('가져오기 실패: ' + err.message, 'error');
+    }
+    input.value = '';  // 동일 파일 재선택 가능하도록
+  };
+  reader.readAsText(file);
+}
+
 /* ── 카테고리 목록 렌더링 ── */
 function renderCustomCategoryList() {
   const list = document.getElementById('customCategoryList');
