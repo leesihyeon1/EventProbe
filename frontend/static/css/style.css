@@ -564,6 +564,9 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 }
 
 .analysis-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 8px 12px;
   font-size: 11px;
   font-weight: 600;
@@ -572,9 +575,28 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   letter-spacing: .6px;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background .1s;
 }
 
-.analysis-card-body { padding: 10px 12px; }
+.analysis-card-header:hover { background: var(--bg-hover); }
+
+.analysis-card-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+  transition: transform .2s;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+/* 기본: 펼쳐진 상태 */
+.analysis-card .analysis-card-body { display: block; padding: 10px 12px; }
+
+/* 접힌 상태 */
+.analysis-card.collapsed .analysis-card-body  { display: none; }
+.analysis-card.collapsed .analysis-card-header { border-bottom: none; }
+.analysis-card.collapsed .analysis-card-chevron { transform: rotate(-90deg); }
 
 .verdict-display {
   display: flex;

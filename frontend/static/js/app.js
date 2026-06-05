@@ -365,6 +365,40 @@ function formatBytes(bytes) {
 }
 
 /* ── Render Analysis ── */
+/* ── 분석 카드 헤더 클릭 → 접기/펼치기 ── */
+function toggleAnalysisCard(header) {
+  const card = header.closest('.analysis-card');
+  card.classList.toggle('collapsed');
+  // 접힌 상태 localStorage 저장
+  const id = card.dataset.cardId;
+  if (id) {
+    const collapsed = JSON.parse(localStorage.getItem('collapsedCards') || '{}');
+    collapsed[id] = card.classList.contains('collapsed');
+    localStorage.setItem('collapsedCards', JSON.stringify(collapsed));
+  }
+}
+
+/* innerHTML 삽입 후 모든 카드 헤더에 chevron + 클릭 이벤트 바인딩 */
+function bindAnalysisCardToggles(container) {
+  const collapsed = JSON.parse(localStorage.getItem('collapsedCards') || '{}');
+  container.querySelectorAll('.analysis-card').forEach(card => {
+    const header = card.querySelector('.analysis-card-header');
+    if (!header) return;
+    // chevron 없으면 추가
+    if (!header.querySelector('.analysis-card-chevron')) {
+      const chev = document.createElement('span');
+      chev.className = 'analysis-card-chevron';
+      chev.textContent = '▼';
+      header.appendChild(chev);
+    }
+    // 저장된 접힘 상태 복원
+    const id = card.dataset.cardId;
+    if (id && collapsed[id]) card.classList.add('collapsed');
+    // 이벤트 중복 방지
+    header.onclick = () => toggleAnalysisCard(header);
+  });
+}
+
 function renderAnalysis(a, result) {
   if (!a) return;
 
@@ -377,7 +411,7 @@ function renderAnalysis(a, result) {
 
   container.innerHTML = `
     <!-- 판정 카드 -->
-    <div class="analysis-card">
+    <div class="analysis-card" data-card-id="verdict">
       <div class="analysis-card-header">판정 결과</div>
       <div class="analysis-card-body">
         <div class="verdict-display">
@@ -394,7 +428,7 @@ function renderAnalysis(a, result) {
     </div>
 
     <!-- 응답 메타 -->
-    <div class="analysis-card">
+    <div class="analysis-card" data-card-id="res-info">
       <div class="analysis-card-header">응답 정보</div>
       <div class="analysis-card-body">
         <div class="meta-grid">
@@ -420,7 +454,7 @@ function renderAnalysis(a, result) {
 
     <!-- 차단 이유 -->
     ${a.block_reason?.length ? `
-    <div class="analysis-card">
+    <div class="analysis-card" data-card-id="block-reason">
       <div class="analysis-card-header">차단 이유</div>
       <div class="analysis-card-body">
         <div class="tag-list">
@@ -453,7 +487,7 @@ function renderAnalysis(a, result) {
 
     <!-- 이상 징후 -->
     ${a.response_anomalies?.length ? `
-    <div class="analysis-card">
+    <div class="analysis-card" data-card-id="anomaly">
       <div class="analysis-card-header">이상 징후</div>
       <div class="analysis-card-body">
         <div class="detail-list">
@@ -464,7 +498,7 @@ function renderAnalysis(a, result) {
 
     <!-- 상세 -->
     ${a.details?.length ? `
-    <div class="analysis-card">
+    <div class="analysis-card" data-card-id="details">
       <div class="analysis-card-header">상세 분석</div>
       <div class="analysis-card-body">
         <div class="detail-list">
@@ -473,6 +507,9 @@ function renderAnalysis(a, result) {
       </div>
     </div>` : ''}
   `;
+
+  // 카드 접기/펼치기 바인딩
+  bindAnalysisCardToggles(container);
 
   // Alert 섹션은 별도 렌더링 (클릭 이벤트 필요)
   renderAlerts(a.alerts || []);
@@ -489,6 +526,7 @@ function renderAlerts(alerts) {
 
   const section = document.createElement('div');
   section.className = 'analysis-card';
+  section.dataset.cardId = 'sec-alerts';
   section.style.borderColor = 'rgba(88,166,255,.25)';
 
   const countChips = Object.entries(counts)
@@ -499,6 +537,7 @@ function renderAlerts(alerts) {
   section.innerHTML = `
     <div class="analysis-card-header" style="color:var(--accent)">
       🔔 보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건)</span>
+      <span class="analysis-card-chevron" style="margin-left:auto">▼</span>
     </div>
     <div class="analysis-card-body" style="padding:10px 12px">
       <div class="alert-summary-bar">${countChips}</div>
@@ -506,6 +545,9 @@ function renderAlerts(alerts) {
     </div>`;
 
   container.appendChild(section);
+  // Alert 카드 헤더에도 접기 바인딩
+  const alertHeader = section.querySelector('.analysis-card-header');
+  if (alertHeader) alertHeader.onclick = () => toggleAnalysisCard(alertHeader);
 
   const listEl = section.querySelector('#alertList');
   alerts.forEach((alert, idx) => {
