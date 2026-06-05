@@ -473,6 +473,91 @@ function renderAnalysis(a, result) {
       </div>
     </div>` : ''}
   `;
+
+  // Alert 섹션은 별도 렌더링 (클릭 이벤트 필요)
+  renderAlerts(a.alerts || []);
+}
+
+/* ── Render ZAP-style Alerts ── */
+function renderAlerts(alerts) {
+  const container = document.getElementById('analysisContent');
+  if (!alerts.length) return;
+
+  // 위험도별 카운트
+  const counts = { high:0, medium:0, low:0, informational:0 };
+  alerts.forEach(a => { if (counts[a.risk] !== undefined) counts[a.risk]++; });
+
+  const section = document.createElement('div');
+  section.className = 'analysis-card';
+  section.style.borderColor = 'rgba(88,166,255,.25)';
+
+  const countChips = Object.entries(counts)
+    .filter(([,n]) => n > 0)
+    .map(([r, n]) => `<span class="alert-count-chip chip-${r}">${riskIcon(r)} ${n}</span>`)
+    .join('');
+
+  section.innerHTML = `
+    <div class="analysis-card-header" style="color:var(--accent)">
+      🔔 보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건)</span>
+    </div>
+    <div class="analysis-card-body" style="padding:10px 12px">
+      <div class="alert-summary-bar">${countChips}</div>
+      <div id="alertList"></div>
+    </div>`;
+
+  container.appendChild(section);
+
+  const listEl = section.querySelector('#alertList');
+  alerts.forEach((alert, idx) => {
+    const card = document.createElement('div');
+    card.className = 'alert-card';
+    card.dataset.idx = idx;
+
+    const confidenceLabel = { certain:'확실', firm:'높음', tentative:'보통' };
+
+    card.innerHTML = `
+      <div class="alert-card-header" onclick="toggleAlert(this)">
+        <div class="alert-risk-bar ${alert.risk}"></div>
+        <div class="alert-title">${escapeHtml(alert.name)}</div>
+        <div class="alert-badges">
+          <span class="alert-risk-badge badge-${alert.risk}">${riskKo(alert.risk)}</span>
+          <span class="alert-confidence-badge">${confidenceLabel[alert.confidence] ?? alert.confidence}</span>
+        </div>
+        <span class="alert-chevron">▶</span>
+      </div>
+      <div class="alert-body">
+        <div class="alert-section">
+          <div class="alert-section-label">설명</div>
+          <div class="alert-section-text">${escapeHtml(alert.description)}</div>
+        </div>
+        <div class="alert-section">
+          <div class="alert-section-label">해결 방법</div>
+          <div class="alert-section-text">${escapeHtml(alert.solution)}</div>
+        </div>
+        ${alert.reference ? `
+        <div class="alert-section">
+          <div class="alert-section-label">참고</div>
+          <a class="alert-ref-link" href="${escapeHtml(alert.reference)}" target="_blank" rel="noopener">${escapeHtml(alert.reference)}</a>
+        </div>` : ''}
+        <div style="margin-top:6px">
+          <span class="tag tag-gray" style="font-size:10px">Alert ID: ${escapeHtml(alert.id)}</span>
+        </div>
+      </div>`;
+
+    listEl.appendChild(card);
+  });
+}
+
+function toggleAlert(header) {
+  header.parentElement.classList.toggle('open');
+}
+
+function riskIcon(risk) {
+  return { high:'🔴', medium:'🟠', low:'🟡', informational:'🔵' }[risk] ?? '⚪';
+}
+
+function riskKo(risk) {
+  return { high:'높음', medium:'중간', low:'낮음', informational:'정보' }[risk] ?? risk;
 }
 
 /* ── Bulk Test Modal ── */

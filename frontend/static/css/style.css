@@ -800,11 +800,141 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 .loading-overlay.hidden { display: none; }
 
 /* ── Risk colors ── */
-.risk-critical { color: var(--critical); }
-.risk-high     { color: var(--danger); }
-.risk-medium   { color: var(--warning); }
-.risk-low      { color: var(--success); }
-.risk-info     { color: var(--text-muted); }
+.risk-critical      { color: var(--critical); }
+.risk-high          { color: var(--danger); }
+.risk-medium        { color: var(--warning); }
+.risk-low           { color: var(--success); }
+.risk-info          { color: var(--text-muted); }
+.risk-informational { color: var(--text-muted); }
+
+/* ── Alert Card (ZAP style) ── */
+.alert-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 6px;
+  transition: border-color .15s;
+}
+
+.alert-card:hover { border-color: var(--border-light); }
+
+.alert-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg-tertiary);
+}
+
+.alert-risk-bar {
+  width: 4px;
+  border-radius: 2px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+.alert-risk-bar.high          { background: var(--danger); }
+.alert-risk-bar.medium        { background: var(--warning); }
+.alert-risk-bar.low           { background: var(--success); }
+.alert-risk-bar.informational { background: var(--text-muted); }
+
+.alert-title {
+  font-size: 11px;
+  font-weight: 600;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.alert-badges { display: flex; gap: 4px; flex-shrink: 0; }
+
+.alert-risk-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.badge-high          { background: rgba(248,81,73,.15);  color: var(--danger);  border: 1px solid rgba(248,81,73,.3); }
+.badge-medium        { background: rgba(210,153,34,.15); color: var(--warning); border: 1px solid rgba(210,153,34,.3); }
+.badge-low           { background: rgba(63,185,80,.12);  color: var(--success); border: 1px solid rgba(63,185,80,.3); }
+.badge-informational { background: var(--bg-hover);      color: var(--text-muted); border: 1px solid var(--border); }
+
+.alert-confidence-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.alert-body {
+  display: none;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border);
+}
+
+.alert-card.open .alert-body { display: block; }
+.alert-card.open .alert-chevron { transform: rotate(90deg); }
+
+.alert-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+  transition: transform .2s;
+  flex-shrink: 0;
+}
+
+.alert-section { margin-bottom: 8px; }
+.alert-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 3px;
+}
+
+.alert-section-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.alert-ref-link {
+  font-size: 10px;
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.alert-ref-link:hover { text-decoration: underline; }
+
+.alert-summary-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.alert-count-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid;
+}
+
+.chip-high          { background: rgba(248,81,73,.1);  color: var(--danger);  border-color: rgba(248,81,73,.3); }
+.chip-medium        { background: rgba(210,153,34,.1); color: var(--warning); border-color: rgba(210,153,34,.3); }
+.chip-low           { background: rgba(63,185,80,.1);  color: var(--success); border-color: rgba(63,185,80,.3); }
+.chip-informational { background: var(--bg-tertiary);  color: var(--text-muted); border-color: var(--border); }
 
 /* ── View toggle ── */
 .view-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
