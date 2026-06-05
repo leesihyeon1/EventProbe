@@ -963,6 +963,72 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   gap: 8px;
 }
 
+/* ── 모달 내부 탭 ── */
+.modal-tab {
+  transition: color .15s, border-color .15s;
+}
+.modal-tab.active {
+  color: var(--accent) !important;
+  border-bottom-color: var(--accent) !important;
+}
+.modal-tab:hover { color: var(--text-primary) !important; }
+
+/* ── 포트 스캔 결과 ── */
+.port-scan-results { display: flex; flex-direction: column; gap: 6px; }
+
+.port-result-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 12px;
+}
+
+.port-result-item.open   { border-color: rgba(63,185,80,.35); background: rgba(63,185,80,.05); }
+.port-result-item.risky  { border-color: rgba(248,81,73,.35); background: rgba(248,81,73,.05); }
+
+.port-num  { font-weight:700; min-width:48px; color:var(--text-primary); }
+.port-svc  { min-width:100px; color:var(--accent); font-weight:600; }
+.port-state-badge {
+  padding: 1px 7px; border-radius: 8px; font-size: 10px; font-weight: 700;
+}
+.state-open   { background:rgba(63,185,80,.15); color:var(--success); border:1px solid rgba(63,185,80,.3); }
+.state-closed { background:var(--bg-tertiary); color:var(--text-muted); border:1px solid var(--border); }
+.port-time    { color:var(--text-muted); font-size:11px; min-width:55px; }
+.port-note    { font-size:11px; color:var(--warning); flex:1; }
+
+/* ── 다중 타겟 결과 ── */
+.target-result-block {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.target-result-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.target-result-header:hover { background: var(--bg-hover); }
+.target-result-header .target-url { font-size:12px; font-weight:600; flex:1; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.target-result-header .target-chevron { font-size:9px; color:var(--text-muted); transition: transform .2s; }
+.target-result-block.collapsed .target-result-header .target-chevron { transform: rotate(-90deg); }
+.target-result-block.collapsed .target-result-body { display: none; }
+.target-result-body { overflow: auto; }
+
+.multi-summary-chips { display:flex; gap:6px; flex-wrap:wrap; }
+
 /* ── Results Table ── */
 .results-view {
   flex: 1;

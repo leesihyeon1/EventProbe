@@ -1,5 +1,7 @@
 import time
 import json
+import asyncio
+import socket
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -25,14 +27,33 @@ class SingleRequest(BaseModel):
 class BulkRequest(BaseModel):
     method: str
     url: str
-    target_param: str          # 페이로드를 삽입할 파라미터 이름
-    inject_in: str = "params"  # params / body / headers
+    target_param: str
+    inject_in: str = "params"
     headers: dict = {}
     body: Optional[str] = None
     params: dict = {}
     payload_ids: list[str]
     category: str
     timeout: int = 10
+
+# 다중 타겟 일괄 테스트
+class MultiTargetRequest(BaseModel):
+    method: str
+    urls: list[str]            # 복수 대상 URL
+    target_param: str
+    inject_in: str = "params"
+    headers: dict = {}
+    body: Optional[str] = None
+    params: dict = {}
+    payload_ids: list[str]
+    category: str
+    timeout: int = 10
+
+# 포트 스캔
+class PortScanRequest(BaseModel):
+    host: str
+    ports: list[int] = []      # 빈 경우 기본 포트 목록 사용
+    timeout: float = 2.0
 
 # ── 페이로드 DB 로드 ────────────────────────────────────────
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "payloads.json")
@@ -209,6 +230,197 @@ async def bulk_test(req: BulkRequest):
 
     summary = generate_summary(results)
     return {"results": results, "summary": summary}
+
+
+# ── 다중 타겟 일괄 테스트 ───────────────────────────────────
+@router.post("/multi-target-test")
+async def multi_target_test(req: MultiTargetRequest):
+    if not req.urls:
+        raise HTTPException(status_code=400, detail="대상 URL이 없습니다")
+
+    data = load_payloads()
+    payloads_to_test = []
+    for cat in data["categories"]:
+        if cat["id"] == req.category:
+            payloads_to_test = [p for p in cat["payloads"] if p["id"] in req.payload_ids] if req.payload_ids else cat["payloads"]
+            break
+
+    if not payloads_to_test:
+        raise HTTPException(status_code=404, detail="페이로드를 찾을 수 없습니다")
+
+    target_results = []
+
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        for url in req.urls:
+            url = url.strip()
+            if not url:
+                continue
+            results = []
+            for p in payloads_to_test:
+                params  = dict(req.params)
+                headers = dict(req.headers)
+                body    = req.body
+
+                if req.inject_in == "params":
+                    params[req.target_param] = p["payload"]
+                elif req.inject_in == "body":
+                    try:
+                        bd = json.loads(body) if body else {}
+                        bd[req.target_param] = p["payload"]
+                        body = json.dumps(bd)
+                        headers.setdefault("Content-Type", "application/json")
+                    except Exception:
+                        body = p["payload"]
+                elif req.inject_in == "headers":
+                    headers[req.target_param] = p["payload"]
+
+                try:
+                    start = time.time()
+                    resp  = await client.request(
+                        method=req.method.upper(), url=url,
+                        headers=headers, params=params,
+                        content=body.encode() if body else None,
+                        timeout=req.timeout,
+                    )
+                    elapsed = (time.time() - start) * 1000
+                    bt = resp.text[:5000]
+                    analysis = analyze_response(resp.status_code, dict(resp.headers), bt, elapsed, p["payload"], req.category)
+                    results.append({
+                        "payload_id": p["id"], "payload_name": p["name"],
+                        "payload": p["payload"], "description": p["description"],
+                        "risk": p["risk"], "status_code": resp.status_code,
+                        "response_time": round(elapsed, 2), "analysis": analysis,
+                    })
+                except httpx.TimeoutException:
+                    results.append({
+                        "payload_id": p["id"], "payload_name": p["name"],
+                        "payload": p["payload"], "description": p["description"],
+                        "risk": p["risk"], "status_code": 0,
+                        "response_time": req.timeout * 1000,
+                        "analysis": {"verdict": "timeout", "confidence": 30,
+                            "waf_detected": None, "block_reason": ["타임아웃"],
+                            "error_leaks": [], "sensitive_data": [],
+                            "response_anomalies": [], "risk_level": "medium",
+                            "details": ["타임아웃"], "score": 35, "alerts": []},
+                    })
+                except Exception as e:
+                    results.append({
+                        "payload_id": p["id"], "payload_name": p["name"],
+                        "payload": p["payload"], "description": p["description"],
+                        "risk": p["risk"], "status_code": 0, "response_time": 0,
+                        "analysis": {"verdict": "error", "confidence": 0,
+                            "waf_detected": None, "block_reason": [str(e)],
+                            "error_leaks": [], "sensitive_data": [],
+                            "response_anomalies": [], "risk_level": "info",
+                            "details": [f"에러: {e}"], "score": 0, "alerts": []},
+                    })
+
+            target_results.append({
+                "url": url,
+                "results": results,
+                "summary": generate_summary(results),
+            })
+
+    return {"targets": target_results, "target_count": len(target_results)}
+
+
+# ── 포트 스캔 ────────────────────────────────────────────────
+DEFAULT_PORTS = [
+    21, 22, 23, 25, 53, 80, 110, 143, 443, 445,
+    3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888,
+    9200, 27017, 1433, 1521, 2375, 2376, 4444, 4848,
+    7001, 8161, 9090, 9300, 11211, 50070,
+]
+
+WELL_KNOWN = {
+    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
+    80: "HTTP", 110: "POP3", 143: "IMAP", 443: "HTTPS", 445: "SMB",
+    3306: "MySQL", 3389: "RDP", 5432: "PostgreSQL", 5900: "VNC",
+    6379: "Redis", 8080: "HTTP-Alt", 8443: "HTTPS-Alt", 8888: "Jupyter",
+    9200: "Elasticsearch", 27017: "MongoDB", 1433: "MSSQL", 1521: "Oracle",
+    2375: "Docker(비보안)", 2376: "Docker(TLS)", 4444: "Metasploit",
+    4848: "GlassFish", 7001: "WebLogic", 8161: "ActiveMQ",
+    9090: "Prometheus/Openshift", 9300: "Elasticsearch(클러스터)",
+    11211: "Memcached", 50070: "Hadoop NameNode",
+}
+
+RISK_PORTS = {21, 23, 445, 3389, 6379, 2375, 4444, 27017, 11211, 50070}
+
+async def _check_port(host: str, port: int, timeout: float) -> dict:
+    try:
+        start = time.time()
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+        elapsed = (time.time() - start) * 1000
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return {
+            "port": port,
+            "state": "open",
+            "service": WELL_KNOWN.get(port, "Unknown"),
+            "response_time": round(elapsed, 2),
+            "risk": "high" if port in RISK_PORTS else "low",
+            "note": _port_note(port),
+        }
+    except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+        return {"port": port, "state": "closed", "service": WELL_KNOWN.get(port, ""), "response_time": None, "risk": "info", "note": ""}
+
+def _port_note(port: int) -> str:
+    notes = {
+        6379: "⚠️ Redis 인증 없이 노출 여부 확인 필요",
+        27017: "⚠️ MongoDB 인증 없이 노출 여부 확인 필요",
+        2375: "🔴 Docker 데몬 비보안 노출 — RCE 가능",
+        3389: "⚠️ RDP 노출 — 무차별 대입 위험",
+        23: "🔴 Telnet 평문 통신 — 사용 지양",
+        11211: "⚠️ Memcached 노출 — DDoS 증폭 위험",
+        4444: "🔴 Metasploit 기본 포트 — 백도어 의심",
+        50070: "⚠️ Hadoop NameNode 관리 인터페이스 노출",
+        9200: "⚠️ Elasticsearch 무인증 노출 여부 확인",
+        5900: "⚠️ VNC 원격 접속 노출",
+    }
+    return notes.get(port, "")
+
+@router.post("/port-scan")
+async def port_scan(req: PortScanRequest):
+    # 호스트명에서 scheme 제거
+    host = req.host.strip()
+    for scheme in ("http://", "https://", "ftp://"):
+        if host.startswith(scheme):
+            host = host[len(scheme):]
+    host = host.split("/")[0].split(":")[0]
+
+    if not host:
+        raise HTTPException(status_code=400, detail="유효한 호스트를 입력하세요")
+
+    # IP 해석
+    try:
+        ip = socket.gethostbyname(host)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail=f"호스트 '{host}'를 해석할 수 없습니다")
+
+    ports = req.ports if req.ports else DEFAULT_PORTS
+
+    # 동시 스캔 (최대 50개씩)
+    tasks   = [_check_port(ip, p, req.timeout) for p in ports]
+    raw     = await asyncio.gather(*tasks)
+    results = sorted(raw, key=lambda x: x["port"])
+
+    open_ports  = [r for r in results if r["state"] == "open"]
+    risky_ports = [r for r in open_ports if r["risk"] == "high"]
+
+    return {
+        "host": host,
+        "ip": ip,
+        "total_scanned": len(ports),
+        "open_count": len(open_ports),
+        "risky_count": len(risky_ports),
+        "results": results,
+        "open_ports": open_ports,
+    }
 
 
 # ── 페이로드 목록 조회 ──────────────────────────────────────

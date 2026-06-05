@@ -603,20 +603,38 @@ function riskKo(risk) {
   return { high:'높음', medium:'중간', low:'낮음', informational:'정보' }[risk] ?? risk;
 }
 
+/* ── Bulk Test Modal 탭 전환 ── */
+function switchModalTab(tab) {
+  document.querySelectorAll('.modal-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.mtab === tab)
+  );
+  document.querySelectorAll('.modal-tab-content').forEach(c => {
+    c.style.display = c.id === `mtab-${tab}` ? 'block' : 'none';
+  });
+}
+
 /* ── Bulk Test Modal ── */
 function openBulkModal() {
   if (!state.payloads) { toast('페이로드를 먼저 로드하세요', 'error'); return; }
 
-  const catSelect = document.getElementById('bulkCategory');
-  catSelect.innerHTML = state.payloads.categories.map(c =>
+  const opts = state.payloads.categories.map(c =>
     `<option value="${c.id}">${c.icon} ${c.name}</option>`
   ).join('');
+  document.getElementById('bulkCategory').innerHTML  = opts;
+  document.getElementById('multiCategory').innerHTML = opts;
 
   // URL 자동 채우기
   const currentUrl = document.getElementById('urlInput').value.trim();
-  if (currentUrl) document.getElementById('bulkUrl').value = currentUrl;
+  if (currentUrl) {
+    document.getElementById('bulkUrl').value    = currentUrl;
+    document.getElementById('multiUrls').value  = currentUrl;
+    document.getElementById('scanHost').value   =
+      currentUrl.replace(/^https?:\/\//, '').split('/')[0];
+  }
 
-  loadBulkPayloadList(catSelect.value);
+  loadBulkPayloadList(document.getElementById('bulkCategory').value);
+  loadMultiPayloadList(document.getElementById('multiCategory').value);
+  switchModalTab('single');
   document.getElementById('bulkModal').classList.remove('hidden');
 }
 
@@ -641,6 +659,235 @@ function loadBulkPayloadList(catId) {
 function selectAllPayloads(checked) {
   document.querySelectorAll('#bulkPayloadChecklist input[type="checkbox"]')
     .forEach(cb => cb.checked = checked);
+}
+
+/* ── 다중 타겟 페이로드 목록 ── */
+function loadMultiPayloadList(catId) {
+  const cat = state.payloads?.categories.find(c => c.id === catId);
+  const container = document.getElementById('multiPayloadChecklist');
+  if (!cat || !container) return;
+  container.innerHTML = cat.payloads.map(p => `
+    <label class="payload-check-item">
+      <input type="checkbox" value="${p.id}" checked>
+      <span class="risk-dot ${p.risk}" style="flex-shrink:0"></span>
+      <span class="item-name">${p.name}</span>
+      <span class="item-payload">${escapeHtml(p.payload)}</span>
+    </label>`).join('');
+}
+
+function selectAllMultiPayloads(checked) {
+  document.querySelectorAll('#multiPayloadChecklist input[type="checkbox"]')
+    .forEach(cb => cb.checked = checked);
+}
+
+/* ── 다중 타겟 일괄 테스트 ── */
+async function runMultiTargetTest() {
+  const urlsRaw = document.getElementById('multiUrls').value.trim();
+  if (!urlsRaw) { toast('URL을 입력하세요', 'error'); return; }
+
+  const urls = urlsRaw.split('\n').map(u => u.trim()).filter(Boolean);
+  if (!urls.length) { toast('유효한 URL이 없습니다', 'error'); return; }
+
+  const catId       = document.getElementById('multiCategory').value;
+  const targetParam = document.getElementById('multiTargetParam').value.trim() || 'q';
+  const injectIn    = document.getElementById('multiInjectIn').value;
+  const method      = document.getElementById('multiMethod').value;
+
+  const checkedIds = [...document.querySelectorAll('#multiPayloadChecklist input[type="checkbox"]:checked')]
+    .map(cb => cb.value);
+  if (!checkedIds.length) { toast('페이로드를 선택하세요', 'error'); return; }
+
+  closeBulkModal();
+  showLoadingOverlay(`0 / ${urls.length} 대상 테스트 중...`);
+
+  try {
+    const res = await fetch('/api/multi-target-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method, urls, target_param: targetParam,
+        inject_in: injectIn, headers: kvToObj(state.kvHeaders),
+        category: catId, payload_ids: checkedIds,
+      }),
+    });
+    const data = await res.json();
+    hideLoadingOverlay();
+    renderMultiTargetResults(data);
+    switchView('results');
+  } catch(e) {
+    hideLoadingOverlay();
+    toast('다중 테스트 실패: ' + e.message, 'error');
+  }
+}
+
+function renderMultiTargetResults(data) {
+  const container = document.querySelector('.results-view');
+  // 기존 단일 결과 숨기기 — 다중 결과 전용 영역 표시
+  const existing = document.getElementById('multiResultsArea');
+  if (existing) existing.remove();
+
+  const area = document.createElement('div');
+  area.id = 'multiResultsArea';
+
+  const totalTargets = data.targets?.length || 0;
+  const allResults   = data.targets?.flatMap(t => t.results) || [];
+  const globalSummary = generateClientSummary(allResults);
+
+  // 글로벌 요약 업데이트
+  document.getElementById('summaryTotal').textContent   = globalSummary.total;
+  document.getElementById('summaryBlocked').textContent = globalSummary.blocked;
+  document.getElementById('summaryPassed').textContent  = globalSummary.passed;
+  document.getElementById('summaryBypass').textContent  = globalSummary.bypass;
+  document.getElementById('summaryRate').textContent    = globalSummary.detection_rate + '%';
+
+  area.innerHTML = `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+      🎯 <strong>${totalTargets}개</strong> 대상 | 총 <strong>${globalSummary.total}회</strong> 테스트
+    </div>
+    ${(data.targets || []).map((t, i) => `
+      <div class="target-result-block" id="trb-${i}">
+        <div class="target-result-header" onclick="toggleTargetBlock(${i})">
+          <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">#${i+1}</span>
+          <span class="target-url">${escapeHtml(t.url)}</span>
+          <div class="multi-summary-chips">
+            <span class="alert-count-chip chip-high">차단 ${t.summary?.blocked||0}</span>
+            <span class="alert-count-chip chip-medium">통과 ${t.summary?.passed||0}</span>
+            ${t.summary?.bypass ? `<span class="alert-count-chip" style="background:rgba(255,107,107,.1);color:var(--critical);border-color:rgba(255,107,107,.3)">우회 ${t.summary.bypass}</span>` : ''}
+            <span class="alert-count-chip chip-informational">${t.summary?.detection_rate||0}%</span>
+          </div>
+          <span class="target-chevron">▼</span>
+        </div>
+        <div class="target-result-body">
+          <table class="results-table">
+            <thead><tr><th>#</th><th>페이로드</th><th>상태</th><th>응답시간</th><th>판정</th><th>위험도</th></tr></thead>
+            <tbody>
+              ${t.results.map((r, j) => `
+                <tr>
+                  <td style="color:var(--text-muted)">${j+1}</td>
+                  <td><span class="payload-code" title="${escapeHtml(r.payload)}">${escapeHtml(r.payload_name)}</span></td>
+                  <td style="color:${httpColor(r.status_code)};font-weight:600">${r.status_code||'-'}</td>
+                  <td>${r.response_time}ms</td>
+                  <td>${verdictBadge(r.analysis?.verdict)}</td>
+                  <td>${riskBadge(r.risk)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`).join('')}`;
+
+  // 기존 테이블 숨기고 다중 결과 표시
+  const table = container.querySelector('.results-table');
+  if (table) table.style.display = 'none';
+  container.appendChild(area);
+}
+
+function toggleTargetBlock(i) {
+  document.getElementById(`trb-${i}`)?.classList.toggle('collapsed');
+}
+
+function generateClientSummary(results) {
+  const total    = results.length;
+  const blocked  = results.filter(r => r.analysis?.verdict === 'blocked').length;
+  const passed   = results.filter(r => r.analysis?.verdict === 'passed').length;
+  const bypass   = results.filter(r => r.analysis?.verdict === 'bypass').length;
+  return { total, blocked, passed, bypass,
+    detection_rate: total ? Math.round(blocked/total*100) : 0 };
+}
+
+/* ── 포트 스캔 ── */
+async function runPortScan() {
+  const host = document.getElementById('scanHost').value.trim();
+  if (!host) { toast('호스트를 입력하세요', 'error'); return; }
+
+  const portsRaw = document.getElementById('scanPorts').value.trim();
+  const ports    = portsRaw ? portsRaw.split(',').map(p => parseInt(p.trim())).filter(n => !isNaN(n) && n > 0 && n < 65536) : [];
+  const timeout  = parseFloat(document.getElementById('scanTimeout').value) || 2;
+
+  closeBulkModal();
+  showLoadingOverlay(`${host} 포트 스캔 중...`);
+
+  try {
+    const res  = await fetch('/api/port-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, ports, timeout }),
+    });
+    const data = await res.json();
+    if (data.detail) throw new Error(data.detail);
+    hideLoadingOverlay();
+    renderPortScanResults(data);
+    switchView('results');
+  } catch(e) {
+    hideLoadingOverlay();
+    toast('포트 스캔 실패: ' + e.message, 'error');
+  }
+}
+
+function renderPortScanResults(data) {
+  // 요약 카드 업데이트
+  document.getElementById('summaryTotal').textContent   = data.total_scanned;
+  document.getElementById('summaryBlocked').textContent = data.open_count;
+  document.getElementById('summaryPassed').textContent  = data.risky_count;
+  document.getElementById('summaryBypass').textContent  = data.total_scanned - data.open_count;
+  document.getElementById('summaryRate').textContent    = data.open_count;
+
+  // 요약 라벨 임시 변경
+  document.querySelector('.num-blocked + .lbl').textContent = '열린 포트';
+  document.querySelector('.num-passed + .lbl').textContent  = '위험 포트';
+  document.querySelector('.num-bypass + .lbl').textContent  = '닫힌 포트';
+  document.querySelector('.num-total + .lbl').textContent   = '스캔 수';
+  document.querySelector('.num-rate + .lbl').textContent    = '오픈';
+
+  const container = document.querySelector('.results-view');
+  const existing  = document.getElementById('portScanArea');
+  if (existing) existing.remove();
+  const oldMulti = document.getElementById('multiResultsArea');
+  if (oldMulti) oldMulti.remove();
+
+  const table = container.querySelector('.results-table');
+  if (table) table.style.display = 'none';
+
+  const area = document.createElement('div');
+  area.id = 'portScanArea';
+  area.innerHTML = `
+    <div style="margin-bottom:14px;padding:12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">🔌 포트 스캔 결과</div>
+      <div style="font-size:12px;color:var(--text-secondary)">
+        대상: <strong>${escapeHtml(data.host)}</strong>
+        (IP: <code style="color:var(--accent)">${escapeHtml(data.ip)}</code>)
+        &nbsp;|&nbsp; 열린 포트: <strong style="color:var(--success)">${data.open_count}</strong>
+        &nbsp;|&nbsp; 위험 포트: <strong style="color:var(--danger)">${data.risky_count}</strong>
+      </div>
+    </div>
+
+    ${data.risky_count > 0 ? `
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:600;color:var(--danger);margin-bottom:6px">🔴 위험 포트</div>
+      <div class="port-scan-results">
+        ${data.open_ports.filter(p=>p.risk==='high').map(p => renderPortItem(p)).join('')}
+      </div>
+    </div>` : ''}
+
+    <div>
+      <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">전체 결과</div>
+      <div class="port-scan-results">
+        ${data.results.map(p => renderPortItem(p)).join('')}
+      </div>
+    </div>`;
+
+  container.appendChild(area);
+}
+
+function renderPortItem(p) {
+  const cls = p.state === 'open' ? (p.risk === 'high' ? 'risky' : 'open') : '';
+  return `
+    <div class="port-result-item ${cls}">
+      <span class="port-num">${p.port}</span>
+      <span class="port-svc">${escapeHtml(p.service || '-')}</span>
+      <span class="port-state-badge ${p.state === 'open' ? 'state-open' : 'state-closed'}">${p.state === 'open' ? '열림' : '닫힘'}</span>
+      <span class="port-time">${p.response_time != null ? p.response_time + 'ms' : '-'}</span>
+      <span class="port-note">${p.note ? escapeHtml(p.note) : ''}</span>
+    </div>`;
 }
 
 async function runBulkTest() {
@@ -1113,6 +1360,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Bulk category change
   document.getElementById('bulkCategory').addEventListener('change', e => {
     loadBulkPayloadList(e.target.value);
+  });
+
+  document.getElementById('multiCategory').addEventListener('change', e => {
+    loadMultiPayloadList(e.target.value);
   });
 
   // 패널 리사이저 초기화

@@ -242,55 +242,156 @@
 
 <!-- ══════════════════════════════ BULK TEST MODAL ═════════════════════════════ -->
 <div class="modal-overlay hidden" id="bulkModal">
-  <div class="modal">
+  <div class="modal" style="width:720px">
     <div class="modal-header">
-      <h2>⚡ 일괄 페이로드 테스트</h2>
+      <h2>⚡ 일괄 테스트</h2>
       <button class="btn btn-secondary" onclick="closeBulkModal()">✕ 닫기</button>
     </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">대상 URL</label>
-        <input id="bulkUrl" class="form-input" type="text" placeholder="https://target.example.com/search">
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+
+    <!-- 모달 내부 탭 -->
+    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg-tertiary)">
+      <div class="modal-tab active" data-mtab="single" onclick="switchModalTab('single')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">⚡ 단일 타겟</div>
+      <div class="modal-tab" data-mtab="multi" onclick="switchModalTab('multi')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">🎯 다중 타겟</div>
+      <div class="modal-tab" data-mtab="portscan" onclick="switchModalTab('portscan')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">🔌 포트 스캔</div>
+    </div>
+
+    <!-- ── 단일 타겟 탭 ── -->
+    <div class="modal-tab-content active" id="mtab-single">
+      <div class="modal-body">
         <div class="form-group">
-          <label class="form-label">HTTP 메서드</label>
-          <select id="bulkMethod" class="form-select">
-            <option>GET</option><option>POST</option><option>PUT</option>
-          </select>
+          <label class="form-label">대상 URL</label>
+          <input id="bulkUrl" class="form-input" type="text" placeholder="https://target.example.com/search">
         </div>
-        <div class="form-group">
-          <label class="form-label">삽입 위치</label>
-          <select id="bulkInjectIn" class="form-select">
-            <option value="params">Query Parameter</option>
-            <option value="body">Request Body (JSON)</option>
-            <option value="headers">Header</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">대상 파라미터 이름</label>
-        <input id="bulkTargetParam" class="form-input" type="text" placeholder="q (예: ?q=PAYLOAD)">
-      </div>
-      <div class="form-group">
-        <label class="form-label">공격 카테고리</label>
-        <select id="bulkCategory" class="form-select"></select>
-      </div>
-      <div class="form-group">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <label class="form-label" style="margin:0">테스트 페이로드 선택</label>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllPayloads(true)">전체 선택</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllPayloads(false)">전체 해제</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">HTTP 메서드</label>
+            <select id="bulkMethod" class="form-select">
+              <option>GET</option><option>POST</option><option>PUT</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">삽입 위치</label>
+            <select id="bulkInjectIn" class="form-select">
+              <option value="params">Query Parameter</option>
+              <option value="body">Request Body (JSON)</option>
+              <option value="headers">Header</option>
+            </select>
           </div>
         </div>
-        <div class="payload-checklist" id="bulkPayloadChecklist"></div>
+        <div class="form-group">
+          <label class="form-label">대상 파라미터 이름</label>
+          <input id="bulkTargetParam" class="form-input" type="text" placeholder="q (예: ?q=PAYLOAD)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">공격 카테고리</label>
+          <select id="bulkCategory" class="form-select"></select>
+        </div>
+        <div class="form-group">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label class="form-label" style="margin:0">테스트 페이로드 선택</label>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllPayloads(true)">전체 선택</button>
+              <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllPayloads(false)">전체 해제</button>
+            </div>
+          </div>
+          <div class="payload-checklist" id="bulkPayloadChecklist"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
+        <button class="btn btn-danger" onclick="runBulkTest()">⚡ 테스트 시작</button>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
-      <button class="btn btn-danger" onclick="runBulkTest()">⚡ 테스트 시작</button>
+
+    <!-- ── 다중 타겟 탭 ── -->
+    <div class="modal-tab-content" id="mtab-multi" style="display:none">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">대상 URL 목록 <span style="color:var(--text-muted);font-weight:400">(줄바꿈으로 구분)</span></label>
+          <textarea id="multiUrls" class="code-editor" rows="5" placeholder="https://target1.example.com/search&#10;https://target2.example.com/api/query&#10;https://target3.example.com/login"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">HTTP 메서드</label>
+            <select id="multiMethod" class="form-select">
+              <option>GET</option><option>POST</option><option>PUT</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">삽입 위치</label>
+            <select id="multiInjectIn" class="form-select">
+              <option value="params">Query Parameter</option>
+              <option value="body">Request Body (JSON)</option>
+              <option value="headers">Header</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">대상 파라미터 이름</label>
+          <input id="multiTargetParam" class="form-input" type="text" placeholder="q">
+        </div>
+        <div class="form-group">
+          <label class="form-label">공격 카테고리</label>
+          <select id="multiCategory" class="form-select"></select>
+        </div>
+        <div class="form-group">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label class="form-label" style="margin:0">테스트 페이로드 선택</label>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllMultiPayloads(true)">전체 선택</button>
+              <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllMultiPayloads(false)">전체 해제</button>
+            </div>
+          </div>
+          <div class="payload-checklist" id="multiPayloadChecklist"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
+        <button class="btn btn-danger" onclick="runMultiTargetTest()">🎯 다중 테스트 시작</button>
+      </div>
     </div>
+
+    <!-- ── 포트 스캔 탭 ── -->
+    <div class="modal-tab-content" id="mtab-portscan" style="display:none">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">대상 호스트</label>
+          <input id="scanHost" class="form-input" type="text" placeholder="192.168.1.1 또는 target.example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            포트 지정 <span style="color:var(--text-muted);font-weight:400">(비우면 기본 34개 포트 자동 스캔)</span>
+          </label>
+          <input id="scanPorts" class="form-input" type="text" placeholder="80,443,8080,3306 (쉼표 구분)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">타임아웃 (초)</label>
+          <input id="scanTimeout" class="form-input" type="number" value="2" min="0.5" max="10" step="0.5">
+        </div>
+
+        <!-- 기본 스캔 포트 안내 -->
+        <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:11px;color:var(--text-muted)">
+          <div style="font-weight:600;margin-bottom:6px;color:var(--text-secondary)">기본 스캔 포트 (34개)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            <span class="tag tag-gray">21 FTP</span><span class="tag tag-gray">22 SSH</span>
+            <span class="tag tag-gray">23 Telnet</span><span class="tag tag-gray">25 SMTP</span>
+            <span class="tag tag-gray">53 DNS</span><span class="tag tag-gray">80 HTTP</span>
+            <span class="tag tag-gray">443 HTTPS</span><span class="tag tag-gray">445 SMB</span>
+            <span class="tag tag-red">3306 MySQL</span><span class="tag tag-red">3389 RDP</span>
+            <span class="tag tag-red">5432 PgSQL</span><span class="tag tag-red">6379 Redis</span>
+            <span class="tag tag-gray">8080 HTTP-Alt</span><span class="tag tag-gray">8443 HTTPS-Alt</span>
+            <span class="tag tag-red">9200 ES</span><span class="tag tag-red">27017 MongoDB</span>
+            <span class="tag tag-red">2375 Docker</span><span class="tag tag-orange">1433 MSSQL</span>
+            <span class="tag tag-gray">+ 기타</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
+        <button class="btn btn-primary" onclick="runPortScan()">🔌 포트 스캔 시작</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
