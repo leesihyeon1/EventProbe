@@ -505,6 +505,79 @@
   </div>
 </div>
 
+<!-- ══════════════════════════════ CUSTOM ALERT RULE MODAL ════════════════════ -->
+<div class="modal-overlay hidden" id="alertRuleModal">
+  <div class="modal" style="width:660px">
+    <div class="modal-header">
+      <h2>🔔 커스텀 Alert 룰 관리</h2>
+      <button class="btn btn-secondary" onclick="closeAlertRuleModal()">✕ 닫기</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
+
+      <!-- 룰 목록 -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">등록된 룰</span>
+          <span id="alertRuleCount" style="font-size:11px;color:var(--text-muted)">0개</span>
+        </div>
+        <div id="alertRuleList" style="display:flex;flex-direction:column;gap:5px;max-height:220px;overflow-y:auto"></div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:14px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px" id="alertRuleFormTitle">새 룰 추가</div>
+
+        <!-- 룰 이름 + 위험도 -->
+        <div style="display:grid;grid-template-columns:1fr 120px 120px;gap:8px;margin-bottom:8px">
+          <input id="arName" class="form-input" placeholder="룰 이름 (예: Authorization 헤더 없음)">
+          <select id="arRisk" class="form-select">
+            <option value="high">🔴 High</option>
+            <option value="medium" selected>🟠 Medium</option>
+            <option value="low">🟡 Low</option>
+            <option value="informational">🔵 정보</option>
+          </select>
+          <select id="arConfidence" class="form-select">
+            <option value="certain">확실</option>
+            <option value="firm" selected>높음</option>
+            <option value="tentative">보통</option>
+          </select>
+        </div>
+
+        <!-- 체크 조건 -->
+        <div style="display:grid;grid-template-columns:140px 140px 1fr;gap:8px;margin-bottom:8px">
+          <select id="arTarget" class="form-select">
+            <option value="header_key">헤더 키</option>
+            <option value="header_value">헤더 값</option>
+            <option value="body">응답 바디</option>
+            <option value="status">상태코드</option>
+          </select>
+          <select id="arMethod" class="form-select">
+            <option value="not_contains">포함 안 함</option>
+            <option value="contains">포함</option>
+            <option value="equals">일치</option>
+            <option value="regex">정규식</option>
+          </select>
+          <input id="arValue" class="form-input" placeholder="값 (예: content-security-policy)">
+        </div>
+
+        <!-- 설명 / 해결방법 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <input id="arDesc"     class="form-input" placeholder="설명">
+          <input id="arSolution" class="form-input" placeholder="해결 방법">
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-success" style="flex:1" onclick="saveAlertRule()">💾 저장</button>
+          <button class="btn btn-secondary" id="arCancelEdit" style="display:none" onclick="cancelEditAlertRule()">취소</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span style="font-size:11px;color:var(--text-muted);margin-right:auto">💾 브라우저에 자동 저장 · 요청 전송 시 자동 적용</span>
+      <button class="btn btn-secondary" onclick="closeAlertRuleModal()">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════════════ LOADING OVERLAY ════════════════════════════ -->
 <div class="loading-overlay hidden" id="loadingOverlay" style="position:fixed">
   <div class="spinner" style="width:28px;height:28px;border-width:3px"></div>

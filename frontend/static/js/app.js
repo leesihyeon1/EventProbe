@@ -773,8 +773,228 @@ function renderAnalysis(a, result) {
   // 카드 접기/펼치기 바인딩
   bindAnalysisCardToggles(container);
 
+  // 커스텀 Alert 룰 실행 후 내장 Alert과 병합
+  const headersLower = Object.fromEntries(
+    Object.entries(result?.headers || {}).map(([k,v]) => [k.toLowerCase(), (v||'').toLowerCase()])
+  );
+  const body      = result?.body || '';
+  const bodyLower = body.toLowerCase();
+  const customAlerts  = runCustomAlertRules(headersLower, body, bodyLower, result?.status_code || 0);
+  const riskOrder     = { high:0, medium:1, low:2, informational:3 };
+  const mergedAlerts  = [...(a.alerts || []), ...customAlerts]
+    .sort((x, y) => (riskOrder[x.risk] ?? 9) - (riskOrder[y.risk] ?? 9));
+
   // Alert 섹션은 별도 렌더링 (클릭 이벤트 필요)
-  renderAlerts(a.alerts || []);
+  renderAlerts(mergedAlerts);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   커스텀 Alert 룰 관리
+   ══════════════════════════════════════════════════════════════════ */
+const ALERT_RULE_KEY = 'eventprobe_alert_rules';
+let editingRuleId = null;
+
+function loadAlertRules() {
+  try { return JSON.parse(localStorage.getItem(ALERT_RULE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveAlertRules(rules) {
+  localStorage.setItem(ALERT_RULE_KEY, JSON.stringify(rules));
+}
+
+/* ── 커스텀 룰 실행 ── */
+function runCustomAlertRules(headersLower, body, bodyLower, statusCode) {
+  const rules   = loadAlertRules().filter(r => r.enabled !== false);
+  const results = [];
+  for (const rule of rules) {
+    try {
+      let matched = false;
+      const val   = (rule.value || '').toLowerCase();
+
+      if (rule.target === 'header_key') {
+        const exists = Object.keys(headersLower).some(k => {
+          if (rule.method === 'contains')     return k.includes(val);
+          if (rule.method === 'not_contains') return false;
+          if (rule.method === 'equals')       return k === val;
+          if (rule.method === 'regex')        return new RegExp(rule.value,'i').test(k);
+          return false;
+        });
+        matched = rule.method === 'not_contains'
+          ? !Object.keys(headersLower).some(k => k.includes(val))
+          : exists;
+
+      } else if (rule.target === 'header_value') {
+        const allVals = Object.values(headersLower).join('\n');
+        if (rule.method === 'contains')     matched = allVals.includes(val);
+        if (rule.method === 'not_contains') matched = !allVals.includes(val);
+        if (rule.method === 'equals')       matched = Object.values(headersLower).some(v => v === val);
+        if (rule.method === 'regex')        matched = new RegExp(rule.value,'i').test(allVals);
+
+      } else if (rule.target === 'body') {
+        if (rule.method === 'contains')     matched = bodyLower.includes(val);
+        if (rule.method === 'not_contains') matched = !bodyLower.includes(val);
+        if (rule.method === 'equals')       matched = body === rule.value;
+        if (rule.method === 'regex')        matched = new RegExp(rule.value,'i').test(body);
+
+      } else if (rule.target === 'status') {
+        const sc = String(statusCode);
+        if (rule.method === 'equals')       matched = sc === rule.value;
+        if (rule.method === 'contains')     matched = sc.includes(rule.value);
+        if (rule.method === 'not_contains') matched = !sc.includes(rule.value);
+        if (rule.method === 'regex')        matched = new RegExp(rule.value).test(sc);
+      }
+
+      if (matched) {
+        results.push({
+          id:          rule.id,
+          name:        rule.name,
+          risk:        rule.risk,
+          confidence:  rule.confidence,
+          description: rule.description || '',
+          solution:    rule.solution || '',
+          reference:   '',
+          _custom:     true,
+        });
+      }
+    } catch { /* 정규식 오류 등 무시 */ }
+  }
+  return results;
+}
+
+/* ── 모달 열기/닫기 ── */
+function openAlertRuleModal() {
+  editingRuleId = null;
+  resetAlertRuleForm();
+  renderAlertRuleList();
+  document.getElementById('alertRuleModal').classList.remove('hidden');
+}
+
+function closeAlertRuleModal() {
+  document.getElementById('alertRuleModal').classList.add('hidden');
+}
+
+/* ── 룰 목록 렌더링 ── */
+function renderAlertRuleList() {
+  const rules     = loadAlertRules();
+  const container = document.getElementById('alertRuleList');
+  document.getElementById('alertRuleCount').textContent = `${rules.length}개`;
+
+  if (!rules.length) {
+    container.innerHTML = `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:14px">등록된 룰이 없습니다</div>`;
+    return;
+  }
+
+  const targetLabels = { header_key:'헤더 키', header_value:'헤더 값', body:'바디', status:'상태코드' };
+  const methodLabels = { contains:'포함', not_contains:'미포함', equals:'일치', regex:'정규식' };
+
+  container.innerHTML = rules.map(r => `
+    <div class="alert-rule-item ${editingRuleId === r.id ? 'editing' : ''}" id="arItem-${r.id}">
+      <span class="alert-risk-bar ${r.risk}" style="width:3px;border-radius:2px;align-self:stretch;flex-shrink:0"></span>
+      <span class="alert-rule-name">${escapeHtml(r.name)}</span>
+      <span class="alert-rule-cond">${targetLabels[r.target]||r.target} ${methodLabels[r.method]||r.method} "${escapeHtml(r.value)}"</span>
+      <div class="alert-rule-actions">
+        <button class="btn-toggle" onclick="toggleAlertRule('${r.id}')" title="${r.enabled===false?'활성화':'비활성화'}">${r.enabled===false?'●':'○'}</button>
+        <button class="btn-edit"   onclick="startEditAlertRule('${r.id}')">✏️</button>
+        <button class="btn-del"    onclick="deleteAlertRule('${r.id}')">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+/* ── 룰 저장 (추가/수정) ── */
+function saveAlertRule() {
+  const name   = document.getElementById('arName').value.trim();
+  const target = document.getElementById('arTarget').value;
+  const method = document.getElementById('arMethod').value;
+  const value  = document.getElementById('arValue').value.trim();
+
+  if (!name)  { toast('룰 이름을 입력하세요', 'error'); return; }
+  if (!value) { toast('체크 값을 입력하세요', 'error'); return; }
+
+  // 정규식 유효성 검사
+  if (method === 'regex') {
+    try { new RegExp(value); } catch { toast('유효하지 않은 정규식입니다', 'error'); return; }
+  }
+
+  const rule = {
+    id:          editingRuleId || genId(),
+    name,
+    risk:        document.getElementById('arRisk').value,
+    confidence:  document.getElementById('arConfidence').value,
+    target,
+    method,
+    value,
+    description: document.getElementById('arDesc').value.trim(),
+    solution:    document.getElementById('arSolution').value.trim(),
+    enabled:     true,
+  };
+
+  const rules = loadAlertRules();
+  if (editingRuleId) {
+    const idx = rules.findIndex(r => r.id === editingRuleId);
+    if (idx >= 0) rules[idx] = rule;
+  } else {
+    rules.push(rule);
+  }
+  saveAlertRules(rules);
+  editingRuleId = null;
+  resetAlertRuleForm();
+  renderAlertRuleList();
+  toast(editingRuleId ? '룰 수정 완료' : '룰 추가 완료', 'success');
+}
+
+/* ── 편집 시작 ── */
+function startEditAlertRule(ruleId) {
+  const rule = loadAlertRules().find(r => r.id === ruleId);
+  if (!rule) return;
+  editingRuleId = ruleId;
+
+  document.getElementById('arName').value      = rule.name;
+  document.getElementById('arRisk').value      = rule.risk;
+  document.getElementById('arConfidence').value= rule.confidence;
+  document.getElementById('arTarget').value    = rule.target;
+  document.getElementById('arMethod').value    = rule.method;
+  document.getElementById('arValue').value     = rule.value;
+  document.getElementById('arDesc').value      = rule.description || '';
+  document.getElementById('arSolution').value  = rule.solution || '';
+  document.getElementById('alertRuleFormTitle').textContent = '룰 편집';
+  document.getElementById('arCancelEdit').style.display = 'inline-flex';
+  renderAlertRuleList();
+}
+
+function cancelEditAlertRule() {
+  editingRuleId = null;
+  resetAlertRuleForm();
+  renderAlertRuleList();
+}
+
+function resetAlertRuleForm() {
+  ['arName','arValue','arDesc','arSolution'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('arRisk').value       = 'medium';
+  document.getElementById('arConfidence').value = 'firm';
+  document.getElementById('arTarget').value     = 'header_key';
+  document.getElementById('arMethod').value     = 'not_contains';
+  document.getElementById('alertRuleFormTitle').textContent = '새 룰 추가';
+  document.getElementById('arCancelEdit').style.display = 'none';
+}
+
+/* ── 활성화 토글 ── */
+function toggleAlertRule(ruleId) {
+  const rules = loadAlertRules();
+  const rule  = rules.find(r => r.id === ruleId);
+  if (!rule) return;
+  rule.enabled = rule.enabled === false ? true : false;
+  saveAlertRules(rules);
+  renderAlertRuleList();
+}
+
+/* ── 룰 삭제 ── */
+function deleteAlertRule(ruleId) {
+  if (!confirm('이 룰을 삭제할까요?')) return;
+  saveAlertRules(loadAlertRules().filter(r => r.id !== ruleId));
+  if (editingRuleId === ruleId) cancelEditAlertRule();
+  renderAlertRuleList();
+  toast('삭제됨', 'success');
 }
 
 /* ── Render ZAP-style Alerts ── */
@@ -796,10 +1016,16 @@ function renderAlerts(alerts) {
     .map(([r, n]) => `<span class="alert-count-chip chip-${r}">${riskIcon(r)} ${n}</span>`)
     .join('');
 
+  const customCount = alerts.filter(a => a._custom).length;
+
   section.innerHTML = `
     <div class="analysis-card-header" style="color:var(--accent)">
-      🔔 보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건)</span>
-      <span class="analysis-card-chevron" style="margin-left:auto">▼</span>
+      🔔 보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건${customCount ? ` · 커스텀 ${customCount}` : ''})</span>
+      <button onclick="event.stopPropagation();openAlertRuleModal()"
+        style="margin-left:auto;background:transparent;border:1px solid rgba(88,166,255,.4);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:2px 7px;margin-right:6px">
+        + 커스텀 룰
+      </button>
+      <span class="analysis-card-chevron">▼</span>
     </div>
     <div class="analysis-card-body" style="padding:10px 12px">
       <div class="alert-summary-bar">${countChips}</div>
@@ -807,7 +1033,6 @@ function renderAlerts(alerts) {
     </div>`;
 
   container.appendChild(section);
-  // Alert 카드 헤더에도 접기 바인딩
   const alertHeader = section.querySelector('.analysis-card-header');
   if (alertHeader) alertHeader.onclick = () => toggleAnalysisCard(alertHeader);
 
@@ -824,6 +1049,7 @@ function renderAlerts(alerts) {
         <div class="alert-risk-bar ${alert.risk}"></div>
         <div class="alert-title">${escapeHtml(alert.name)}</div>
         <div class="alert-badges">
+          ${alert._custom ? '<span class="custom-alert-badge">커스텀</span>' : ''}
           <span class="alert-risk-badge badge-${alert.risk}">${riskKo(alert.risk)}</span>
           <span class="alert-confidence-badge">${confidenceLabel[alert.confidence] ?? alert.confidence}</span>
         </div>

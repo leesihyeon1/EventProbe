@@ -971,6 +971,38 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   gap: 8px;
 }
 
+/* ── 커스텀 Alert 룰 아이템 ── */
+.alert-rule-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  transition: border-color .1s;
+}
+.alert-rule-item:hover { border-color: var(--border-light); }
+.alert-rule-item.editing { border-color: var(--accent-dark); background: rgba(88,166,255,.05); }
+
+.alert-rule-name  { flex:1; font-weight:600; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.alert-rule-cond  { font-size:10px; color:var(--text-muted); background:var(--bg-tertiary); border:1px solid var(--border); border-radius:4px; padding:1px 6px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.alert-rule-actions { display:flex; gap:4px; flex-shrink:0; }
+.alert-rule-actions button {
+  background:transparent; border:1px solid var(--border); border-radius:3px;
+  color:var(--text-muted); cursor:pointer; font-size:11px; padding:2px 6px; transition:all .1s;
+}
+.alert-rule-actions .btn-edit:hover { color:var(--accent);  border-color:var(--accent); }
+.alert-rule-actions .btn-del:hover  { color:var(--danger);  border-color:var(--danger); }
+.alert-rule-actions .btn-toggle:hover { color:var(--warning); border-color:var(--warning); }
+
+.custom-alert-badge {
+  font-size:9px; color:var(--accent);
+  background:rgba(88,166,255,.12); border:1px solid rgba(88,166,255,.3);
+  border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+
 .baseline-indicator {
   font-size: 10px;
   color: var(--accent);
