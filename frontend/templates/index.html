@@ -84,7 +84,7 @@
       <div class="view active" data-view="request">
 
         <!-- 요청 탭 -->
-        <div class="request-panel">
+        <div class="request-panel" id="requestPanel">
           <div class="tab-bar">
             <div class="tab req-tab active" data-tab="params" onclick="switchReqTab('params')">Query Params</div>
             <div class="tab req-tab" data-tab="headers" onclick="switchReqTab('headers')">Headers</div>
@@ -103,6 +103,9 @@
             <textarea id="bodyEditor" class="code-editor" placeholder='{"key": "value"}' style="min-height:90px"></textarea>
           </div>
         </div>
+
+        <!-- 수직 리사이저 -->
+        <div class="row-divider" id="rowDivider" title="드래그하여 높이 조절"></div>
 
         <!-- 응답 영역 -->
         <div class="response-area" id="responseArea">

@@ -841,6 +841,61 @@ function switchView(view) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+   수직 리사이저 — 요청 패널 ↕ 응답 패널 세로 크기 조정
+   ══════════════════════════════════════════════════════════════════ */
+function initRowResizer() {
+  const divider    = document.getElementById('rowDivider');
+  const reqPanel   = document.getElementById('requestPanel');
+  if (!divider || !reqPanel) return;
+
+  // 저장된 높이 복원
+  const saved = localStorage.getItem('requestPanelHeight');
+  if (saved) reqPanel.style.height = saved + 'px';
+
+  let dragging = false;
+  let startY   = 0;
+  let startH   = 0;
+
+  divider.addEventListener('mousedown', e => {
+    dragging = true;
+    startY   = e.clientY;
+    startH   = reqPanel.getBoundingClientRect().height;
+    divider.classList.add('dragging');
+    document.body.style.cursor     = 'row-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const delta = e.clientY - startY;
+    const newH  = Math.min(Math.max(startH + delta, 80), window.innerHeight * 0.6);
+    reqPanel.style.height = newH + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove('dragging');
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('requestPanelHeight',
+      reqPanel.getBoundingClientRect().height);
+  });
+
+  // Ctrl + 휠로도 조정
+  reqPanel.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const curH = reqPanel.getBoundingClientRect().height;
+    const step = e.deltaY > 0 ? -20 : 20;
+    const newH = Math.min(Math.max(curH + step, 80), window.innerHeight * 0.6);
+    reqPanel.style.height = newH + 'px';
+    localStorage.setItem('requestPanelHeight', newH);
+  }, { passive: false });
+}
+
+/* ══════════════════════════════════════════════════════════════════
    드래그 리사이저 — 응답 패널 ↔ 보안 분석 패널 가로 크기 조정
    ══════════════════════════════════════════════════════════════════ */
 function initPaneResizer() {
@@ -923,5 +978,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // 패널 리사이저 초기화
+  initRowResizer();
   initPaneResizer();
 });
