@@ -1050,25 +1050,36 @@ function importAlertRules(input) {
 }
 
 /* ── Render ZAP-style Alerts ── */
+let alertFilter = 'all';   // 현재 필터 상태 유지
+
 function renderAlerts(alerts) {
   const container = document.getElementById('analysisContent');
   if (!alerts.length) return;
 
-  // 위험도별 카운트
   const counts = { high:0, medium:0, low:0, informational:0 };
   alerts.forEach(a => { if (counts[a.risk] !== undefined) counts[a.risk]++; });
+  const customCount = alerts.filter(a => a._custom).length;
 
   const section = document.createElement('div');
   section.className = 'analysis-card';
   section.dataset.cardId = 'sec-alerts';
   section.style.borderColor = 'rgba(88,166,255,.25)';
+  section.id = 'alertSection';
 
-  const countChips = Object.entries(counts)
-    .filter(([,n]) => n > 0)
-    .map(([r, n]) => `<span class="alert-count-chip chip-${r}">${riskIcon(r)} ${n}</span>`)
-    .join('');
+  // 필터 탭 구성 (건수 있는 것만)
+  const filterTabs = [
+    { key:'all',           label:`전체 ${alerts.length}` },
+    { key:'high',          label:`🔴 High ${counts.high}`,         show: counts.high > 0 },
+    { key:'medium',        label:`🟠 Medium ${counts.medium}`,     show: counts.medium > 0 },
+    { key:'low',           label:`🟡 Low ${counts.low}`,           show: counts.low > 0 },
+    { key:'informational', label:`🔵 정보 ${counts.informational}`, show: counts.informational > 0 },
+  ].filter(t => t.key === 'all' || t.show);
 
-  const customCount = alerts.filter(a => a._custom).length;
+  const filterTabHtml = filterTabs.map(t => `
+    <button class="alert-filter-tab ${alertFilter === t.key ? 'active' : ''}"
+      data-filter="${t.key}" onclick="setAlertFilter('${t.key}')">
+      ${t.label}
+    </button>`).join('');
 
   section.innerHTML = `
     <div class="analysis-card-header" style="color:var(--accent)">
@@ -1079,55 +1090,116 @@ function renderAlerts(alerts) {
       </button>
       <span class="analysis-card-chevron">▼</span>
     </div>
-    <div class="analysis-card-body" style="padding:10px 12px">
-      <div class="alert-summary-bar">${countChips}</div>
+    <div class="analysis-card-body" style="padding:8px 12px">
+      <!-- 위험도 필터 탭 -->
+      <div class="alert-filter-bar">${filterTabHtml}</div>
+      <!-- Alert 목록 -->
       <div id="alertList"></div>
+      <!-- Informational 더보기 버튼 -->
+      <div id="alertInfoMore" style="display:none;text-align:center;padding:6px 0">
+        <button class="alert-more-btn" onclick="toggleInfoAlerts()">
+          🔵 정보성 ${counts.informational}건 더보기 ▼
+        </button>
+      </div>
     </div>`;
 
   container.appendChild(section);
   const alertHeader = section.querySelector('.analysis-card-header');
   if (alertHeader) alertHeader.onclick = () => toggleAnalysisCard(alertHeader);
 
-  const listEl = section.querySelector('#alertList');
-  alerts.forEach((alert, idx) => {
-    const card = document.createElement('div');
-    card.className = 'alert-card';
-    card.dataset.idx = idx;
+  // 저장된 전체 Alert 참조
+  section._alerts = alerts;
+  section._counts = counts;
 
-    const confidenceLabel = { certain:'확실', firm:'높음', tentative:'보통' };
+  renderAlertList(section, alerts, alertFilter);
+}
 
-    card.innerHTML = `
-      <div class="alert-card-header" onclick="toggleAlert(this)">
-        <div class="alert-risk-bar ${alert.risk}"></div>
-        <div class="alert-title">${escapeHtml(alert.name)}</div>
-        <div class="alert-badges">
-          ${alert._custom ? '<span class="custom-alert-badge">커스텀</span>' : ''}
-          <span class="alert-risk-badge badge-${alert.risk}">${riskKo(alert.risk)}</span>
-          <span class="alert-confidence-badge">${confidenceLabel[alert.confidence] ?? alert.confidence}</span>
-        </div>
-        <span class="alert-chevron">▶</span>
-      </div>
-      <div class="alert-body">
-        <div class="alert-section">
-          <div class="alert-section-label">설명</div>
-          <div class="alert-section-text">${escapeHtml(alert.description)}</div>
-        </div>
-        <div class="alert-section">
-          <div class="alert-section-label">해결 방법</div>
-          <div class="alert-section-text">${escapeHtml(alert.solution)}</div>
-        </div>
-        ${alert.reference ? `
-        <div class="alert-section">
-          <div class="alert-section-label">참고</div>
-          <a class="alert-ref-link" href="${escapeHtml(alert.reference)}" target="_blank" rel="noopener">${escapeHtml(alert.reference)}</a>
-        </div>` : ''}
-        <div style="margin-top:6px">
-          <span class="tag tag-gray" style="font-size:10px">Alert ID: ${escapeHtml(alert.id)}</span>
-        </div>
-      </div>`;
+function renderAlertList(section, alerts, filter) {
+  const listEl  = section.querySelector('#alertList');
+  const moreBtn = section.querySelector('#alertInfoMore');
+  const counts  = section._counts;
+  listEl.innerHTML = '';
 
-    listEl.appendChild(card);
+  const confidenceLabel = { certain:'확실', firm:'높음', tentative:'보통' };
+
+  // 필터 적용
+  const filtered = filter === 'all' ? alerts : alerts.filter(a => a.risk === filter);
+
+  // 필터가 'all'일 때: informational은 기본 숨김 (D안)
+  const showAll = filter !== 'all' || section._showInfo;
+  const mainAlerts = filter === 'all' && !section._showInfo
+    ? filtered.filter(a => a.risk !== 'informational')
+    : filtered;
+  const infoAlerts = filter === 'all' && !section._showInfo
+    ? filtered.filter(a => a.risk === 'informational')
+    : [];
+
+  // 더보기 버튼 표시 여부
+  if (filter === 'all' && counts.informational > 0 && !section._showInfo) {
+    moreBtn.style.display = 'block';
+    moreBtn.querySelector('.alert-more-btn').textContent =
+      `🔵 정보성 ${counts.informational}건 더보기 ▼`;
+  } else {
+    moreBtn.style.display = 'none';
+  }
+
+  mainAlerts.forEach(alert => {
+    listEl.appendChild(buildAlertCard(alert, confidenceLabel));
   });
+}
+
+function buildAlertCard(alert, confidenceLabel) {
+  const card = document.createElement('div');
+  card.className = 'alert-card';
+  card.dataset.risk = alert.risk;
+  card.innerHTML = `
+    <div class="alert-card-header" onclick="toggleAlert(this)">
+      <div class="alert-risk-bar ${alert.risk}"></div>
+      <div class="alert-title">${escapeHtml(alert.name)}</div>
+      <div class="alert-badges">
+        ${alert._custom ? '<span class="custom-alert-badge">커스텀</span>' : ''}
+        <span class="alert-risk-badge badge-${alert.risk}">${riskKo(alert.risk)}</span>
+        <span class="alert-confidence-badge">${(confidenceLabel || {})[alert.confidence] ?? alert.confidence}</span>
+      </div>
+      <span class="alert-chevron">▶</span>
+    </div>
+    <div class="alert-body">
+      <div class="alert-section">
+        <div class="alert-section-label">설명</div>
+        <div class="alert-section-text">${escapeHtml(alert.description)}</div>
+      </div>
+      <div class="alert-section">
+        <div class="alert-section-label">해결 방법</div>
+        <div class="alert-section-text">${escapeHtml(alert.solution)}</div>
+      </div>
+      ${alert.reference ? `
+      <div class="alert-section">
+        <div class="alert-section-label">참고</div>
+        <a class="alert-ref-link" href="${escapeHtml(alert.reference)}" target="_blank" rel="noopener">${escapeHtml(alert.reference)}</a>
+      </div>` : ''}
+      <div style="margin-top:6px">
+        <span class="tag tag-gray" style="font-size:10px">Alert ID: ${escapeHtml(alert.id)}</span>
+      </div>
+    </div>`;
+  return card;
+}
+
+function setAlertFilter(filter) {
+  alertFilter = filter;
+  const section = document.getElementById('alertSection');
+  if (!section || !section._alerts) return;
+  // 탭 active 갱신
+  section.querySelectorAll('.alert-filter-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.filter === filter)
+  );
+  renderAlertList(section, section._alerts, filter);
+}
+
+function toggleInfoAlerts() {
+  const section = document.getElementById('alertSection');
+  if (!section) return;
+  section._showInfo = !section._showInfo;
+  renderAlertList(section, section._alerts, alertFilter);
 }
 
 function toggleAlert(header) {

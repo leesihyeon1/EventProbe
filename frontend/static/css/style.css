@@ -1537,6 +1537,51 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 
 .alert-ref-link:hover { text-decoration: underline; }
 
+/* ── Alert 필터 탭 ── */
+.alert-filter-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.alert-filter-tab {
+  padding: 3px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+
+.alert-filter-tab:hover { color: var(--text-primary); border-color: var(--border-light); }
+.alert-filter-tab.active {
+  background: rgba(88,166,255,.15);
+  color: var(--accent);
+  border-color: rgba(88,166,255,.4);
+  font-weight: 600;
+}
+
+/* ── 더보기 버튼 ── */
+.alert-more-btn {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: all .15s;
+  width: 100%;
+}
+.alert-more-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .alert-summary-bar {
   display: flex;
   gap: 6px;
