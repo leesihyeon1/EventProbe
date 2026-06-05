@@ -30,18 +30,42 @@
 <!-- ══════════════════════════════════ BODY ═══════════════════════════════════ -->
 <div class="app-body">
 
-  <!-- ── Sidebar (페이로드 치트시트) ── -->
+  <!-- ── Sidebar ── -->
   <div class="sidebar">
-    <div class="sidebar-header">⚔️ 공격 페이로드</div>
-    <div class="sidebar-search">
-      <input id="sidebarSearchInput" type="text" placeholder="페이로드 검색...">
+
+    <!-- 사이드바 탭 전환 -->
+    <div class="sidebar-tab-bar">
+      <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">⚔️ 페이로드</div>
+      <div class="sidebar-tab" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</div>
     </div>
-    <div class="sidebar-scroll" id="sidebarList">
-      <div class="empty-state" style="padding:20px">
-        <div class="spinner"></div>
-        <div class="msg">로드 중...</div>
+
+    <!-- 페이로드 패널 -->
+    <div class="sidebar-panel active" id="sidebarPayloads">
+      <div class="sidebar-search">
+        <input id="sidebarSearchInput" type="text" placeholder="페이로드 검색...">
+      </div>
+      <div class="sidebar-scroll" id="sidebarList">
+        <div class="empty-state" style="padding:20px">
+          <div class="spinner"></div>
+          <div class="msg">로드 중...</div>
+        </div>
       </div>
     </div>
+
+    <!-- 히스토리 패널 -->
+    <div class="sidebar-panel" id="sidebarHistory">
+      <div class="history-toolbar">
+        <span id="historyCount" style="font-size:11px;color:var(--text-muted)">0건</span>
+        <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px" onclick="clearHistory()">🗑 전체 삭제</button>
+      </div>
+      <div class="sidebar-scroll" id="historyList">
+        <div class="empty-state" id="historyEmpty">
+          <div class="icon">🕓</div>
+          <div class="msg">요청 기록이 없습니다</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── Main Content ── -->

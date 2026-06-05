@@ -248,6 +248,7 @@ async function sendRequest() {
     state.lastResult = result;
     renderResponse(result);
     renderAnalysis(result.analysis, result);
+    addHistory(reqPayload, result);   // 히스토리 저장
   } catch(e) {
     toast('요청 실패: ' + e.message, 'error');
     document.getElementById('responseBody').textContent = '요청 실패: ' + e.message;
@@ -954,6 +955,143 @@ function initPaneResizer() {
     analysisEl.style.width = newW + 'px';
     localStorage.setItem('analysisPanelWidth', newW);
   }, { passive: false });
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   사이드바 탭 전환
+   ══════════════════════════════════════════════════════════════════ */
+function switchSidebarTab(tab) {
+  document.querySelectorAll('.sidebar-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.stab === tab)
+  );
+  document.querySelectorAll('.sidebar-panel').forEach(p =>
+    p.classList.toggle('active', p.id === (tab === 'payloads' ? 'sidebarPayloads' : 'sidebarHistory'))
+  );
+  if (tab === 'history') renderHistoryList();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   요청 히스토리
+   ══════════════════════════════════════════════════════════════════ */
+const HISTORY_KEY  = 'eventprobe_history';
+const HISTORY_MAX  = 100;
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveHistory(list) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+}
+
+function addHistory(req, result) {
+  const list = loadHistory();
+  list.unshift({
+    id:           Date.now(),
+    ts:           new Date().toISOString(),
+    method:       req.method?.toUpperCase() || 'GET',
+    url:          req.url || '',
+    headers:      req.headers || {},
+    params:       req.params  || {},
+    body:         req.body    || null,
+    status:       result.status_code || 0,
+    response_time:result.response_time || 0,
+    body_size:    result.body_size || 0,
+    verdict:      result.analysis?.verdict || 'unknown',
+    risk_level:   result.analysis?.risk_level || 'info',
+    alert_count:  result.analysis?.alerts?.length || 0,
+    payload:      req.payload || null,
+    category:     req.category || null,
+  });
+  saveHistory(list);
+  // 히스토리 탭이 열려있으면 즉시 갱신
+  if (document.querySelector('.sidebar-tab[data-stab="history"]')?.classList.contains('active')) {
+    renderHistoryList();
+  }
+}
+
+function deleteHistoryItem(id, e) {
+  e.stopPropagation();
+  const list = loadHistory().filter(h => h.id !== id);
+  saveHistory(list);
+  renderHistoryList();
+}
+
+function clearHistory() {
+  if (!confirm('히스토리를 모두 삭제할까요?')) return;
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistoryList();
+}
+
+function formatRelTime(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000)  return `${Math.floor(diff/1000)}초 전`;
+  if (diff < 3600000) return `${Math.floor(diff/60000)}분 전`;
+  if (diff < 86400000) return `${Math.floor(diff/3600000)}시간 전`;
+  return new Date(iso).toLocaleDateString('ko-KR', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function methodClass(m) {
+  const map = { GET:'method-get', POST:'method-post', PUT:'method-put', DELETE:'method-delete', PATCH:'method-patch' };
+  return map[m] || 'method-other';
+}
+
+function renderHistoryList() {
+  const list = loadHistory();
+  const container = document.getElementById('historyList');
+  const countEl   = document.getElementById('historyCount');
+  countEl.textContent = `${list.length}건`;
+
+  if (!list.length) {
+    container.innerHTML = `
+      <div class="empty-state" id="historyEmpty">
+        <div class="icon">🕓</div>
+        <div class="msg">요청 기록이 없습니다</div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(h => {
+    const shortUrl = h.url.length > 32 ? h.url.slice(0, 32) + '…' : h.url;
+    const statusColor = httpColor(h.status);
+    return `
+      <div class="history-item" onclick="restoreHistory(${h.id})">
+        <button class="history-delete" onclick="deleteHistoryItem(${h.id}, event)" title="삭제">×</button>
+        <div class="history-item-top">
+          <span class="history-method ${methodClass(h.method)}">${h.method}</span>
+          <span class="history-url" title="${escapeHtml(h.url)}">${escapeHtml(shortUrl)}</span>
+        </div>
+        <div class="history-item-bottom">
+          <span class="history-status" style="color:${statusColor}">${h.status || '-'}</span>
+          <span class="history-time">${formatRelTime(h.ts)}</span>
+          <span class="history-verdict verdict-${h.verdict}">${{blocked:'차단',passed:'통과',bypass:'우회',timeout:'타임아웃',error:'에러',unknown:'미확인'}[h.verdict]||h.verdict}</span>
+          ${h.alert_count ? `<span class="history-alert-count">🔔${h.alert_count}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function restoreHistory(id) {
+  const item = loadHistory().find(h => h.id === id);
+  if (!item) return;
+
+  // URL / Method 복원
+  document.getElementById('urlInput').value    = item.url;
+  document.getElementById('methodSelect').value = item.method;
+
+  // Headers / Params 복원
+  state.kvHeaders = Object.entries(item.headers || {}).map(([k,v]) => ({key:k, value:v}));
+  state.kvParams  = Object.entries(item.params  || {}).map(([k,v]) => ({key:k, value:v}));
+  renderKvEditor('headersKv', state.kvHeaders);
+  renderKvEditor('paramsKv',  state.kvParams);
+
+  // Body 복원
+  document.getElementById('bodyEditor').value = item.body || '';
+
+  // 요청/분석 뷰로 전환
+  switchView('request');
+  toast(`히스토리 복원: ${item.method} ${item.url.slice(0,40)}`, 'success');
 }
 
 /* ── Init ── */
