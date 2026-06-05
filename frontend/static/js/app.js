@@ -351,9 +351,27 @@ function saveBaseline() {
   btn.textContent = '📌 베이스라인 ✓';
   btn.style.borderColor = 'var(--success)';
   btn.style.color       = 'var(--success)';
+  // 초기화 버튼 표시
+  document.getElementById('baselineClearBtn').style.display = 'inline-flex';
   // Diff 탭에 뱃지 활성화
   document.getElementById('diffBadge').style.display = 'inline';
   toast('베이스라인 저장됨 — 다음 요청과 비교합니다', 'success');
+}
+
+function clearBaseline() {
+  baseline = null;
+  // 저장 버튼 원래대로
+  const btn = document.getElementById('baselineBtn');
+  btn.textContent   = '📌 베이스라인 저장';
+  btn.style.borderColor = '';
+  btn.style.color       = '';
+  // 초기화 버튼 숨김
+  document.getElementById('baselineClearBtn').style.display = 'none';
+  // Diff 탭 뱃지 끄기
+  document.getElementById('diffBadge').style.display = 'none';
+  // Diff 뷰 초기화
+  if (state.activeResTab === 'diff') renderDiff();
+  toast('베이스라인 초기화됨', 'success');
 }
 
 function renderDiff() {
