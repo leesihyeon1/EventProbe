@@ -265,18 +265,20 @@ async def multi_target_test(req: MultiTargetRequest):
                 headers = dict(req.headers)
                 body    = req.body
 
-                if req.inject_in == "params":
-                    params[req.target_param] = p["payload"]
-                elif req.inject_in == "body":
-                    try:
-                        bd = json.loads(body) if body else {}
-                        bd[req.target_param] = p["payload"]
-                        body = json.dumps(bd)
-                        headers.setdefault("Content-Type", "application/json")
-                    except Exception:
-                        body = p["payload"]
-                elif req.inject_in == "headers":
-                    headers[req.target_param] = p["payload"]
+                # 빈 페이로드면 삽입 없이 그대로 요청
+                if p.get("payload", ""):
+                    if req.inject_in == "params":
+                        params[req.target_param] = p["payload"]
+                    elif req.inject_in == "body":
+                        try:
+                            bd = json.loads(body) if body else {}
+                            bd[req.target_param] = p["payload"]
+                            body = json.dumps(bd)
+                            headers.setdefault("Content-Type", "application/json")
+                        except Exception:
+                            body = p["payload"]
+                    elif req.inject_in == "headers":
+                        headers[req.target_param] = p["payload"]
 
                 try:
                     start = time.time()

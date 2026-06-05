@@ -1328,19 +1328,19 @@ async function runMultiTargetTest() {
   let requestBody;
 
   if (multiPayloadMode === 'custom') {
-    // 직접 입력 모드: 사용자 입력값을 즉석 페이로드로 변환
     const customRaw = document.getElementById('multiCustomPayloads').value.trim();
-    if (!customRaw) { toast('페이로드를 입력하세요', 'error'); return; }
 
-    const customPayloads = customRaw.split('\n')
-      .map(p => p.trim()).filter(Boolean)
-      .map((p, i) => ({ id: `custom_${i}`, name: p.slice(0,30), payload: p, description: '직접 입력', risk: 'medium' }));
+    // 입력값 없으면 파라미터 삽입 없이 URL 그대로 테스트
+    const customPayloads = customRaw
+      ? customRaw.split('\n').map(p => p.trim()).filter(Boolean)
+          .map((p, i) => ({ id: `custom_${i}`, name: p.slice(0,30), payload: p, description: '직접 입력', risk: 'medium' }))
+      : [{ id: 'plain_0', name: '단순 요청', payload: '', description: '페이로드 없이 그대로 요청', risk: 'info' }];
 
     requestBody = {
       method, urls, target_param: targetParam,
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
       category: '_custom', payload_ids: [],
-      custom_payloads: customPayloads,   // 백엔드에 직접 전달
+      custom_payloads: customPayloads,
     };
   } else {
     // 체크리스트 모드
