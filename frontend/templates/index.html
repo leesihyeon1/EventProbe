@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecAPITester — 보안 이벤트 검증 도구</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════ TOPBAR ══════════════════════════════════ -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <div class="logo-icon">🛡️</div>
+    <span>SecAPITester</span>
+  </div>
+
+  <div class="topbar-tabs">
+    <button class="topbar-tab active" data-view="request" onclick="switchView('request')">요청 / 분석</button>
+    <button class="topbar-tab" data-view="results" onclick="switchView('results')">일괄 테스트 결과</button>
+    <button class="topbar-tab" data-view="report" onclick="switchView('report')">검증 리포트</button>
+  </div>
+
+  <div class="topbar-actions">
+    <button class="btn btn-success" onclick="openBulkModal()">⚡ 일괄 테스트</button>
+    <button class="btn btn-secondary" onclick="generateReport()">📄 리포트 생성</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ BODY ═══════════════════════════════════ -->
+<div class="app-body">
+
+  <!-- ── Sidebar (페이로드 치트시트) ── -->
+  <div class="sidebar">
+    <div class="sidebar-header">⚔️ 공격 페이로드</div>
+    <div class="sidebar-search">
+      <input id="sidebarSearchInput" type="text" placeholder="페이로드 검색...">
+    </div>
+    <div class="sidebar-scroll" id="sidebarList">
+      <div class="empty-state" style="padding:20px">
+        <div class="spinner"></div>
+        <div class="msg">로드 중...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main Content ── -->
+  <div class="main-content">
+
+    <!-- ── URL Bar ── -->
+    <div class="url-bar">
+      <select id="methodSelect" class="method-select">
+        <option>GET</option>
+        <option>POST</option>
+        <option>PUT</option>
+        <option>DELETE</option>
+        <option>PATCH</option>
+        <option>HEAD</option>
+        <option>OPTIONS</option>
+      </select>
+      <input id="urlInput" class="url-input" type="text" placeholder="https://target.example.com/api/endpoint">
+      <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
+    </div>
+
+    <!-- ── Inject Bar ── -->
+    <div class="inject-bar" id="injectBar" style="display:none">
+      <span class="label">선택된 페이로드:</span>
+      <span id="injectPayloadName" style="font-size:12px;color:var(--accent);white-space:nowrap"></span>
+      <span class="payload-preview" id="injectPayloadPreview"></span>
+      <span class="label">삽입 위치:</span>
+      <select id="injectTarget" class="form-select" style="width:100px;padding:3px 6px">
+        <option value="param">Query Param</option>
+        <option value="body">Body</option>
+        <option value="header">Header</option>
+        <option value="url">URL</option>
+      </select>
+      <button class="btn btn-primary" style="padding:4px 10px;font-size:11px" onclick="injectPayload()">삽입</button>
+    </div>
+
+    <!-- ── View Area ── -->
+    <div class="view-area">
+
+      <!-- ═══ VIEW: 요청/분석 ═══ -->
+      <div class="view active" data-view="request">
+
+        <!-- 요청 탭 -->
+        <div class="request-panel">
+          <div class="tab-bar">
+            <div class="tab req-tab active" data-tab="params" onclick="switchReqTab('params')">Query Params</div>
+            <div class="tab req-tab" data-tab="headers" onclick="switchReqTab('headers')">Headers</div>
+            <div class="tab req-tab" data-tab="body" onclick="switchReqTab('body')">Body</div>
+          </div>
+
+          <div class="tab-content req-tab-content active" data-tab="params" style="max-height:140px;overflow-y:auto">
+            <div class="kv-editor" id="paramsKv"></div>
+          </div>
+
+          <div class="tab-content req-tab-content" data-tab="headers" style="max-height:140px;overflow-y:auto">
+            <div class="kv-editor" id="headersKv"></div>
+          </div>
+
+          <div class="tab-content req-tab-content" data-tab="body">
+            <textarea id="bodyEditor" class="code-editor" placeholder='{"key": "value"}' style="min-height:90px"></textarea>
+          </div>
+        </div>
+
+        <!-- 응답 영역 -->
+        <div class="response-area">
+          <!-- 응답 패널 -->
+          <div class="response-panel">
+            <div class="panel-header">
+              <span>응답</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span id="resStatusCode" style="font-weight:700;font-size:13px">-</span>
+                <span id="resTime" style="color:var(--text-muted)">-</span>
+                <span id="resSize" style="color:var(--text-muted)">-</span>
+              </div>
+            </div>
+            <div class="tab-bar" style="background:var(--bg-primary)">
+              <div class="tab res-tab active" data-tab="body" onclick="switchResTab('body')">Body</div>
+              <div class="tab res-tab" data-tab="headers" onclick="switchResTab('headers')">Headers</div>
+            </div>
+            <pre class="response-body res-tab-content active" data-tab="body" id="responseBody"><span style="color:var(--text-muted)">응답이 여기에 표시됩니다</span></pre>
+            <pre class="response-body res-tab-content" data-tab="headers" id="responseHeadersBody"></pre>
+          </div>
+
+          <!-- 분석 패널 -->
+          <div class="analysis-panel">
+            <div class="panel-header">
+              <span>보안 분석</span>
+              <span id="analysisVerdict"></span>
+            </div>
+            <div class="analysis-scroll" id="analysisContent">
+              <div class="empty-state">
+                <div class="icon">🔍</div>
+                <div class="msg">요청을 전송하면 분석 결과가 표시됩니다</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /view:request -->
+
+      <!-- ═══ VIEW: 일괄 테스트 결과 ═══ -->
+      <div class="view" data-view="results">
+        <div class="results-view">
+          <div class="results-summary">
+            <div class="summary-card">
+              <div class="num num-total" id="summaryTotal">-</div>
+              <div class="lbl">총 테스트</div>
+            </div>
+            <div class="summary-card">
+              <div class="num num-blocked" id="summaryBlocked">-</div>
+              <div class="lbl">차단됨</div>
+            </div>
+            <div class="summary-card">
+              <div class="num num-passed" id="summaryPassed">-</div>
+              <div class="lbl">통과됨</div>
+            </div>
+            <div class="summary-card">
+              <div class="num num-bypass" id="summaryBypass">-</div>
+              <div class="lbl">우회 성공</div>
+            </div>
+            <div class="summary-card">
+              <div class="num num-rate" id="summaryRate">-</div>
+              <div class="lbl">탐지율</div>
+            </div>
+          </div>
+
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>페이로드 이름</th>
+                <th>페이로드</th>
+                <th>상태코드</th>
+                <th>응답시간</th>
+                <th>판정</th>
+                <th>위험도</th>
+                <th>상세</th>
+              </tr>
+            </thead>
+            <tbody id="resultsTableBody">
+              <tr>
+                <td colspan="8" style="text-align:center;color:var(--text-muted);padding:40px">
+                  일괄 테스트를 실행하면 결과가 표시됩니다
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div><!-- /view:results -->
+
+      <!-- ═══ VIEW: 검증 리포트 ═══ -->
+      <div class="view" data-view="report">
+        <div class="panel-header">
+          <span>📄 보안 검증 리포트</span>
+          <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="window.print()">🖨️ 인쇄</button>
+        </div>
+        <div class="report-view" id="reportContent">
+          <div class="empty-state">
+            <div class="icon">📊</div>
+            <div class="msg">일괄 테스트 실행 후 리포트를 생성하세요</div>
+          </div>
+        </div>
+      </div><!-- /view:report -->
+
+    </div><!-- /view-area -->
+  </div><!-- /main-content -->
+</div><!-- /app-body -->
+
+<!-- ══════════════════════════════ BULK TEST MODAL ═════════════════════════════ -->
+<div class="modal-overlay hidden" id="bulkModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>⚡ 일괄 페이로드 테스트</h2>
+      <button class="btn btn-secondary" onclick="closeBulkModal()">✕ 닫기</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">대상 URL</label>
+        <input id="bulkUrl" class="form-input" type="text" placeholder="https://target.example.com/search">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label class="form-label">HTTP 메서드</label>
+          <select id="bulkMethod" class="form-select">
+            <option>GET</option><option>POST</option><option>PUT</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">삽입 위치</label>
+          <select id="bulkInjectIn" class="form-select">
+            <option value="params">Query Parameter</option>
+            <option value="body">Request Body (JSON)</option>
+            <option value="headers">Header</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">대상 파라미터 이름</label>
+        <input id="bulkTargetParam" class="form-input" type="text" placeholder="q (예: ?q=PAYLOAD)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">공격 카테고리</label>
+        <select id="bulkCategory" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label class="form-label" style="margin:0">테스트 페이로드 선택</label>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllPayloads(true)">전체 선택</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllPayloads(false)">전체 해제</button>
+          </div>
+        </div>
+        <div class="payload-checklist" id="bulkPayloadChecklist"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
+      <button class="btn btn-danger" onclick="runBulkTest()">⚡ 테스트 시작</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ LOADING OVERLAY ════════════════════════════ -->
+<div class="loading-overlay hidden" id="loadingOverlay" style="position:fixed">
+  <div class="spinner" style="width:28px;height:28px;border-width:3px"></div>
+  <div class="loading-msg">테스트 실행 중...</div>
+  <div style="font-size:11px;color:var(--text-muted)">잠시만 기다려주세요</div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

