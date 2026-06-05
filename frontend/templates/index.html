@@ -360,19 +360,41 @@
           <label class="form-label">대상 파라미터 이름</label>
           <input id="multiTargetParam" class="form-input" type="text" placeholder="q">
         </div>
+        <!-- 페이로드 입력 모드 선택 -->
         <div class="form-group">
-          <label class="form-label">공격 카테고리</label>
-          <select id="multiCategory" class="form-select"></select>
-        </div>
-        <div class="form-group">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <label class="form-label" style="margin:0">테스트 페이로드 선택</label>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllMultiPayloads(true)">전체 선택</button>
-              <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllMultiPayloads(false)">전체 해제</button>
-            </div>
+          <div style="display:flex;gap:4px;margin-bottom:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px">
+            <button class="multi-payload-mode-btn active" id="multiModeList" onclick="switchMultiPayloadMode('list')"
+              style="flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s">
+              📋 체크리스트
+            </button>
+            <button class="multi-payload-mode-btn" id="multiModeCustom" onclick="switchMultiPayloadMode('custom')"
+              style="flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s">
+              ✏️ 직접 입력
+            </button>
           </div>
-          <div class="payload-checklist" id="multiPayloadChecklist"></div>
+
+          <!-- 체크리스트 모드 -->
+          <div id="multiModeListPanel">
+            <div class="form-group" style="margin-bottom:8px">
+              <label class="form-label">공격 카테고리</label>
+              <select id="multiCategory" class="form-select"></select>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <label class="form-label" style="margin:0">페이로드 선택</label>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllMultiPayloads(true)">전체 선택</button>
+                <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="selectAllMultiPayloads(false)">전체 해제</button>
+              </div>
+            </div>
+            <div class="payload-checklist" id="multiPayloadChecklist"></div>
+          </div>
+
+          <!-- 직접 입력 모드 -->
+          <div id="multiModeCustomPanel" style="display:none">
+            <label class="form-label" style="margin-bottom:6px">페이로드 값 <span style="color:var(--text-muted);font-weight:400">(줄바꿈으로 여러 개 입력 가능)</span></label>
+            <textarea id="multiCustomPayloads" class="code-editor" rows="6"
+              placeholder="' OR 1=1--&#10;admin'--&#10;&lt;script&gt;alert(1)&lt;/script&gt;&#10;../../../etc/passwd"></textarea>
+          </div>
         </div>
       </div>
       <div class="modal-footer">

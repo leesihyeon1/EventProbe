@@ -1293,6 +1293,27 @@ function selectAllMultiPayloads(checked) {
 }
 
 /* ── 다중 타겟 일괄 테스트 ── */
+/* ── 다중 타겟 페이로드 모드 전환 ── */
+let multiPayloadMode = 'list';
+
+function switchMultiPayloadMode(mode) {
+  multiPayloadMode = mode;
+  const isCustom = mode === 'custom';
+
+  document.getElementById('multiModeListPanel').style.display   = isCustom ? 'none' : 'block';
+  document.getElementById('multiModeCustomPanel').style.display = isCustom ? 'block' : 'none';
+
+  const btnList   = document.getElementById('multiModeList');
+  const btnCustom = document.getElementById('multiModeCustom');
+  const activeStyle   = 'background:var(--accent-dark);color:#fff';
+  const inactiveStyle = 'background:transparent;color:var(--text-muted)';
+
+  btnList.style.cssText   += isCustom ? inactiveStyle : activeStyle;
+  btnCustom.style.cssText += isCustom ? activeStyle   : inactiveStyle;
+  btnList.classList.toggle('active', !isCustom);
+  btnCustom.classList.toggle('active', isCustom);
+}
+
 async function runMultiTargetTest() {
   const urlsRaw = document.getElementById('multiUrls').value.trim();
   if (!urlsRaw) { toast('URL을 입력하세요', 'error'); return; }
@@ -1300,27 +1321,49 @@ async function runMultiTargetTest() {
   const urls = urlsRaw.split('\n').map(u => u.trim()).filter(Boolean);
   if (!urls.length) { toast('유효한 URL이 없습니다', 'error'); return; }
 
-  const catId       = document.getElementById('multiCategory').value;
   const targetParam = document.getElementById('multiTargetParam').value.trim() || 'q';
   const injectIn    = document.getElementById('multiInjectIn').value;
   const method      = document.getElementById('multiMethod').value;
 
-  const checkedIds = [...document.querySelectorAll('#multiPayloadChecklist input[type="checkbox"]:checked')]
-    .map(cb => cb.value);
-  if (!checkedIds.length) { toast('페이로드를 선택하세요', 'error'); return; }
+  let requestBody;
+
+  if (multiPayloadMode === 'custom') {
+    // 직접 입력 모드: 사용자 입력값을 즉석 페이로드로 변환
+    const customRaw = document.getElementById('multiCustomPayloads').value.trim();
+    if (!customRaw) { toast('페이로드를 입력하세요', 'error'); return; }
+
+    const customPayloads = customRaw.split('\n')
+      .map(p => p.trim()).filter(Boolean)
+      .map((p, i) => ({ id: `custom_${i}`, name: p.slice(0,30), payload: p, description: '직접 입력', risk: 'medium' }));
+
+    requestBody = {
+      method, urls, target_param: targetParam,
+      inject_in: injectIn, headers: kvToObj(state.kvHeaders),
+      category: '_custom', payload_ids: [],
+      custom_payloads: customPayloads,   // 백엔드에 직접 전달
+    };
+  } else {
+    // 체크리스트 모드
+    const catId      = document.getElementById('multiCategory').value;
+    const checkedIds = [...document.querySelectorAll('#multiPayloadChecklist input[type="checkbox"]:checked')]
+      .map(cb => cb.value);
+    if (!checkedIds.length) { toast('페이로드를 선택하세요', 'error'); return; }
+
+    requestBody = {
+      method, urls, target_param: targetParam,
+      inject_in: injectIn, headers: kvToObj(state.kvHeaders),
+      category: catId, payload_ids: checkedIds,
+    };
+  }
 
   closeBulkModal();
-  showLoadingOverlay(`0 / ${urls.length} 대상 테스트 중...`);
+  showLoadingOverlay(`${urls.length}개 대상 테스트 중...`);
 
   try {
     const res = await fetch('/api/multi-target-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method, urls, target_param: targetParam,
-        inject_in: injectIn, headers: kvToObj(state.kvHeaders),
-        category: catId, payload_ids: checkedIds,
-      }),
+      body: JSON.stringify(requestBody),
     });
     const data = await res.json();
     hideLoadingOverlay();

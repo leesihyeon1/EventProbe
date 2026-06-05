@@ -39,14 +39,15 @@ class BulkRequest(BaseModel):
 # 다중 타겟 일괄 테스트
 class MultiTargetRequest(BaseModel):
     method: str
-    urls: list[str]            # 복수 대상 URL
+    urls: list[str]
     target_param: str
     inject_in: str = "params"
     headers: dict = {}
     body: Optional[str] = None
     params: dict = {}
-    payload_ids: list[str]
-    category: str
+    payload_ids: list[str] = []
+    category: str = ""
+    custom_payloads: list[dict] = []   # 직접 입력 페이로드
     timeout: int = 10
 
 # 포트 스캔
@@ -238,15 +239,18 @@ async def multi_target_test(req: MultiTargetRequest):
     if not req.urls:
         raise HTTPException(status_code=400, detail="대상 URL이 없습니다")
 
-    data = load_payloads()
-    payloads_to_test = []
-    for cat in data["categories"]:
-        if cat["id"] == req.category:
-            payloads_to_test = [p for p in cat["payloads"] if p["id"] in req.payload_ids] if req.payload_ids else cat["payloads"]
-            break
-
-    if not payloads_to_test:
-        raise HTTPException(status_code=404, detail="페이로드를 찾을 수 없습니다")
+    # 직접 입력 페이로드 우선, 없으면 체크리스트에서 로드
+    if req.custom_payloads:
+        payloads_to_test = req.custom_payloads
+    else:
+        data = load_payloads()
+        payloads_to_test = []
+        for cat in data["categories"]:
+            if cat["id"] == req.category:
+                payloads_to_test = [p for p in cat["payloads"] if p["id"] in req.payload_ids] if req.payload_ids else cat["payloads"]
+                break
+        if not payloads_to_test:
+            raise HTTPException(status_code=404, detail="페이로드를 찾을 수 없습니다")
 
     target_results = []
 
