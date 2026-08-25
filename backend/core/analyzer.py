@@ -5,6 +5,18 @@ import re
 from typing import Optional
 
 
+def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
+    """body 에서 pattern(캡처그룹1=버전)을 찾아 target 미만이면 True (취약 라이브러리 판정용)."""
+    m = re.search(pattern, body or "", re.I)
+    if not m:
+        return False
+    try:
+        parts = tuple(int(x) for x in re.findall(r"\d+", m.group(1))[:3])
+        return parts < target
+    except Exception:
+        return False
+
+
 # ── WAF 차단 시그니처 ────────────────────────────────────────────────────────
 # 오탐을 줄이기 위해 매칭 대상을 3가지로 분리:
 #   header_names : 응답 "헤더 이름"에 부분일치 (전용 헤더)
@@ -1227,6 +1239,136 @@ ALERT_RULES = [
     {"id": "err-dotnet-stack", "name": ".NET 스택트레이스 노출", "risk": "medium", "confidence": "firm",
      "description": ".NET 예외/스택이 노출됩니다.", "solution": "customErrors 로 상세 숨김.", "reference": "",
      "check": lambda h, b, bl, s: "system.web." in bl and "at system." in bl or "microsoft.aspnetcore" in bl and "stack trace" in bl},
+
+    # ══════════════════════════════════════════════════════════════════
+    # 3차 확장 — 취약 라이브러리(Retire.js) / 제품 CVE 지문 / 노출 파일 추가
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── 취약/구버전 라이브러리 (Retire.js 계열, tentative) ─────────────
+    {"id": "lib-jquery-old", "name": "취약 jQuery(<3.5.0)", "risk": "medium", "confidence": "tentative",
+     "description": "jQuery 3.5.0 미만은 XSS(CVE-2020-11022/11023) 취약.", "solution": "jQuery 3.5+ 로 업그레이드.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"jquery[/-]?(\d+\.\d+\.\d+)", (3, 5, 0))},
+    {"id": "lib-angularjs", "name": "AngularJS(1.x) — EOL/CSTI 위험", "risk": "medium", "confidence": "tentative",
+     "description": "AngularJS 1.x 는 지원 종료·클라이언트 템플릿 인젝션 위험.", "solution": "최신 Angular 로 마이그레이션.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"angular[.-]?(1\.\d+\.\d+)", (2, 0, 0))},
+    {"id": "lib-bootstrap-old", "name": "취약 Bootstrap(<3.4/<4.3.1)", "risk": "low", "confidence": "tentative",
+     "description": "구버전 Bootstrap XSS(CVE-2019-8331 등).", "solution": "최신 Bootstrap 사용.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"bootstrap[/-]?(\d+\.\d+\.\d+)", (4, 3, 1))},
+    {"id": "lib-lodash-old", "name": "취약 Lodash(<4.17.21)", "risk": "medium", "confidence": "tentative",
+     "description": "구버전 Lodash 프로토타입 오염(CVE-2020-8203 등).", "solution": "lodash 4.17.21+.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"lodash[/-]?(\d+\.\d+\.\d+)", (4, 17, 21))},
+    {"id": "lib-moment-old", "name": "취약 Moment.js(<2.29.4)", "risk": "low", "confidence": "tentative",
+     "description": "구버전 moment.js ReDoS/경로 취약.", "solution": "moment 2.29.4+ 또는 대체.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"moment[/-]?(\d+\.\d+\.\d+)", (2, 29, 4))},
+    {"id": "lib-vue2-eol", "name": "Vue 2 — EOL", "risk": "low", "confidence": "tentative",
+     "description": "Vue 2.x 는 지원 종료.", "solution": "Vue 3 마이그레이션.", "reference": "",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"vue[/-]?(2\.\d+\.\d+)", (3, 0, 0))},
+
+    # ── 제품/CVE 지문 ─────────────────────────────────────────────────
+    {"id": "cve-struts", "name": "Apache Struts 흔적", "risk": "medium", "confidence": "tentative",
+     "description": "Struts(.action/.do) 흔적 — CVE-2017-5638(RCE) 등 이력.", "solution": "최신 패치 적용.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"\.action(\?|\"|')|struts\.token|org\.apache\.struts", bl))},
+    {"id": "cve-weblogic", "name": "Oracle WebLogic 콘솔 노출", "risk": "high", "confidence": "tentative",
+     "description": "WebLogic 콘솔/uddiexplorer 노출 — 다수 RCE(CVE-2020-14882 등).", "solution": "콘솔 접근 제한·패치.", "reference": "",
+     "check": lambda h, b, bl, s: "weblogic" in bl and ("console" in bl or "uddiexplorer" in bl)},
+    {"id": "cve-exchange", "name": "MS Exchange OWA/ECP 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Exchange OWA/ECP/Autodiscover 노출 — ProxyLogon 등 이력.", "solution": "패치·접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "x-owa-version" in h or "/owa/auth" in bl or "outlook web app" in bl},
+    {"id": "cve-citrix", "name": "Citrix ADC/Gateway 흔적", "risk": "medium", "confidence": "tentative",
+     "description": "Citrix Netscaler/Gateway 흔적 — CVE-2019-19781/CVE-2023-4966 이력.", "solution": "패치.", "reference": "",
+     "check": lambda h, b, bl, s: "ns_af" in h.get("set-cookie","") or "citrix" in bl and "gateway" in bl or "/vpn/index.html" in bl},
+    {"id": "cve-confluence", "name": "Atlassian Confluence 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Confluence 노출 — OGNL RCE(CVE-2021-26084/CVE-2022-26134) 이력.", "solution": "패치.", "reference": "",
+     "check": lambda h, b, bl, s: "confluence" in bl and ("x-confluence-request-time" in h or "com.atlassian.confluence" in bl)},
+    {"id": "cve-gitlab", "name": "GitLab 노출", "risk": "low", "confidence": "tentative",
+     "description": "GitLab 노출 — 다수 취약점 이력.", "solution": "최신 버전 유지.", "reference": "",
+     "check": lambda h, b, bl, s: "gitlab" in bl and ("gitlab_session" in h.get("set-cookie","") or "gon.gitlab" in bl)},
+    {"id": "cve-spring4shell", "name": "Spring 프레임워크(Spring4Shell 표면)", "risk": "low", "confidence": "tentative",
+     "description": "Spring MVC/WebFlux 흔적 — CVE-2022-22965(Spring4Shell) 대상 가능.", "solution": "Spring 패치 확인.", "reference": "",
+     "check": lambda h, b, bl, s: "org.springframework" in bl and ("bindingresult" in bl or "class.module" in bl)},
+    {"id": "cve-log4shell-refl", "name": "Log4Shell 페이로드 반사", "risk": "medium", "confidence": "tentative",
+     "description": "응답에 ${jndi:...} 페이로드가 반사됩니다(로그 인젝션 표면).", "solution": "Log4j 패치.", "reference": "",
+     "check": lambda h, b, bl, s: "${jndi:" in bl or "jndi:ldap" in bl},
+    {"id": "svc-solr", "name": "Apache Solr 노출", "risk": "medium", "confidence": "firm",
+     "description": "Solr 관리/쿼리 노출 — RCE 이력.", "solution": "접근 제한·패치.", "reference": "",
+     "check": lambda h, b, bl, s: '"responseheader"' in bl and ("solr" in bl or '"qtime"' in bl)},
+    {"id": "svc-couchdb", "name": "CouchDB/Redis 등 DB 응답 노출", "risk": "medium", "confidence": "tentative",
+     "description": "CouchDB/Redis/Mongo 등의 응답 흔적이 노출됩니다.", "solution": "인증·접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: '"couchdb":"welcome"' in bl or "redis_version:" in bl or '"ismaster"' in bl},
+
+    # ── 노출 파일/설정 추가 ────────────────────────────────────────────
+    {"id": "expose-webconfig", "name": "web.config 노출", "risk": "high", "confidence": "firm",
+     "description": "IIS web.config 노출 — 연결문자열/설정 유출.", "solution": "접근 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "<configuration>" in bl and ("<connectionstrings" in bl or "<system.web" in bl)},
+    {"id": "expose-htaccess", "name": ".htaccess/.htpasswd 노출", "risk": "high", "confidence": "firm",
+     "description": ".htaccess/.htpasswd 노출.", "solution": "접근 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "rewriteengine" in bl or bool(re.search(r"^[a-z0-9_-]+:\$apr1\$", b or "", re.I | re.M))},
+    {"id": "expose-composer", "name": "composer.json/lock 노출", "risk": "low", "confidence": "firm",
+     "description": "PHP composer 의존성 파일 노출(구성/버전 유출).", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: '"require"' in bl and ("composer" in bl or '"packages"' in bl and '"dist"' in bl)},
+    {"id": "expose-packagejson", "name": "package.json 노출", "risk": "low", "confidence": "firm",
+     "description": "Node package.json 노출(의존성/스크립트 유출).", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: '"dependencies"' in bl and '"scripts"' in bl and '"name"' in bl},
+    {"id": "expose-npmrc", "name": ".npmrc/.pypirc 노출", "risk": "high", "confidence": "firm",
+     "description": ".npmrc/.pypirc 노출(레지스트리 토큰 유출 가능).", "solution": "접근 차단·토큰 폐기.", "reference": "",
+     "check": lambda h, b, bl, s: "_authtoken" in bl or "//registry.npmjs.org/:_authToken".lower() in bl or "[pypi]" in bl and "password" in bl},
+    {"id": "expose-wpconfig", "name": "wp-config 백업 노출", "risk": "critical", "confidence": "firm",
+     "description": "wp-config 백업 노출 — DB 자격증명/솔트 유출.", "solution": "즉시 제거·자격증명 변경.", "reference": "",
+     "check": lambda h, b, bl, s: "db_password" in bl and "wp_" in bl and "define(" in bl},
+    {"id": "expose-sourcemap", "name": "JS 소스맵 파일 노출", "risk": "low", "confidence": "firm",
+     "description": ".map 소스맵이 노출되어 원본 소스가 복원될 수 있습니다.", "solution": "프로덕션 소스맵 제거.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'\{"version"\s*:\s*3\s*,\s*"(file|sources|mappings)"', bl)) or "x-sourcemap" in h},
+    {"id": "expose-idea", "name": "IDE 설정(.idea/.vscode) 노출", "risk": "low", "confidence": "tentative",
+     "description": "IDE 프로젝트 설정 노출.", "solution": "접근 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "<project version" in bl and "component name" in bl or "workspace.xml" in bl},
+    {"id": "expose-backup-archive", "name": "백업 아카이브 노출(.sql/.zip/.tar.gz)", "risk": "medium", "confidence": "tentative",
+     "description": "본문/링크에 백업 아카이브 참조가 있습니다.", "solution": "백업 파일을 웹 루트 밖으로 이동.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'href=["\'][^"\']+\.(sql|zip|tar\.gz|tgz|bak|7z|rar)\b', bl))},
+    {"id": "expose-crossdomain", "name": "crossdomain.xml 과대 허용", "risk": "medium", "confidence": "firm",
+     "description": "crossdomain.xml 이 * 로 모든 도메인을 허용합니다.", "solution": "허용 도메인을 제한하세요.", "reference": "",
+     "check": lambda h, b, bl, s: "cross-domain-policy" in bl and 'domain="*"' in bl},
+
+    # ── 디버그/에러 추가 ───────────────────────────────────────────────
+    {"id": "debug-nextjs", "name": "Next.js 에러/디버그 노출", "risk": "low", "confidence": "tentative",
+     "description": "Next.js 상세 에러 오버레이/스택 노출.", "solution": "프로덕션 빌드로 배포.", "reference": "",
+     "check": lambda h, b, bl, s: "__next_error__" in bl or ("nextjs" in bl and "call stack" in bl)},
+    {"id": "debug-nuxt", "name": "Nuxt 에러 노출", "risk": "low", "confidence": "tentative",
+     "description": "Nuxt 에러 페이지/스택 노출.", "solution": "프로덕션 설정.", "reference": "",
+     "check": lambda h, b, bl, s: "nuxt" in bl and "stack" in bl and "statuscode" in bl},
+    {"id": "debug-phoenix", "name": "Elixir/Phoenix 디버그 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Phoenix 상세 예외 페이지 노출.", "solution": "prod 설정으로 상세 숨김.", "reference": "",
+     "check": lambda h, b, bl, s: "phoenix" in bl and ("plug.conn" in bl or "stacktrace" in bl)},
+    {"id": "debug-graphql-verbose", "name": "GraphQL 상세 에러 노출", "risk": "low", "confidence": "tentative",
+     "description": "GraphQL 응답에 상세 스택/디버그 에러가 포함됩니다.", "solution": "프로덕션에서 에러 마스킹.", "reference": "",
+     "check": lambda h, b, bl, s: '"errors"' in bl and ("stacktrace" in bl or '"exception"' in bl)},
+    {"id": "debug-node-stack", "name": "Node.js 스택트레이스 노출", "risk": "medium", "confidence": "firm",
+     "description": "Node.js 예외 스택이 노출됩니다.", "solution": "상세 에러를 사용자에게 노출하지 마세요.", "reference": "",
+     "check": lambda h, b, bl, s: "at object.<anonymous>" in bl or bool(re.search(r"at [\w.]+ \([^)]+:\d+:\d+\)", bl))},
+
+    # ── 헤더/직렬화 추가 ───────────────────────────────────────────────
+    {"id": "hdr-server-timing", "name": "Server-Timing 헤더 노출", "risk": "informational", "confidence": "certain",
+     "description": "Server-Timing 으로 내부 처리시간/구성이 노출됩니다.", "solution": "프로덕션에서 상세 제거.", "reference": "",
+     "check": lambda h, b, bl, s: "server-timing" in h},
+    {"id": "hdr-deprecated-sec", "name": "폐기된 보안 헤더 사용", "risk": "informational", "confidence": "firm",
+     "description": "Public-Key-Pins/Expect-CT/Feature-Policy 등 폐기된 헤더 사용.", "solution": "최신 대체 헤더(CSP/Permissions-Policy)로 전환.", "reference": "",
+     "check": lambda h, b, bl, s: "public-key-pins" in h or "expect-ct" in h or "feature-policy" in h},
+    {"id": "ser-java", "name": "Java 직렬화 객체 노출", "risk": "medium", "confidence": "firm",
+     "description": "응답에 Java 직렬화 데이터(rO0AB / aced0005)가 노출됩니다.", "solution": "직렬화 데이터 노출 제거·역직렬화 보안 검토.", "reference": "",
+     "check": lambda h, b, bl, s: "ro0ab" in bl or "\xac\xed\x00\x05" in (b or "")},
+    {"id": "ser-php", "name": "PHP 직렬화 객체 노출", "risk": "low", "confidence": "tentative",
+     "description": "응답에 PHP 직렬화 객체(O:n:) 흔적이 있습니다.", "solution": "역직렬화 입력 검증.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'O:\d+:"[a-z_][\w]*":\d+:\{', b or "", re.I))},
+    {"id": "leak-viewstate", "name": "ASP.NET ViewState 노출", "risk": "informational", "confidence": "firm",
+     "description": "__VIEWSTATE 가 노출됩니다(MAC 미적용 시 역직렬화 위험).", "solution": "ViewState MAC/암호화 적용.", "reference": "",
+     "check": lambda h, b, bl, s: "__viewstate" in bl and "value=" in bl},
+
+    # ── 클라우드 메타데이터 응답(SSRF 성공 흔적) ───────────────────────
+    {"id": "cloud-aws-meta", "name": "AWS 메타데이터 응답 노출", "risk": "critical", "confidence": "firm",
+     "description": "응답에 AWS 메타데이터/IAM 자격증명 흔적이 있습니다(SSRF 성공 가능).", "solution": "SSRF 차단·IMDSv2 강제.", "reference": "",
+     "check": lambda h, b, bl, s: "iam/security-credentials" in bl or "instance-identity" in bl or ('"accesskeyid"' in bl and '"secretaccesskey"' in bl)},
+    {"id": "cloud-gcp-meta", "name": "GCP 메타데이터 응답 노출", "risk": "critical", "confidence": "firm",
+     "description": "GCP 메타데이터 흔적이 있습니다(SSRF 성공 가능).", "solution": "SSRF 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "computemetadata" in bl or "metadata.google.internal" in bl},
 ]
 
 
