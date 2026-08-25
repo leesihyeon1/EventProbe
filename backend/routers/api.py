@@ -204,14 +204,22 @@ async def send_request(req: SingleRequest):
         }
     except Exception as e:
         # 연결 실패/DNS/헤더 거부 등 — 500 대신 구조화된 에러로 반환해
-        # 단일 전송·GO TEST UI 가 "HTTP undefined" 대신 명확히 표시하도록 함
+        # 단일 전송·GO TEST UI 가 "HTTP undefined" 대신 명확히 표시하도록 함.
+        # httpx 일부 예외는 str(e) 가 비어 있으므로 하위 원인(__cause__)까지 뽑아낸다.
+        detail = str(e).strip()
+        cause = e.__cause__ or e.__context__
+        if cause and str(cause).strip():
+            detail = (detail + f" ({type(cause).__name__}: {cause})").strip() if detail else f"{type(cause).__name__}: {cause}"
+        if not detail:
+            detail = "연결 실패 (대상 도달 불가 — DNS/방화벽/포트 확인)"
+        msg = f"{type(e).__name__}: {detail}"
         return {
             "status_code": 0,
             "headers": {},
             "body": "",
             "response_time": 0,
             "body_size": 0,
-            "error": f"{type(e).__name__}: {e}",
+            "error": msg,
             "analysis": {
                 "verdict": "error",
                 "confidence": 0,
@@ -221,7 +229,7 @@ async def send_request(req: SingleRequest):
                 "sensitive_data": [],
                 "response_anomalies": [],
                 "risk_level": "info",
-                "details": [f"요청 실패: {type(e).__name__}: {e}"],
+                "details": [f"요청 실패: {msg}"],
                 "score": 0,
             },
         }

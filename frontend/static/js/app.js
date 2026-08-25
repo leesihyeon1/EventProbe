@@ -674,16 +674,53 @@ function renderAiCandidates(res) {
   if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
 
   listEl.innerHTML = cands.map((c, i) => `
-    <div class="payload-item" style="align-items:flex-start;gap:6px" title="${escapeHtml(c.why || '')}">
-      <input type="checkbox" class="ai-cand-chk" data-idx="${i}" checked style="margin-top:3px">
+    <div class="payload-item ai-cand-item" data-idx="${i}" onclick="applyAiCandidate(${i})"
+         style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
       <div style="flex:1;min-width:0">
         <div style="font-size:11px;color:var(--accent)">${_CAT_ICON[c.category]||'🔎'} ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
         <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
         ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)}</div>` : ''}
-        <div class="ai-cand-result" data-idx="${i}" style="font-size:11px;margin-top:3px"></div>
       </div>
     </div>`).join('');
-  document.getElementById('goTestBtn').style.display = '';
+  // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
+  const gt = document.getElementById('goTestBtn'); if (gt) gt.style.display = 'none';
+}
+
+// 후보 클릭 → 현재 요청 폼에 payload 주입 (이후 사용자가 ▶ 전송)
+function applyAiCandidate(idx) {
+  const c = state.aiCandidates[idx];
+  if (!c) return;
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  if (c.location === 'header') {
+    _setKv(state.kvHeaders, c.param || 'X-Test-Payload', c.payload, 'replace');
+    renderKvEditor('headersKv', state.kvHeaders);
+    switchReqTab('headers');
+  } else if (c.location === 'body') {
+    const bodyEl = document.getElementById('bodyEditor');
+    try { const bd = bodyEl.value.trim() ? JSON.parse(bodyEl.value) : {}; bd[c.param || 'q'] = c.payload; bodyEl.value = JSON.stringify(bd, null, 2); }
+    catch { bodyEl.value = c.payload; }
+    switchReqTab('body');
+  } else { // param
+    const k = c.param || 'q';
+    const urlInput = document.getElementById('urlInput');
+    const re = new RegExp('([?&]' + esc(k) + '=)[^&#]*');
+    if (re.test(urlInput.value)) {
+      urlInput.value = urlInput.value.replace(re, '$1' + encodeURIComponent(c.payload));
+    } else {
+      _setKv(state.kvParams, k, c.payload, 'replace');
+      renderKvEditor('paramsKv', state.kvParams);
+      switchReqTab('params');
+    }
+  }
+  // 분석 시 payload/category 가 전달되도록 선택 상태 기록
+  state.selectedPayload = { payload: c.payload, name: c.category };
+  state.selectedCategory = { id: c.category, icon: _CAT_ICON[c.category] || '🔎' };
+  // 강조 표시
+  document.querySelectorAll('#aiCandidateList .ai-cand-item').forEach(el => el.classList.remove('selected'));
+  const row = document.querySelector(`#aiCandidateList .ai-cand-item[data-idx="${idx}"]`);
+  if (row) row.classList.add('selected');
+  toast('후보 적용됨 — ▶ 전송으로 테스트하세요', 'success');
 }
 
 // 후보 하나를 현재 요청에 적용한 요청 payload 생성
