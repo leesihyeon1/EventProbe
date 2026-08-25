@@ -13,6 +13,13 @@ const API = {
     const r = await fetch('/api/bulk-test', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async aiStatus() {
+    try { const r = await fetch('/api/ai-status'); return r.json(); } catch (e) { return { enabled: false }; }
+  },
+  async aiPayloads(data) {
+    const r = await fetch('/api/ai-payloads', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
 };
 
 /* ── State ── */
@@ -27,6 +34,8 @@ const state = {
   activeView: 'request',  // request / results / report
   activeReqTab: 'params',
   activeResTab: 'body',
+  aiEnabled: false,       // 서버에 AI(NVIDIA/로컬 NIM) 설정됨 여부
+  aiVariants: [],         // AI가 생성한 우회 변형 페이로드
 };
 
 /* ── Utils ── */
@@ -249,7 +258,8 @@ function parseRawHttp(raw) {
   const body = sep === -1 ? '' : text.slice(sep + 2);
   const lines = head.split('\n');
   const reqLine = (lines.shift() || '').trim();
-  const m = reqLine.match(/^([A-Z]+)\s+(\S+)\s+HTTP\/[\d.]+$/i);
+  // HTTP 버전은 선택적으로 처리 — 캡처/복사된 패킷은 "GET /path" 처럼 버전이 없는 경우가 많다
+  const m = reqLine.match(/^([A-Z]+)\s+(\S+)(?:\s+HTTP\/[\d.]+)?$/i);
   let method = 'GET', target = '/';
   if (m) { method = m[1].toUpperCase(); target = m[2]; }
   const headerLines = lines.map(l => l.trim()).filter(l => l && l.includes(':'));
@@ -393,7 +403,11 @@ async function loadSidebar() {
 
   // 커스텀 페이로드 병합
   loadCustomPayloads();
+  const aiCat = state.aiVariants.length
+    ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, payloads: state.aiVariants }]
+    : [];
   const allCategories = [
+    ...aiCat,
     ...state.payloads.categories,
     ...customState.categories.filter(c => c.payloads.length > 0).map(c => ({
       ...c, _custom: true
@@ -471,36 +485,138 @@ function selectPayload(catId, payloadId) {
   document.getElementById('injectPayloadPreview').textContent = payload.payload;
   document.getElementById('injectPayloadName').textContent = `${cat.icon} ${payload.name}`;
   document.getElementById('injectBar').style.display = 'flex';
+  refreshInjectTargets();                 // A: 대상 파라미터/헤더 자동완성 갱신
+  // E: AI 활성 시에만 우회변형 버튼 노출
+  const aiBtn = document.getElementById('aiVariantBtn');
+  if (aiBtn) aiBtn.style.display = state.aiEnabled ? '' : 'none';
+}
+
+// URL 쿼리스트링에서 파라미터 키 추출
+function _paramKeysFromUrl() {
+  const url = document.getElementById('urlInput')?.value || '';
+  const qi = url.indexOf('?');
+  if (qi === -1) return [];
+  return url.slice(qi + 1).split('&').map(p => p.split('=')[0]).filter(Boolean);
+}
+
+// 현재 요청에 존재하는 param/header 키 목록 (중복 제거)
+function existingKeys(target) {
+  if (target === 'param') {
+    const fromKv = (state.kvParams || []).map(r => r.key).filter(Boolean);
+    return [...new Set([..._paramKeysFromUrl(), ...fromKv])];
+  }
+  if (target === 'header') {
+    return [...new Set((state.kvHeaders || []).map(r => r.key).filter(Boolean))];
+  }
+  return [];
+}
+
+// A: 대상 위치 변경 시 — 키 입력창/모드 노출 및 자동완성/기본값 갱신
+function onInjectTargetChange() { refreshInjectTargets(); }
+
+function refreshInjectTargets() {
+  const target = document.getElementById('injectTarget').value;
+  const keyInput = document.getElementById('injectKey');
+  const modeSel  = document.getElementById('injectMode');
+  const list     = document.getElementById('injectKeyList');
+  const needsKey = (target === 'param' || target === 'header');
+
+  keyInput.style.display = needsKey ? '' : 'none';
+  modeSel.style.display  = needsKey ? '' : 'none';
+  if (!needsKey) return;
+
+  const keys = existingKeys(target);
+  list.innerHTML = keys.map(k => `<option value="${escapeHtml(k)}">`).join('');
+  keyInput.placeholder = target === 'param' ? '파라미터명' : '헤더명';
+  // 기본값: 기존 키가 있으면 첫 번째(=가장 유력한 대상), 없으면 관례값
+  if (!keyInput.value || !keys.includes(keyInput.value)) {
+    keyInput.value = keys[0] || (target === 'param' ? 'q' : 'X-Test-Payload');
+  }
+}
+
+// D: 같은 키가 있으면 값 교체(중복 생성 방지), 없으면 추가
+function _setKv(arr, key, value, mode) {
+  const idx = arr.findIndex(r => (r.key || '').toLowerCase() === key.toLowerCase());
+  if (mode === 'replace' && idx !== -1) { arr[idx].value = value; return 'replaced'; }
+  if (idx !== -1 && mode !== 'append') { arr[idx].value = value; return 'replaced'; }
+  arr.push({ key, value });
+  return 'added';
 }
 
 function injectPayload() {
   if (!state.selectedPayload) return;
   const payload = state.selectedPayload.payload;
-  const target = document.getElementById('injectTarget').value;
+  const target  = document.getElementById('injectTarget').value;
+  const mode    = document.getElementById('injectMode').value;   // replace | append
+  const key     = (document.getElementById('injectKey').value || '').trim();
 
   if (target === 'url') {
     const urlInput = document.getElementById('urlInput');
-    const pos = urlInput.selectionStart;
+    const pos = urlInput.selectionStart ?? urlInput.value.length;
     const val = urlInput.value;
     urlInput.value = val.slice(0, pos) + payload + val.slice(pos);
-    toast('URL에 페이로드 삽입됨', 'success');
+    toast('URL 커서 위치에 삽입됨', 'success');
+
   } else if (target === 'body') {
     const bodyEl = document.getElementById('bodyEditor');
-    const pos = bodyEl.selectionStart;
+    const pos = bodyEl.selectionStart ?? bodyEl.value.length;
     bodyEl.value = bodyEl.value.slice(0, pos) + payload + bodyEl.value.slice(pos);
-    // body 탭으로 전환
     switchReqTab('body');
-    toast('Body에 페이로드 삽입됨', 'success');
+    toast('Body 커서 위치에 삽입됨', 'success');
+
   } else if (target === 'header') {
-    state.kvHeaders.push({ key: 'X-Test-Payload', value: payload });
+    const k = key || 'X-Test-Payload';
+    const how = _setKv(state.kvHeaders, k, payload, mode);
     renderKvEditor('headersKv', state.kvHeaders);
     switchReqTab('headers');
-    toast('Header에 페이로드 삽입됨', 'success');
+    toast(`Header ${k} ${how === 'replaced' ? '값 교체' : '추가'}됨`, 'success');
+
   } else if (target === 'param') {
-    state.kvParams.push({ key: 'q', value: payload });
-    renderKvEditor('paramsKv', state.kvParams);
-    switchReqTab('params');
-    toast('Query Param에 페이로드 삽입됨', 'success');
+    const k = key || 'q';
+    // URL 쿼리스트링에만 존재하는 파라미터면, URL 문자열에서 직접 교체
+    const urlKeys = _paramKeysFromUrl();
+    const inKv = (state.kvParams || []).some(r => (r.key || '').toLowerCase() === k.toLowerCase());
+    if (mode === 'replace' && urlKeys.includes(k) && !inKv) {
+      const urlInput = document.getElementById('urlInput');
+      urlInput.value = urlInput.value.replace(
+        new RegExp('([?&]' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=)[^&#]*'),
+        '$1' + encodeURIComponent(payload));
+      toast(`URL 파라미터 ${k} 값 교체됨`, 'success');
+    } else {
+      const how = _setKv(state.kvParams, k, payload, mode);
+      renderKvEditor('paramsKv', state.kvParams);
+      switchReqTab('params');
+      toast(`Query Param ${k} ${how === 'replaced' ? '값 교체' : '추가'}됨`, 'success');
+    }
+  }
+}
+
+// E: 선택된 페이로드의 WAF 우회 변형을 AI로 생성 → 사이드바 "AI 우회 변형"에 추가
+async function generateBypassVariants() {
+  if (!state.selectedPayload) { toast('페이로드를 먼저 선택하세요', 'error'); return; }
+  const base = state.selectedPayload.payload;
+  const category = state.selectedCategory?.id || '';
+  const waf = state.lastResult?.analysis?.waf_detected || '';   // 직전 응답에서 탐지된 WAF
+  const btn = document.getElementById('aiVariantBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '생성 중…';
+  try {
+    const res = await API.aiPayloads({ base_payload: base, category, waf, count: 8 });
+    if (res.error) { toast('AI 변형 실패: ' + res.error, 'error'); return; }
+    const variants = (res.variants || []).filter(Boolean);
+    if (!variants.length) { toast('생성된 변형이 없습니다', 'error'); return; }
+    // 사이드바 카테고리에 반영 (클릭해서 그대로 삽입 가능)
+    state.aiVariants = variants.map((p, i) => ({
+      id: 'aiv_' + Date.now() + '_' + i,
+      name: (p.length > 40 ? p.slice(0, 40) + '…' : p),
+      payload: p, description: `AI 우회 변형${waf ? ' (' + waf + ')' : ''}`, risk: 'high',
+    }));
+    loadSidebar();
+    toast(`우회 변형 ${variants.length}개 생성됨 — 좌측 "🤖 AI 우회 변형"에서 선택`, 'success');
+  } catch (e) {
+    toast('AI 변형 오류: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
   }
 }
 
@@ -902,6 +1018,41 @@ function bindAnalysisCardToggles(container) {
   });
 }
 
+// AI 상세 분석(NVIDIA NIM) 카드 렌더
+function renderAiCard(ai) {
+  if (ai.error) {
+    return `
+    <div class="analysis-card" data-card-id="ai">
+      <div class="analysis-card-header">🤖 AI 상세 분석</div>
+      <div class="analysis-card-body">
+        <div class="detail-item" style="color:var(--danger)">${escapeHtml(ai.error)}</div>
+      </div>
+    </div>`;
+  }
+  const succ = { yes: 'tag-red', no: 'tag-green', inconclusive: 'tag-blue' }[ai.attack_success] || 'tag-blue';
+  const succLabel = { yes: '공격 성공', no: '공격 실패/미영향', inconclusive: '판단 불가' }[ai.attack_success] || String(ai.attack_success || '-');
+  const sev = String(ai.severity || 'info');
+  const fp = { low: '낮음', medium: '중간', high: '높음' }[ai.false_positive_risk] || (ai.false_positive_risk || '-');
+  const ev = Array.isArray(ai.evidence) ? ai.evidence : (ai.evidence ? [ai.evidence] : []);
+  return `
+    <div class="analysis-card" data-card-id="ai">
+      <div class="analysis-card-header">🤖 AI 상세 분석 <span style="font-size:10px;color:var(--text-muted);font-weight:400">${escapeHtml(ai.model || 'NVIDIA NIM')}</span></div>
+      <div class="analysis-card-body">
+        <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <span class="tag ${succ}">${escapeHtml(succLabel)}</span>
+          <span class="tag tag-${sev === 'critical' || sev === 'high' ? 'red' : sev === 'medium' ? 'yellow' : 'blue'}">위험도 ${escapeHtml(sev)}</span>
+          <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
+          <span class="tag tag-blue">오탐위험 ${escapeHtml(fp)}</span>
+        </div>
+        ${ai.vulnerability ? `<div class="imp-row"><span>취약점</span><code>${escapeHtml(ai.vulnerability)}</code></div>` : ''}
+        ${ai.reasoning ? `<div class="detail-item"><b>근거</b> — ${escapeHtml(ai.reasoning)}</div>` : ''}
+        ${ev.length ? `<div class="detail-item"><b>증거</b><ul style="margin:4px 0 0 16px">${ev.map(e => `<li>${escapeHtml(String(e))}</li>`).join('')}</ul></div>` : ''}
+        ${ai.reproduction ? `<div class="detail-item"><b>재현</b> — ${escapeHtml(String(ai.reproduction))}</div>` : ''}
+        ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(String(ai.remediation))}</div>` : ''}
+      </div>
+    </div>`;
+}
+
 function renderAnalysis(a, result) {
   if (!a) return;
 
@@ -1009,6 +1160,9 @@ function renderAnalysis(a, result) {
         </div>
       </div>
     </div>` : ''}
+
+    <!-- AI 상세 분석 (NVIDIA NIM) -->
+    ${a.ai ? renderAiCard(a.ai) : ''}
   `;
 
   // 카드 접기/펼치기 바인딩
@@ -2602,6 +2756,9 @@ document.addEventListener('DOMContentLoaded', () => {
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
 
+  // 서버 AI 설정 여부 확인 (우회변형 버튼 노출 판단)
+  API.aiStatus().then(s => { state.aiEnabled = !!s.enabled; });
+
   // Enter key on URL
   document.getElementById('urlInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') sendRequest();
@@ -2651,7 +2808,13 @@ function looksLikeRequest(text) {
   const first = t.split(/\s+/)[0].toLowerCase().replace(/^\$/, '');
   if (first === 'curl' || first === 'wget') return true;
   const firstLine = t.split('\n')[0].trim();
+  // HTTP 버전이 있으면 확실한 요청. 버전이 없어도 대상이 /path 또는 http(s):// 로
+  // 시작하고 다음 줄에 헤더(:포함)가 있으면 요청으로 인정 (버전 없는 캡처 대응)
   if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP\/\d/i.test(firstLine)) return true;
+  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\/\S*|https?:\/\/\S+)$/i.test(firstLine)) {
+    const second = (t.split('\n')[1] || '').trim();
+    if (/^[\w-]+:\s*\S/.test(second)) return true;   // 둘째 줄이 헤더면 요청으로 확신
+  }
   return false;
 }
 

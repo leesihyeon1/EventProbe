@@ -95,17 +95,29 @@
 
     <!-- ── Inject Bar ── -->
     <div class="inject-bar" id="injectBar" style="display:none">
-      <span class="label">선택된 페이로드:</span>
+      <span class="label">페이로드:</span>
       <span id="injectPayloadName" style="font-size:12px;color:var(--accent);white-space:nowrap"></span>
       <span class="payload-preview" id="injectPayloadPreview"></span>
-      <span class="label">삽입 위치:</span>
-      <select id="injectTarget" class="form-select" style="width:100px;padding:3px 6px">
+      <span class="label">위치:</span>
+      <select id="injectTarget" class="form-select" style="width:96px;padding:3px 6px" onchange="onInjectTargetChange()">
         <option value="param">Query Param</option>
         <option value="body">Body</option>
         <option value="header">Header</option>
         <option value="url">URL</option>
       </select>
+      <!-- A: 대상 파라미터/헤더 이름 지정 (기존 값 자동완성) -->
+      <input id="injectKey" list="injectKeyList" class="form-input" placeholder="파라미터명"
+             style="width:120px;padding:3px 6px" title="넣을 파라미터/헤더 이름 — 기존 값에서 선택하거나 직접 입력">
+      <datalist id="injectKeyList"></datalist>
+      <!-- B: 값 교체 vs 새로 추가 -->
+      <select id="injectMode" class="form-select" style="width:92px;padding:3px 6px" title="교체=해당 값에 페이로드 대입 / 추가=새 항목 추가">
+        <option value="replace">값 교체</option>
+        <option value="append">새로 추가</option>
+      </select>
       <button class="btn btn-primary" style="padding:4px 10px;font-size:11px" onclick="injectPayload()">삽입</button>
+      <!-- E: AI 우회 변형 생성 (AI 활성 시에만 노출) -->
+      <button id="aiVariantBtn" class="btn btn-secondary" style="padding:4px 10px;font-size:11px;display:none"
+              onclick="generateBypassVariants()" title="차단 우회용 변형 페이로드를 AI로 생성">🤖 우회 변형</button>
     </div>
 
     <!-- ── View Area ── -->
