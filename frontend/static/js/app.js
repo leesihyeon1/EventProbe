@@ -20,6 +20,10 @@ const API = {
     const r = await fetch('/api/ai-payloads', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async aiSuggest(data) {
+    const r = await fetch('/api/ai-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
 };
 
 /* ── State ── */

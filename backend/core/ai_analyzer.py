@@ -103,7 +103,7 @@ async def ai_analyze(ctx: dict) -> dict | None:
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}", "model": model}
@@ -150,7 +150,7 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
@@ -204,11 +204,11 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
             {"role": "user", "content": user},
         ],
         "temperature": 0.4,
-        "max_tokens": 1200,
+        "max_tokens": 900,
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=40) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
@@ -236,7 +236,9 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
             "candidates": norm[:count],
             "model": model,
         }
+    except httpx.TimeoutException:
+        return {"error": "AI 응답 시간 초과 — 모델이 느리거나 요청이 큽니다. 더 빠른 모델(NVIDIA_MODEL) 사용 권장"}
     except json.JSONDecodeError:
         return {"error": "AI 후보 응답 파싱 실패"}
     except Exception as e:
-        return {"error": f"AI 후보 오류: {e}"}
+        return {"error": f"AI 후보 오류: {type(e).__name__} {e}"}
