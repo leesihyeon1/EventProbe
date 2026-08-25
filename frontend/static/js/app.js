@@ -436,7 +436,6 @@ async function loadSidebar() {
 
     group.innerHTML = `
       <div class="category-header" onclick="toggleCategory(this)">
-        <span>${cat.icon || '📝'}</span>
         <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${cat.name}</span>
         ${customBadge}
         <span class="category-badge">${cat.payloads.length}</span>
