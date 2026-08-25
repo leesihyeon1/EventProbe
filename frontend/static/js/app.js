@@ -2826,62 +2826,132 @@ function parseCSV(text) {
   return rows.filter(r => r.length && !(r.length === 1 && r[0].trim() === ''));
 }
 
+// WAF/IDS syslog 한 줄에서 URL 조립 (Imperva key="value", IDS layer_7_data 중첩 모두 대응)
+function extractUrlFromLogLine(line) {
+  const kv = {};
+  // 따옴표 key="value" (Imperva WAF, IDS syslog)
+  const re = /(\w+)="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(line)) !== null) { kv[m[1]] = m[2]; }
+
+  // CEF (TippingPoint IPS 등): 확장부의 따옴표 없는 key=value (값에 공백 포함 가능 → 다음 key= 앞까지)
+  if (/\bCEF:/.test(line)) {
+    const parts = line.split('|');
+    const ext = parts.length >= 8 ? parts.slice(7).join('|') : line;
+    const re2 = /(\w+)=(.*?)(?=\s+\w+=|$)/g;
+    let m2;
+    while ((m2 = re2.exec(ext)) !== null) { const k = m2[1], v = m2[2].trim(); if (k && !(k in kv)) kv[k] = v; }
+  }
+
+  // IDS의 layer_7_data 내부(NAME == VALUE ;;;) 를 다시 파싱
+  const inner = {};
+  if (kv.layer_7_data) {
+    kv.layer_7_data.split(';;;').forEach(seg => {
+      const i = seg.indexOf('==');
+      if (i !== -1) { const k = seg.slice(0, i).trim(); const v = seg.slice(i + 2).trim(); if (k) inner[k] = v; }
+    });
+  }
+  const pick = (o, ks) => { for (const k of ks) { const v = o[k]; if (v != null && v !== '' && v !== 'N/A' && v !== '---') return v; } return ''; };
+
+  let host = pick(kv, ['httpHost', 'host', 'hostname', 'dest_host', 'dhost'])
+          || pick(inner, ['HTTP Host'])
+          || pick(kv, ['destination_ip', 'dst']);
+  let path = pick(kv, ['url', 'uri', 'url_path', 'request_uri', 'request'])
+          || pick(inner, ['HTTP URI']);
+  const query = pick(kv, ['webQuery', 'uri_query', 'query']);
+  const port = pick(kv, ['dport', 'destination_port', 'dpt']);
+
+  if (!host || !path) return null;
+  host = host.replace(/^https?:\/\//i, '').trim();
+  // request/url 필드가 이미 full URL 인 경우 그대로 사용
+  if (/^https?:\/\//i.test(path)) {
+    let u = path;
+    if (query && !u.includes('?')) u += '?' + query.replace(/^\?/, '');
+    return u;
+  }
+  if (!/^\//.test(path)) path = '/' + path;
+  const scheme = (port === '443') ? 'https' : (port === '80') ? 'http' : 'https';
+  let u = scheme + '://' + host + path;
+  if (query) u += (u.includes('?') ? '&' : '?') + query.replace(/^\?/, '');
+  return u;
+}
+
 function fillMultiFromLog(text, name) {
-  const firstLine = (text.split('\n', 1)[0] || '');
+  const firstLine = (text.split('\n', 1)[0] || '').replace(/^﻿/, '');
+  // 헤더 줄에 콤마가 있고 따옴표로 감싼 컬럼이 보이면 CSV(테이블) 로 우선 판정.
+  // (CEF/WAF 로그가 _raw 컬럼 안에 박혀 있어도 파일 자체는 CSV 이므로 라인 파싱 모드로 새면 안 됨)
   const looksCsv = firstLine.includes(',');
   let urls = [];
 
-  if (!looksCsv) {
-    // 단순 URL 목록(한 줄에 하나)
-    urls = text.split('\n').map(v => v.trim()).filter(v => /^https?:\/\//i.test(v));
-  } else {
+  if (looksCsv) {
     const rows = parseCSV(text);
     if (rows.length < 2) throw new Error('데이터 행이 없습니다');
-    const headers = rows[0].map(h => h.trim());
+    const headers = rows[0].map(h => h.trim().replace(/^﻿/, ''));
     const body = rows.slice(1);
     const lower = headers.map(h => h.toLowerCase());
     const idxOf = (cands) => { for (const c of cands) { const k = lower.indexOf(c); if (k !== -1) return k; } return -1; };
 
-    // 1) 값 기준으로 full-URL 컬럼 탐지 (가장 http(s):// 비율 높은 컬럼)
-    const N = Math.min(body.length, 50);
-    let bestCol = -1, bestScore = 0;
-    for (let ci = 0; ci < headers.length; ci++) {
-      let hit = 0, tot = 0;
-      for (let ri = 0; ri < N; ri++) {
-        const v = (body[ri][ci] || '').trim();
-        if (!v) continue; tot++;
-        if (/^https?:\/\//i.test(v)) hit++;
-      }
-      const score = tot ? hit / tot : 0;
-      if (score > bestScore) { bestScore = score; bestCol = ci; }
+    // 1) 로그 원문 컬럼(_raw/message 등)이 있으면 줄 파싱기로 URL 추출.
+    //    실제 SIEM(Splunk 등) export 는 구조화 컬럼이 비고 원문만 _raw 에 있는 경우가 많다.
+    const rawIdx = idxOf(['_raw', 'raw', 'message', 'msg', 'log', 'event', 'rawmsg']);
+    if (rawIdx !== -1) {
+      urls = body.map(r => extractUrlFromLogLine(r[rawIdx] || '')).filter(Boolean);
     }
 
-    if (bestScore >= 0.5) {
-      urls = body.map(r => (r[bestCol] || '').trim()).filter(v => /^https?:\/\//i.test(v));
-    } else {
-      // 2) host + path(+query) 조합
-      const hostIdx = idxOf(['dest', 'dest_host', 'dest_name', 'http_host', 'host', 'hostname', 'website', 'site', 'domain', 'url_domain', 'server', 'vip']);
-      const pathIdx = idxOf(['uri_path', 'url_path', 'path', 'cs-uri-stem', 'uri_stem', 'uri', 'request_uri', 'request', 'http_uri', 'url']);
-      const queryIdx = idxOf(['uri_query', 'url_query', 'query', 'cs-uri-query', 'query_string', 'querystring']);
-      if (pathIdx === -1) throw new Error('URL/경로 컬럼을 찾지 못했습니다 (헤더에 url, uri, host 등이 있는지 확인)');
-      urls = body.map(r => {
-        let path = (r[pathIdx] || '').trim();
-        if (!path) return null;
-        const q = queryIdx !== -1 ? (r[queryIdx] || '').trim().replace(/^\?/, '') : '';
-        if (/^https?:\/\//i.test(path)) {          // path 컬럼이 실은 full URL
-          let u = path;
-          if (q && !u.includes('?')) u += '?' + q;
-          return u;
+    // 2) _raw 로 못 뽑았으면 값 기준으로 full-URL 컬럼 탐지 (가장 http(s):// 비율 높은 컬럼)
+    if (!urls.length) {
+      const N = Math.min(body.length, 50);
+      let bestCol = -1, bestScore = 0;
+      for (let ci = 0; ci < headers.length; ci++) {
+        let hit = 0, tot = 0;
+        for (let ri = 0; ri < N; ri++) {
+          const v = (body[ri][ci] || '').trim();
+          if (!v) continue; tot++;
+          if (/^https?:\/\//i.test(v)) hit++;
         }
-        let host = hostIdx !== -1 ? (r[hostIdx] || '').trim() : '';
-        if (!host) return null;
-        let scheme = /:80$/.test(host) ? 'http' : 'https';
-        host = host.replace(/^https?:\/\//i, '');
-        if (!path.startsWith('/')) path = '/' + path;
-        let u = scheme + '://' + host + path;
-        if (q) u += (u.includes('?') ? '&' : '?') + q;
-        return u;
-      }).filter(Boolean);
+        const score = tot ? hit / tot : 0;
+        if (score > bestScore) { bestScore = score; bestCol = ci; }
+      }
+      if (bestScore >= 0.5) {
+        urls = body.map(r => (r[bestCol] || '').trim()).filter(v => /^https?:\/\//i.test(v));
+      }
+    }
+
+    // 3) 그래도 없으면 host + path(+query) 컬럼 조합
+    if (!urls.length) {
+      const hostIdx = idxOf(['dest', 'dest_host', 'dest_name', 'http_host', 'httphost', 'host', 'hostname', 'dhost', 'website', 'site', 'domain', 'url_domain', 'server', 'vip']);
+      const pathIdx = idxOf(['uri_path', 'url_path', 'path', 'cs-uri-stem', 'uri_stem', 'uri', 'request_uri', 'request', 'http_uri', 'url']);
+      const queryIdx = idxOf(['uri_query', 'url_query', 'query', 'cs-uri-query', 'query_string', 'querystring', 'webquery']);
+      if (pathIdx !== -1) {
+        urls = body.map(r => {
+          let path = (r[pathIdx] || '').trim();
+          if (!path) return null;
+          const q = queryIdx !== -1 ? (r[queryIdx] || '').trim().replace(/^\?/, '') : '';
+          if (/^https?:\/\//i.test(path)) {          // path 컬럼이 실은 full URL
+            let u = path;
+            if (q && !u.includes('?')) u += '?' + q;
+            return u;
+          }
+          let host = hostIdx !== -1 ? (r[hostIdx] || '').trim() : '';
+          if (!host) return null;
+          let scheme = /:80$/.test(host) ? 'http' : 'https';
+          host = host.replace(/^https?:\/\//i, '');
+          if (!path.startsWith('/')) path = '/' + path;
+          let u = scheme + '://' + host + path;
+          if (q) u += (u.includes('?') ? '&' : '?') + q;
+          return u;
+        }).filter(Boolean);
+      }
+    }
+  } else {
+    // 비-CSV: 원문 로그 dump(줄당 이벤트) 또는 단순 URL 목록
+    const kvHits = (text.match(/\w+="/g) || []).length;
+    const looksLog = /\bCEF:/.test(text)
+      || (kvHits >= 5 && /(httpHost=|layer_7_data=|webQuery=|attack_name=|ruleName=|destination_ip=)/i.test(text));
+    if (looksLog) {
+      urls = text.split('\n').map(l => extractUrlFromLogLine(l)).filter(Boolean);
+    } else {
+      urls = text.split('\n').map(v => v.trim()).filter(v => /^https?:\/\//i.test(v));
     }
   }
 
