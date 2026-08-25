@@ -169,16 +169,31 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
 
 _SUGGEST_SYSTEM = (
     "You are a web application pentest planner for AUTHORIZED testing. "
-    "Given a single HTTP request (the Host is intentionally removed for privacy), "
-    "infer what functionality/endpoint is being exercised and which parameters look injectable, "
-    "then propose concrete test payloads across the MOST RELEVANT vulnerability categories "
-    "(e.g. sqli, xss, lfi, ssrf, cmdi, ssti, redirect, idor, nosql). "
-    "Prefer parameters that already exist in the request. "
+    "Given a single HTTP request (Host removed for privacy), infer the endpoint and propose "
+    "HIGH-SIGNAL, endpoint-appropriate tests. Follow these rules strictly:\n"
+    "1) RECOGNIZE well-known endpoints from the path and prioritize endpoint-specific tests, e.g.: "
+    "/manager/html or /manager/* = Apache Tomcat Manager (default creds, auth-bypass path tricks like "
+    "/manager/html/..;/, known CVEs) ; /wp-admin,/wp-login.php,/xmlrpc.php = WordPress ; "
+    "/.env,/.git/config = secret exposure ; /actuator/* = Spring Boot Actuator ; /phpmyadmin,/solr,/jenkins,/console. "
+    "Name the detected app/tech in test_type.\n"
+    "2) INJECTION-SURFACE PRIORITY: (a) existing query params, (b) the URL PATH itself "
+    "(path traversal / segment tricks), (c) request body fields. Use these before anything else.\n"
+    "3) DO NOT spray payloads into generic headers. NEVER put XSS/SSRF/SSTI/SQLi into User-Agent, "
+    "Accept, Content-Type, Accept-Language etc. — they are not reflected/executed. "
+    "Only use a header when the technique specifically targets it: Host / X-Forwarded-For / "
+    "X-Forwarded-Host / X-Original-URL / Referer for host-header injection, cache poisoning, "
+    "SSRF-via-header, or access-control bypass.\n"
+    "4) If there are NO injectable query params, focus on PATH-based tests and endpoint-specific "
+    "checks — do not fall back to header spam.\n"
+    "5) Each candidate must test something DISTINCT (no near-duplicates). Max 8. "
+    "Only include categories that genuinely fit this endpoint.\n"
+    "location must be one of: param | path | body | header. "
+    "For location=path, 'payload' is appended to the URL path (e.g. traversal like /..;/ or ../.. ). "
     "Respond ONLY with a JSON object, no prose: "
-    '{"test_type":"short label","summary":"1-2 sentences (Korean)",'
-    '"candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|other",'
-    '"param":"target param or header name","location":"param|body|header",'
-    '"payload":"the payload string","why":"why relevant (Korean, short)"}]}'
+    '{"test_type":"detected app / endpoint","summary":"1-2 sentences (Korean)",'
+    '"candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other",'
+    '"param":"target param/header name, or empty for path","location":"param|path|body|header",'
+    '"payload":"the payload string","why":"why relevant to THIS endpoint (Korean, short)"}]}'
 )
 
 
@@ -221,7 +236,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
             if not isinstance(c, dict) or not c.get("payload"):
                 continue
             loc = str(c.get("location", "param")).lower()
-            if loc not in ("param", "body", "header"):
+            if loc not in ("param", "path", "body", "header"):
                 loc = "param"
             norm.append({
                 "category": str(c.get("category", "other")),

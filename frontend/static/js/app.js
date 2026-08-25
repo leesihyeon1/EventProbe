@@ -692,7 +692,21 @@ function applyAiCandidate(idx) {
   if (!c) return;
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  if (c.location === 'header') {
+  if (c.location === 'path') {
+    // URL 을 origin / path / query 로 분해
+    const urlInput = document.getElementById('urlInput');
+    const qIdx = urlInput.value.indexOf('?');
+    const q = qIdx >= 0 ? urlInput.value.slice(qIdx) : '';
+    const base = qIdx >= 0 ? urlInput.value.slice(0, qIdx) : urlInput.value;
+    const m = base.match(/^([a-z][a-z0-9+.-]*:\/\/[^\/]+)(\/.*)?$/i);
+    const origin = m ? m[1] : '';
+    const path = m ? (m[2] || '') : base;
+    // payload 가 / 로 시작하면 전체 경로 교체, 아니면 현재 경로에 이어붙이기
+    const newPath = c.payload.startsWith('/')
+      ? c.payload
+      : path.replace(/\/+$/, '') + '/' + c.payload;
+    urlInput.value = origin + newPath + q;
+  } else if (c.location === 'header') {
     _setKv(state.kvHeaders, c.param || 'X-Test-Payload', c.payload, 'replace');
     renderKvEditor('headersKv', state.kvHeaders);
     switchReqTab('headers');
