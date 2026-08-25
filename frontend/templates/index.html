@@ -217,6 +217,16 @@
                 Diff <span id="diffBadge" style="display:none;font-size:9px;background:var(--accent-dark);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">●</span>
               </div>
             </div>
+            <!-- 응답 검색 바 -->
+            <div class="res-search-bar" style="display:flex;gap:6px;align-items:center;padding:5px 8px;background:var(--bg-primary);border-bottom:1px solid var(--border)">
+              <span style="font-size:12px">🔎</span>
+              <input id="resSearchInput" class="form-input" placeholder="응답에서 검색 (Body/Headers)…" spellcheck="false"
+                     style="flex:1;padding:3px 8px;font-size:12px" oninput="resSearch(true)"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();resSearchNav(event.shiftKey?-1:1)}">
+              <span id="resSearchCount" style="font-size:11px;color:var(--text-muted);white-space:nowrap;min-width:34px;text-align:right">-</span>
+              <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px" onclick="resSearchNav(-1)" title="이전 (Shift+Enter)">▲</button>
+              <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px" onclick="resSearchNav(1)" title="다음 (Enter)">▼</button>
+            </div>
             <pre class="response-body res-tab-content active" data-tab="body" id="responseBody"><span style="color:var(--text-muted)">응답이 여기에 표시됩니다</span></pre>
             <pre class="response-body res-tab-content" data-tab="res-headers" id="responseHeadersBody"></pre>
             <div class="response-body res-tab-content" data-tab="req-summary" id="reqSummaryBody" style="font-family:var(--font-mono);font-size:12px;line-height:1.7"></div>

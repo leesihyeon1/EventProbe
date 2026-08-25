@@ -818,6 +818,59 @@ function switchResTab(tab) {
   );
   // Diff 탭 진입 시 렌더링
   if (tab === 'diff') renderDiff();
+  resSearch(false);   // 탭 전환 시 현재 검색어로 재하이라이트
+}
+
+/* ── 응답 검색 (Body/Headers 하이라이트 + 이동) ── */
+let _resHitIdx = 0;
+
+function _resSearchPane() {
+  if (state.activeResTab === 'body') return document.getElementById('responseBody');
+  if (state.activeResTab === 'res-headers') return document.getElementById('responseHeadersBody');
+  return null;   // req-summary(HTML)/diff 는 하이라이트 대상 아님
+}
+
+function resSearch(resetIdx) {
+  const q = document.getElementById('resSearchInput').value;
+  const countEl = document.getElementById('resSearchCount');
+  const el = _resSearchPane();
+  if (!el) { countEl.textContent = q ? 'Body/Headers 탭' : '-'; return; }
+  const text = el.textContent;          // 마킹돼 있어도 textContent 는 원문
+  if (!q) { el.textContent = text; countEl.textContent = '-'; return; }
+  if (resetIdx) _resHitIdx = 0;
+
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(esc, 'gi');
+  let out = '', last = 0, m, n = 0;
+  while ((m = re.exec(text)) !== null) {
+    out += escapeHtml(text.slice(last, m.index)) + '<mark class="search-hit">' + escapeHtml(m[0]) + '</mark>';
+    last = m.index + m[0].length;
+    n++;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  out += escapeHtml(text.slice(last));
+  el.innerHTML = out;
+  _updateResHit(el, countEl);
+}
+
+function _updateResHit(el, countEl) {
+  const hits = el.querySelectorAll('.search-hit');
+  if (!hits.length) { countEl.textContent = '0'; return; }
+  if (_resHitIdx < 0) _resHitIdx = hits.length - 1;
+  if (_resHitIdx >= hits.length) _resHitIdx = 0;
+  hits.forEach((h, i) => h.classList.toggle('current', i === _resHitIdx));
+  hits[_resHitIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  countEl.textContent = `${_resHitIdx + 1}/${hits.length}`;
+}
+
+function resSearchNav(dir) {
+  const el = _resSearchPane();
+  const countEl = document.getElementById('resSearchCount');
+  if (!el) return;
+  const hits = el.querySelectorAll('.search-hit');
+  if (!hits.length) { resSearch(true); return; }
+  _resHitIdx += dir;
+  _updateResHit(el, countEl);
 }
 
 /* ── Send Request ── */
@@ -1081,6 +1134,9 @@ function renderResponse(result) {
 
   // 요청 요약 (보낸 내용)
   renderRequestSummary(result._req);
+
+  // 검색어가 있으면 새 응답에 재적용
+  if (document.getElementById('resSearchInput')?.value) resSearch(true);
 }
 
 function buildRawRequest(req) {

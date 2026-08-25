@@ -1744,3 +1744,7 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
+
+/* 응답 검색 하이라이트 */
+mark.search-hit { background: rgba(240, 200, 60, .35); color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.search-hit.current { background: #f0a500; color: #1a1a1a; }
