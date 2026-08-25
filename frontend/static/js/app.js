@@ -436,7 +436,7 @@ async function loadSidebar() {
 
     group.innerHTML = `
       <div class="category-header" onclick="toggleCategory(this)">
-        <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${cat.name}</span>
+        <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${escapeHtml(cat.name)}</span>
         ${customBadge}
         <span class="category-badge">${cat.payloads.length}</span>
         <span class="category-chevron">▶</span>
@@ -445,7 +445,7 @@ async function loadSidebar() {
         ${cat.payloads.map(p => `
           <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
             <span class="risk-dot ${p.risk || 'medium'}"></span>
-            <span class="payload-name" title="${escapeHtml(p.payload)}">${p.name}</span>
+            <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
           </div>`).join('')}
       </div>`;
     container.appendChild(group);
@@ -1868,7 +1868,7 @@ function openBulkModal() {
   if (!state.payloads) { toast('페이로드를 먼저 로드하세요', 'error'); return; }
 
   const opts = state.payloads.categories.map(c =>
-    `<option value="${c.id}">${c.icon} ${c.name}</option>`
+    `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
   ).join('');
   document.getElementById('bulkCategory').innerHTML  = opts;
   document.getElementById('multiCategory').innerHTML = opts;
@@ -1901,7 +1901,7 @@ function loadBulkPayloadList(catId) {
     <label class="payload-check-item">
       <input type="checkbox" value="${p.id}" checked>
       <span class="risk-dot ${p.risk}" style="flex-shrink:0"></span>
-      <span class="item-name">${p.name}</span>
+      <span class="item-name">${escapeHtml(p.name)}</span>
       <span class="item-payload">${escapeHtml(p.payload)}</span>
     </label>`).join('');
 }
@@ -1920,7 +1920,7 @@ function loadMultiPayloadList(catId) {
     <label class="payload-check-item">
       <input type="checkbox" value="${p.id}" checked>
       <span class="risk-dot ${p.risk}" style="flex-shrink:0"></span>
-      <span class="item-name">${p.name}</span>
+      <span class="item-name">${escapeHtml(p.name)}</span>
       <span class="item-payload">${escapeHtml(p.payload)}</span>
     </label>`).join('');
 }
