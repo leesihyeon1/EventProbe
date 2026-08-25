@@ -1138,11 +1138,24 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   width: 680px;
-  max-height: 80vh;
+  max-width: calc(100vw - 32px);
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+
+/* 모달 내부 탭 콘텐츠: 남은 높이를 채우는 flex 컬럼으로 만들어
+   본문(.modal-body)만 스크롤되고 하단 버튼(.modal-footer)은 항상 보이도록 함.
+   min-height:0 이 없으면 flex 자식이 내용 높이만큼 커져 스크롤이 동작하지 않음. */
+.modal-tab-content {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-tab-content.active { display: flex; }
 
 .modal-header {
   display: flex;
@@ -1154,7 +1167,7 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 
 .modal-header h2 { font-size: 15px; font-weight: 600; }
 
-.modal-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 
 .form-group { display: flex; flex-direction: column; gap: 6px; }
 .form-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
@@ -1682,3 +1695,32 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border-radius: 4px;
   transition: width .6s;
 }
+
+/* Request Import preview */
+.import-preview {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  max-height: 160px;
+  overflow-y: auto;
+}
+.import-preview .imp-row { display: flex; gap: 10px; padding: 2px 0; }
+.import-preview .imp-row > span { color: var(--text-muted); width: 64px; flex: none; }
+.import-preview .imp-row code { color: var(--text-primary); word-break: break-all; white-space: pre-wrap; }
+
+/* Smart-paste undo toast */
+.toast-undo {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 12px;
+  margin-left: 10px;
+  padding: 0;
+}
+.toast-undo:hover { opacity: .8; }

@@ -59,9 +59,15 @@ class PortScanRequest(BaseModel):
 # ── 페이로드 DB 로드 ────────────────────────────────────────
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "payloads.json")
 
+_PAYLOAD_CACHE = None
+
 def load_payloads():
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    # 기동 후 최초 1회만 디스크에서 읽고 이후 캐시 반환
+    global _PAYLOAD_CACHE
+    if _PAYLOAD_CACHE is None:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            _PAYLOAD_CACHE = json.load(f)
+    return _PAYLOAD_CACHE
 
 def find_payload_by_id(payload_id: str):
     data = load_payloads()

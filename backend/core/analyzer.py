@@ -6,18 +6,39 @@ from typing import Optional
 
 
 # ── WAF 차단 시그니처 ────────────────────────────────────────────────────────
+# 오탐을 줄이기 위해 매칭 대상을 3가지로 분리:
+#   header_names : 응답 "헤더 이름"에 부분일치 (전용 헤더)
+#   cookies      : Set-Cookie 값에 부분일치 (전용 세션 쿠키)
+#   server       : Server / Via / X-Powered-By / X-CDN 값에 부분일치 (제품명)
 WAF_SIGNATURES = {
-    "Cloudflare":   ["cloudflare", "cf-ray", "__cfduid"],
-    "AWS WAF":      ["awselb", "x-amzn-requestid", "x-amz-cf-id"],
-    "ModSecurity":  ["mod_security", "modsecurity", "NOYB"],
-    "Akamai":       ["akamai", "akamaighost", "x-akamai"],
-    "Imperva":      ["imperva", "incapsula", "visid_incap", "x-cdn"],
-    "F5 BIG-IP":    ["bigip", "x-waf-status", "ts="],
-    "Barracuda":    ["barracuda", "barra_counter_session"],
-    "Fortinet":     ["fortigate", "fortiweb", "x-waf-event-info"],
-    "Sucuri":       ["sucuri", "x-sucuri-id"],
-    "Wordfence":    ["wordfence"],
+    "Cloudflare":   {"header_names": ["cf-ray", "cf-cache-status"], "cookies": ["__cfduid", "__cf_bm"], "server": ["cloudflare"]},
+    "AWS WAF":      {"header_names": ["x-amzn-requestid", "x-amz-cf-id", "x-amzn-waf-action"], "cookies": ["awsalb", "awselb"], "server": []},
+    "ModSecurity":  {"header_names": [], "cookies": [], "server": ["mod_security", "modsecurity"]},
+    "Akamai":       {"header_names": ["x-akamai-transformed", "akamai-grn"], "cookies": ["ak_bmsc"], "server": ["akamaighost"]},
+    "Imperva":      {"header_names": ["x-iinfo", "x-cdn"], "cookies": ["visid_incap", "incap_ses", "nlbi_"], "server": ["incapsula"]},
+    "F5 BIG-IP":    {"header_names": ["x-waf-status"], "cookies": ["bigipserver", "ts01"], "server": ["big-ip", "bigip"]},
+    "Barracuda":    {"header_names": [], "cookies": ["barra_counter_session"], "server": ["barracuda"]},
+    "Fortinet":     {"header_names": ["x-waf-event-info"], "cookies": ["fortiwafsid"], "server": ["fortiweb", "fortigate"]},
+    "Sucuri":       {"header_names": ["x-sucuri-id", "x-sucuri-cache"], "cookies": [], "server": ["sucuri"]},
+    "Wordfence":    {"header_names": [], "cookies": [], "server": ["wordfence"]},
 }
+
+
+def detect_waf(headers_lower: dict) -> Optional[str]:
+    """응답 헤더에서 WAF 제품을 탐지. 헤더 이름/전용 쿠키/제품명 기준으로만 매칭."""
+    header_names = list(headers_lower.keys())
+    server_blob = " ".join(
+        headers_lower.get(h, "") for h in ("server", "via", "x-powered-by", "x-cdn")
+    )
+    set_cookie = headers_lower.get("set-cookie", "")
+    for waf, sig in WAF_SIGNATURES.items():
+        if any(hn in name for hn in sig["header_names"] for name in header_names):
+            return waf
+        if any(cv in set_cookie for cv in sig["cookies"]):
+            return waf
+        if any(sv in server_blob for sv in sig["server"]):
+            return waf
+    return None
 
 # ── 차단 응답 바디 키워드 ────────────────────────────────────────────────────
 BLOCK_KEYWORDS = [
@@ -872,16 +893,11 @@ def analyze_response(
         result["details"].append(f"HTTP {status_code} — 서버 에러")
 
     # 2. WAF 헤더 탐지
-    for waf_name, signatures in WAF_SIGNATURES.items():
-        for sig in signatures:
-            for hdr_val in headers_lower.values():
-                if sig in hdr_val:
-                    result["waf_detected"] = waf_name
-                    result["details"].append(f"WAF 탐지: {waf_name}")
-                    if result["verdict"] != "blocked":
-                        result["verdict"] = "blocked"
-                    result["confidence"] = min(result["confidence"] + 20, 95)
-                    break
+    waf_name = detect_waf(headers_lower)
+    if waf_name:
+        result["waf_detected"] = waf_name
+        result["details"].append(f"WAF 탐지: {waf_name}")
+        result["confidence"] = min(result["confidence"] + 20, 95)
 
     # 3. 응답 바디 차단 키워드
     for kw in BLOCK_KEYWORDS:

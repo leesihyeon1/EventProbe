@@ -5,6 +5,14 @@ import os
 
 app = FastAPI(title="SecAPITester", version="1.0.0")
 
+
+# 개발/테스트 도구: 정적 파일 캐시로 인한 "변경 미반영" 방지 (항상 최신 서빙)
+@app.middleware("http")
+async def _no_cache(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 # 라우터 등록
 from routers.api import router as api_router
 app.include_router(api_router)

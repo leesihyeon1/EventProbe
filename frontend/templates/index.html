@@ -84,6 +84,7 @@
         <option>OPTIONS</option>
       </select>
       <input id="urlInput" class="url-input" type="text" placeholder="https://target.example.com/api/endpoint">
+      <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기" style="white-space:nowrap">📋 붙여넣기</button>
       <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
     </div>
 
@@ -271,6 +272,35 @@
 </div><!-- /app-body -->
 
 <!-- ══════════════════════════════ BULK TEST MODAL ═════════════════════════════ -->
+<!-- ══════════════════════════ REQUEST IMPORT MODAL ══════════════════════════ -->
+<div class="modal-overlay hidden" id="importModal">
+  <div class="modal" style="width:720px">
+    <div class="modal-header">
+      <h2>📋 요청 붙여넣기 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">Raw HTTP / cURL / wget</span></h2>
+      <button class="btn btn-secondary" onclick="closeImportModal()">✕ 닫기</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">SOAR·Burp의 raw 패킷, 또는 curl·wget 명령을 그대로 붙여넣으세요 <span style="color:var(--text-muted);font-weight:400">(형식 자동 감지)</span></label>
+        <textarea id="importRaw" class="code-editor" rows="11" spellcheck="false" oninput="previewImport()"
+          placeholder="예) POST /api/login HTTP/1.1&#10;Host: target.example.com&#10;Content-Type: application/json&#10;&#10;{&quot;user&quot;:&quot;admin&quot;}&#10;&#10;예) curl 'https://target/api?q=1' -H 'Authorization: Bearer x' --data '{&quot;a&quot;:1}'&#10;&#10;예) wget --method=POST --header='Content-Type: application/json' --body-data='{...}' https://target/api"
+          style="min-height:200px;font-size:12px"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">파싱 미리보기</label>
+        <div id="importPreview" class="import-preview"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.6">
+        ℹ️ 명령을 서버에서 실행하지 않고 <b>파싱만</b> 합니다. URL·헤더·바디·쿼리가 폼에 채워지며, 이후 페이로드 주입·전송을 이어서 할 수 있습니다.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeImportModal()">취소</button>
+      <button class="btn btn-primary" onclick="applyImport()">✓ 폼에 채우기</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="bulkModal">
   <div class="modal" style="width:720px">
     <div class="modal-header">

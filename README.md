@@ -29,15 +29,25 @@ EventProbe는 WAF/IDS/IPS 보안 장비의 이벤트 탐지 여부를 검증하�
 git clone https://github.com/leesihyeon1/EventProbe.git
 cd EventProbe
 
-# 2. 의존성 설치
+# 2. 가상환경 생성 및 활성화 (권장 — 전역 파이썬 오염 방지)
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+# source .venv/bin/activate
+
+# 3. 의존성 설치
 pip install -r requirements.txt
 
-# 3. 서버 실행
+# 4. 서버 실행
 python backend/main.py
 
-# 4. 브라우저 접속
+# 5. 브라우저 접속
 # http://localhost:8000
 ```
+
+> venv를 쓰지 않으면 `ModuleNotFoundError: No module named 'fastapi'` 등이 발생할 수 있습니다.
+> 이 경우 의존성이 설치되지 않은 것이니 3단계를 먼저 실행하세요.
 
 ---
 
@@ -95,14 +105,24 @@ taskkill /PID <PID번호> /F
 
 ## 지원 공격 카테고리
 
+총 **14개 카테고리 / 178개 페이로드** 내장 (`backend/data/payloads.json`).
+
 | 카테고리 | 페이로드 수 | 설명 |
 |---------|-----------|------|
-| SQL Injection | 10개 | 인증 우회, UNION, Blind, 인코딩 우회 |
-| XSS | 8개 | Script, 이벤트 핸들러, SVG, 인코딩 우회 |
-| SSRF | 6개 | localhost, AWS 메타데이터, 파일 프로토콜 |
-| LFI / Path Traversal | 6개 | 경로 우회, 인코딩, Null 바이트 |
-| Command Injection | 6개 | 세미콜론, 파이프, 서브쉘, Blind |
-| Header Injection | 4개 | Host, X-Forwarded-For, User-Agent |
+| SQL Injection | 30개 | 인증 우회, UNION, Blind, 인코딩 우회 |
+| XSS | 22개 | Script, 이벤트 핸들러, SVG, 인코딩 우회 |
+| SSRF | 20개 | localhost, AWS 메타데이터, 파일 프로토콜 |
+| LFI / Path Traversal | 18개 | 경로 우회, 인코딩, Null 바이트 |
+| Command Injection | 17개 | 세미콜론, 파이프, 서브쉘, Blind |
+| Header Injection | 12개 | Host, X-Forwarded-For, User-Agent |
+| Business Logic / IDOR | 10개 | 권한 우회, 객체 참조 조작 |
+| SSTI | 9개 | 템플릿 인젝션 (Jinja2, Twig 등) |
+| NoSQL Injection | 8개 | MongoDB 연산자 인젝션 |
+| Open Redirect | 8개 | 오픈 리다이렉트 우회 |
+| XXE Injection | 6개 | 외부 엔티티, 파일 읽기 |
+| JWT 공격 | 6개 | alg=none, 서명 우회 |
+| Prototype Pollution | 6개 | `__proto__` 오염 |
+| LDAP Injection | 6개 | LDAP 필터 우회 |
 
 ## 스택
 

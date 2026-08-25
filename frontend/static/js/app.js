@@ -152,6 +152,238 @@ function kvToObj(arr) {
   return o;
 }
 
+/* ==================================================================
+   요청 붙여넣기 Import - Raw HTTP / cURL / wget 자동 파싱
+   (셸 실행 없이 토큰화만 -> httpx 전송용 폼에 채움)
+   ================================================================== */
+
+// 셸 명령 토크나이저: 따옴표/줄연속/윈도우 caret 이스케이프 처리
+function tokenizeShell(input) {
+  let s = input.replace(/\r\n?/g, '\n');
+  s = s.replace(/\\\n/g, ' ');   // bash 줄 연속 (backslash + 개행)
+  s = s.replace(/\^\n/g, ' ');   // cmd 줄 연속 (caret + 개행)
+  s = s.replace(/\^(["^])/g, '$1'); // cmd caret 이스케이프 ^" -> "
+  const tokens = [];
+  let cur = '', inTok = false, i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "'") {
+      inTok = true; i++;
+      while (i < s.length && s[i] !== "'") { cur += s[i]; i++; }
+      i++; continue;
+    }
+    if (c === '"') {
+      inTok = true; i++;
+      while (i < s.length && s[i] !== '"') {
+        if (s[i] === '\\' && i + 1 < s.length && '"\\$`'.includes(s[i + 1])) { cur += s[i + 1]; i += 2; }
+        else { cur += s[i]; i++; }
+      }
+      i++; continue;
+    }
+    if (/\s/.test(c)) { if (inTok) { tokens.push(cur); cur = ''; inTok = false; } i++; continue; }
+    if (c === '\\' && i + 1 < s.length) { cur += s[i + 1]; i += 2; inTok = true; continue; }
+    cur += c; inTok = true; i++;
+  }
+  if (inTok) tokens.push(cur);
+  return tokens;
+}
+
+function _b64(str) { try { return btoa(unescape(encodeURIComponent(str))); } catch (e) { return btoa(str); } }
+
+// cURL 파서
+function parseCurl(tokens) {
+  const r = { method: null, url: null, headers: [], dataParts: [], getMode: false };
+  const dataFlags = new Set(['-d', '--data', '--data-raw', '--data-ascii', '--data-binary', '--data-urlencode']);
+  const skipNoArg = new Set(['-k', '--insecure', '-L', '--location', '-s', '--silent', '--compressed', '-v', '--verbose', '-i', '--include', '-S', '--show-error', '-f', '--fail', '--progress-bar', '-4', '-6', '-g', '-#', '-j', '--junk-session-cookies', '-N', '--no-buffer']);
+  const skipWithArg = new Set(['-o', '--output', '-w', '--write-out', '-m', '--max-time', '--connect-timeout', '-x', '--proxy', '--cacert', '--cert', '--key', '-K', '--config', '-T', '--upload-file', '-c', '--cookie-jar', '-D', '--dump-header', '--retry', '--limit-rate', '-r', '--range', '--resolve', '-E', '--interface']);
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    const next = () => tokens[++i];
+    if (t === '-X' || t === '--request') r.method = (next() || '').toUpperCase();
+    else if (t === '-H' || t === '--header') r.headers.push(next() || '');
+    else if (dataFlags.has(t)) r.dataParts.push(next() || '');
+    else if (t.startsWith('--data=')) r.dataParts.push(t.slice(7));
+    else if (t === '-G' || t === '--get') r.getMode = true;
+    else if (t === '-b' || t === '--cookie') r.headers.push('Cookie: ' + (next() || ''));
+    else if (t === '-A' || t === '--user-agent') r.headers.push('User-Agent: ' + (next() || ''));
+    else if (t === '-e' || t === '--referer') r.headers.push('Referer: ' + (next() || ''));
+    else if (t === '-u' || t === '--user') r.headers.push('Authorization: Basic ' + _b64(next() || ''));
+    else if (t === '--url') r.url = next();
+    else if (t === '-F' || t === '--form') { r.dataParts.push(next() || ''); r._form = true; }
+    else if (skipWithArg.has(t)) next();
+    else if (skipNoArg.has(t)) { /* 무시 */ }
+    else if (t.startsWith('-')) { /* 미지원 플래그: 무시 */ }
+    else if (t.toLowerCase() !== 'curl') { if (!r.url) r.url = t; }
+  }
+  return r;
+}
+
+// wget 파서
+function parseWget(tokens) {
+  const r = { method: null, url: null, headers: [], dataParts: [], getMode: false };
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    const next = () => tokens[++i];
+    if (t.startsWith('--method=')) r.method = t.slice(9).toUpperCase();
+    else if (t === '--method') r.method = (next() || '').toUpperCase();
+    else if (t.startsWith('--header=')) r.headers.push(t.slice(9));
+    else if (t === '--header') r.headers.push(next() || '');
+    else if (t.startsWith('--post-data=')) { r.dataParts.push(t.slice(12)); if (!r.method) r.method = 'POST'; }
+    else if (t === '--post-data') { r.dataParts.push(next() || ''); if (!r.method) r.method = 'POST'; }
+    else if (t.startsWith('--body-data=')) r.dataParts.push(t.slice(12));
+    else if (t === '--body-data') r.dataParts.push(next() || '');
+    else if (t.startsWith('--user-agent=')) r.headers.push('User-Agent: ' + t.slice(13));
+    else if (t === '--user-agent' || t === '-U') r.headers.push('User-Agent: ' + (next() || ''));
+    else if (t === '-O' || t === '--output-document') next();
+    else if (t.startsWith('-')) { /* 무시 (--no-check-certificate 등) */ }
+    else if (t.toLowerCase() !== 'wget') { if (!r.url) r.url = t; }
+  }
+  return r;
+}
+
+// Raw HTTP 파서
+function parseRawHttp(raw) {
+  const text = raw.replace(/\r\n?/g, '\n');
+  const sep = text.indexOf('\n\n');
+  const head = sep === -1 ? text : text.slice(0, sep);
+  const body = sep === -1 ? '' : text.slice(sep + 2);
+  const lines = head.split('\n');
+  const reqLine = (lines.shift() || '').trim();
+  const m = reqLine.match(/^([A-Z]+)\s+(\S+)\s+HTTP\/[\d.]+$/i);
+  let method = 'GET', target = '/';
+  if (m) { method = m[1].toUpperCase(); target = m[2]; }
+  const headerLines = lines.map(l => l.trim()).filter(l => l && l.includes(':'));
+  const hostLine = headerLines.find(h => /^host:/i.test(h));
+  const host = hostLine ? hostLine.slice(hostLine.indexOf(':') + 1).trim() : '';
+  let url;
+  if (/^https?:\/\//i.test(target)) {
+    url = target;
+  } else {
+    let scheme = 'https';
+    if (/:80$/.test(host)) scheme = 'http';
+    const xp = headerLines.find(h => /^x-forwarded-proto:/i.test(h));
+    if (xp) { const v = xp.slice(xp.indexOf(':') + 1).trim().toLowerCase(); if (v === 'http' || v === 'https') scheme = v; }
+    url = scheme + '://' + host + (target.startsWith('/') ? target : '/' + target);
+  }
+  const outHeaders = headerLines.filter(h => !/^host:/i.test(h));
+  return { method, url, headers: outHeaders, dataParts: body ? [body] : [], getMode: false };
+}
+
+function _safeDecode(s) { try { return decodeURIComponent(String(s).replace(/\+/g, ' ')); } catch (e) { return s; } }
+
+// 공통 정규화: URL 쿼리 분리 -> params, 데이터 결합, method 결정
+function normalizeParsed(p) {
+  let url = p.url || '';
+  const params = [];
+  let queryStr = '';
+  const qi = url.indexOf('?');
+  if (qi !== -1) { queryStr = url.slice(qi + 1); url = url.slice(0, qi); }
+  const data = (p.dataParts || []).join('&');
+  if (p.getMode && data) queryStr = queryStr ? (queryStr + '&' + data) : data;
+  if (queryStr) {
+    queryStr.split('&').forEach(pair => {
+      if (!pair) return;
+      const eq = pair.indexOf('=');
+      const k = eq === -1 ? pair : pair.slice(0, eq);
+      const v = eq === -1 ? '' : pair.slice(eq + 1);
+      params.push({ key: _safeDecode(k), value: _safeDecode(v) });
+    });
+  }
+  const headers = parseRawHeaders((p.headers || []).join('\n'));
+  const body = p.getMode ? '' : data;
+  let method = p.method;
+  if (!method) method = body ? 'POST' : 'GET';
+  return { method, url, params, headers, body };
+}
+
+// 형식 감지 -> 파싱 -> 정규화
+function parseRequestText(text) {
+  const t = (text || '').trim();
+  if (!t) return null;
+  const first = t.split(/\s+/)[0].toLowerCase().replace(/^\$/, '');
+  let parsed;
+  if (first === 'curl') parsed = parseCurl(tokenizeShell(t));
+  else if (first === 'wget') parsed = parseWget(tokenizeShell(t));
+  else parsed = parseRawHttp(t);
+  const norm = normalizeParsed(parsed);
+  norm._format = first === 'curl' ? 'curl' : first === 'wget' ? 'wget' : 'raw';
+  return norm;
+}
+
+// 파싱 결과를 메인 요청 폼에 채움
+function fillFromParsed(n) {
+  const ms = document.getElementById('methodSelect');
+  if (n.method) {
+    const opt = [...ms.options].find(o => o.value.toUpperCase() === n.method);
+    if (opt) ms.value = opt.value;
+    else { const o = document.createElement('option'); o.textContent = n.method; ms.appendChild(o); ms.value = n.method; }
+  }
+  document.getElementById('urlInput').value = n.url || '';
+
+  state.kvParams = n.params.length ? n.params : [];
+  renderKvEditor('paramsKv', state.kvParams);
+
+  // 헤더는 KV 모드로 강제 후 채움
+  state.kvHeaders = n.headers.length ? n.headers : [];
+  headerMode = 'kv';
+  document.getElementById('headersKvWrap').style.display = 'block';
+  document.getElementById('headersRawWrap').style.display = 'none';
+  document.getElementById('hdrModeKv').classList.add('active');
+  document.getElementById('hdrModeRaw').classList.remove('active');
+  renderKvEditor('headersKv', state.kvHeaders);
+
+  document.getElementById('bodyEditor').value = n.body || '';
+  switchReqTab(n.body ? 'body' : 'params');
+}
+
+const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP' };
+
+function openImportModal() {
+  document.getElementById('importRaw').value = '';
+  document.getElementById('importPreview').innerHTML =
+    '<span style="color:var(--text-muted)">붙여넣으면 파싱 결과가 여기에 표시됩니다</span>';
+  document.getElementById('importModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('importRaw').focus(), 50);
+}
+
+function closeImportModal() {
+  document.getElementById('importModal').classList.add('hidden');
+}
+
+function previewImport() {
+  const text = document.getElementById('importRaw').value;
+  const el = document.getElementById('importPreview');
+  if (!text.trim()) {
+    el.innerHTML = '<span style="color:var(--text-muted)">붙여넣으면 파싱 결과가 여기에 표시됩니다</span>';
+    return;
+  }
+  let n;
+  try { n = parseRequestText(text); }
+  catch (e) { el.innerHTML = '<span style="color:var(--danger)">파싱 실패: ' + escapeHtml(e.message) + '</span>'; return; }
+  if (!n) { el.innerHTML = ''; return; }
+  const bodyPrev = n.body ? (escapeHtml(n.body.slice(0, 140)) + (n.body.length > 140 ? '...' : '')) : '(없음)';
+  el.innerHTML =
+    '<div style="margin-bottom:8px"><span class="tag tag-blue">' + _FMT_LABEL[n._format] + ' 감지</span></div>' +
+    '<div class="imp-row"><span>Method</span><code>' + escapeHtml(n.method) + '</code></div>' +
+    '<div class="imp-row"><span>URL</span><code>' + escapeHtml(n.url || '(인식 실패)') + '</code></div>' +
+    '<div class="imp-row"><span>Params</span><code>' + n.params.length + '개</code></div>' +
+    '<div class="imp-row"><span>Headers</span><code>' + n.headers.length + '개</code></div>' +
+    '<div class="imp-row"><span>Body</span><code>' + bodyPrev + '</code></div>';
+}
+
+function applyImport() {
+  const text = document.getElementById('importRaw').value;
+  if (!text.trim()) { toast('내용을 붙여넣으세요', 'error'); return; }
+  let n;
+  try { n = parseRequestText(text); }
+  catch (e) { toast('파싱 실패: ' + e.message, 'error'); return; }
+  if (!n || !n.url) { toast('URL을 인식하지 못했습니다', 'error'); return; }
+  fillFromParsed(n);
+  closeImportModal();
+  toast('요청을 불러왔습니다 (' + _FMT_LABEL[n._format] + ')', 'success');
+}
+
+
 /* ── Sidebar ── */
 async function loadSidebar() {
   state.payloads = await API.payloads();
@@ -1221,7 +1453,9 @@ function switchModalTab(tab) {
     t.classList.toggle('active', t.dataset.mtab === tab)
   );
   document.querySelectorAll('.modal-tab-content').forEach(c => {
-    c.style.display = c.id === `mtab-${tab}` ? 'block' : 'none';
+    const on = c.id === `mtab-${tab}`;
+    c.classList.toggle('active', on);
+    c.style.display = on ? 'flex' : 'none';
   });
 }
 
@@ -2392,3 +2626,88 @@ document.addEventListener('DOMContentLoaded', () => {
   initRowResizer();
   initPaneResizer();
 });
+
+/* ==================================================================
+   스마트 붙여넣기 - 어디서든 Ctrl+V 로 요청 자동 인식 (지속 UI 없음)
+   ================================================================== */
+
+// 붙여넣은 텍스트가 요청(curl/wget/raw HTTP)처럼 보이는지 확신 있는 경우만 true
+function looksLikeRequest(text) {
+  const t = (text || '').trim();
+  if (t.length < 8) return false;
+  const first = t.split(/\s+/)[0].toLowerCase().replace(/^\$/, '');
+  if (first === 'curl' || first === 'wget') return true;
+  const firstLine = t.split('\n')[0].trim();
+  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP\/\d/i.test(firstLine)) return true;
+  return false;
+}
+
+// 현재 요청 폼 스냅샷 (실행취소용)
+function captureRequestForm() {
+  return {
+    method: document.getElementById('methodSelect').value,
+    url: document.getElementById('urlInput').value,
+    body: document.getElementById('bodyEditor').value,
+    rawHeaders: document.getElementById('headersRawEditor').value,
+    headerMode: headerMode,
+    kvParams: state.kvParams.map(r => ({ key: r.key, value: r.value })),
+    kvHeaders: state.kvHeaders.map(r => ({ key: r.key, value: r.value })),
+  };
+}
+
+function restoreRequestForm(s) {
+  document.getElementById('methodSelect').value = s.method;
+  document.getElementById('urlInput').value = s.url;
+  document.getElementById('bodyEditor').value = s.body;
+  document.getElementById('headersRawEditor').value = s.rawHeaders;
+  state.kvParams = s.kvParams;
+  state.kvHeaders = s.kvHeaders;
+  renderKvEditor('paramsKv', state.kvParams);
+  renderKvEditor('headersKv', state.kvHeaders);
+  headerMode = s.headerMode;
+  const kv = s.headerMode === 'kv';
+  document.getElementById('headersKvWrap').style.display = kv ? 'block' : 'none';
+  document.getElementById('headersRawWrap').style.display = kv ? 'none' : 'block';
+  document.getElementById('hdrModeKv').classList.toggle('active', kv);
+  document.getElementById('hdrModeRaw').classList.toggle('active', !kv);
+}
+
+// 실행취소 버튼이 달린 토스트
+function toastUndo(msg, onUndo) {
+  const el = document.createElement('div');
+  el.className = 'toast info';
+  const span = document.createElement('span');
+  span.textContent = msg;
+  const btn = document.createElement('button');
+  btn.className = 'toast-undo';
+  btn.textContent = '실행취소';
+  btn.onclick = () => { onUndo(); el.remove(); toast('되돌렸습니다', 'info'); };
+  el.appendChild(span);
+  el.appendChild(btn);
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+function onGlobalPaste(e) {
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  if (!looksLikeRequest(text)) return;   // 요청 형태가 아니면 평소대로 붙여넣기
+
+  const ae = document.activeElement;
+  const isUrlBar = ae && ae.id === 'urlInput';
+  const editing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable);
+  // URL 바에 붙여넣은 요청은 import 의도로 간주. 그 외 편집 필드(Body/헤더/모달 textarea 등)는 평소대로.
+  if (editing && !isUrlBar) return;
+
+  let n;
+  try { n = parseRequestText(text); } catch (err) { return; }
+  if (!n || !n.url) return;
+
+  e.preventDefault();
+  const snapshot = captureRequestForm();
+  fillFromParsed(n);
+  if (state.activeView !== 'request') switchView('request');
+  toastUndo('요청 불러옴 (' + _FMT_LABEL[n._format] + ')', () => restoreRequestForm(snapshot));
+}
+
+document.addEventListener('paste', onGlobalPaste);
+
