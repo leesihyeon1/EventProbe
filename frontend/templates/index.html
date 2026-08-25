@@ -36,6 +36,7 @@
     <!-- 사이드바 탭 전환 -->
     <div class="sidebar-tab-bar">
       <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">⚔️ 페이로드</div>
+      <div class="sidebar-tab" data-stab="aitest" onclick="switchSidebarTab('aitest')">🤖 AI 테스트</div>
       <div class="sidebar-tab" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</div>
       <button class="sidebar-edit-btn" onclick="event.stopPropagation();openCustomModal()" title="커스텀 페이로드 편집">✏️</button>
     </div>
@@ -50,6 +51,26 @@
           <div class="spinner"></div>
           <div class="msg">로드 중...</div>
         </div>
+      </div>
+    </div>
+
+    <!-- AI 테스트 패널 -->
+    <div class="sidebar-panel" id="sidebarAitest">
+      <div style="padding:10px;display:flex;flex-direction:column;gap:8px;height:100%">
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.5">
+          현재 요청을 AI가 인식해 관련 페이로드 후보를 만듭니다.
+          <b>호스트·인증·쿠키는 제외</b>하고 요청 정보만 전송합니다.
+        </div>
+        <button class="btn btn-primary" style="font-size:12px;padding:6px" onclick="generateAiCandidates()">🤖 AI 후보 생성</button>
+        <div id="aiSuggestMeta" style="font-size:11px;color:var(--accent)"></div>
+        <div class="sidebar-scroll" id="aiCandidateList" style="flex:1;min-height:0">
+          <div class="empty-state" style="padding:20px">
+            <div class="icon">🤖</div>
+            <div class="msg">현재 요청으로 후보를 생성하세요</div>
+          </div>
+        </div>
+        <button id="goTestBtn" class="btn btn-primary" style="font-size:12px;padding:7px;display:none"
+                onclick="goTest()">▶ GO TEST (선택 후보 실행)</button>
       </div>
     </div>
 
@@ -90,6 +111,7 @@
         <span>기본헤더</span>
       </label>
       <button class="btn btn-secondary" onclick="openHeaderProfileModal()" title="기본 헤더 프로파일 편집" style="white-space:nowrap">⚙️</button>
+      <button id="aiSuggestBtn" class="btn btn-secondary" onclick="generateAiCandidates()" title="현재 요청을 AI가 인식해 페이로드 후보 생성 (호스트·인증 제외)" style="white-space:nowrap;display:none">🤖 AI 후보</button>
       <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
     </div>
 

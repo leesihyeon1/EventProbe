@@ -9,7 +9,8 @@ from typing import Optional
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary
-from core.ai_analyzer import ai_analyze, ai_generate_variants, is_enabled as ai_enabled, response_analysis_enabled
+from urllib.parse import urlsplit
+from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, is_enabled as ai_enabled, response_analysis_enabled
 
 router = APIRouter(prefix="/api")
 
@@ -222,6 +223,28 @@ async def ai_payloads(req: AiVariantRequest):
         raise HTTPException(status_code=400, detail="AI 미설정 (.env 의 NVIDIA_API_KEY 없음)")
     count = max(1, min(req.count, 20))
     return await ai_generate_variants(req.base_payload, req.category, req.waf, count)
+
+
+class AiSuggestRequest(BaseModel):
+    method: str = "GET"
+    url: str = ""
+    params: dict = {}
+    body: Optional[str] = None
+    header_names: list[str] = []
+    count: int = 8
+
+@router.post("/ai-suggest")
+async def ai_suggest(req: AiSuggestRequest):
+    if not ai_enabled():
+        raise HTTPException(status_code=400, detail="AI 미설정 (.env 의 NVIDIA_API_KEY 없음)")
+    # 유출 방지: URL 에서 host 제거하고 path(+query) 만 AI 로 전달
+    parts = urlsplit(req.url or "")
+    path = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
+    # 민감 헤더 이름은 제외
+    safe_header_names = [h for h in (req.header_names or [])
+                         if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
+    count = max(1, min(req.count, 15))
+    return await ai_suggest_payloads(req.method, path, req.params, req.body or "", safe_header_names, count)
 
 
 # ── 다중 페이로드 일괄 테스트 ───────────────────────────────

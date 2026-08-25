@@ -165,3 +165,78 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
         return {"error": "AI 변형 응답 파싱 실패"}
     except Exception as e:
         return {"error": f"AI 변형 오류: {e}"}
+
+
+_SUGGEST_SYSTEM = (
+    "You are a web application pentest planner for AUTHORIZED testing. "
+    "Given a single HTTP request (the Host is intentionally removed for privacy), "
+    "infer what functionality/endpoint is being exercised and which parameters look injectable, "
+    "then propose concrete test payloads across the MOST RELEVANT vulnerability categories "
+    "(e.g. sqli, xss, lfi, ssrf, cmdi, ssti, redirect, idor, nosql). "
+    "Prefer parameters that already exist in the request. "
+    "Respond ONLY with a JSON object, no prose: "
+    '{"test_type":"short label","summary":"1-2 sentences (Korean)",'
+    '"candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|other",'
+    '"param":"target param or header name","location":"param|body|header",'
+    '"payload":"the payload string","why":"why relevant (Korean, short)"}]}'
+)
+
+
+async def ai_suggest_payloads(method: str, path: str, params: dict,
+                              body: str = "", header_names=None, count: int = 8) -> dict:
+    """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음."""
+    key = _api_key()
+    if not key:
+        return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
+    model, base_url = _model(), _base_url()
+    user = (
+        f"method: {method}\n"
+        f"path (host removed): {path}\n"
+        f"query params: {json.dumps(params or {}, ensure_ascii=False)[:800]}\n"
+        f"body: {(body or '(none)')[:800]}\n"
+        f"header names: {json.dumps(header_names or [], ensure_ascii=False)[:400]}\n"
+        f"Propose up to {count} payload candidates."
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _SUGGEST_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.4,
+        "max_tokens": 1200,
+    }
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=40) as client:
+            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+        if r.status_code != 200:
+            return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
+        content = r.json()["choices"][0]["message"]["content"]
+        parsed = _extract_json(content)
+        cands = parsed.get("candidates") or []
+        # 방어적 정규화
+        norm = []
+        for c in cands:
+            if not isinstance(c, dict) or not c.get("payload"):
+                continue
+            loc = str(c.get("location", "param")).lower()
+            if loc not in ("param", "body", "header"):
+                loc = "param"
+            norm.append({
+                "category": str(c.get("category", "other")),
+                "param": str(c.get("param", "")),
+                "location": loc,
+                "payload": str(c.get("payload")),
+                "why": str(c.get("why", "")),
+            })
+        return {
+            "test_type": str(parsed.get("test_type", "")),
+            "summary": str(parsed.get("summary", "")),
+            "candidates": norm[:count],
+            "model": model,
+        }
+    except json.JSONDecodeError:
+        return {"error": "AI 후보 응답 파싱 실패"}
+    except Exception as e:
+        return {"error": f"AI 후보 오류: {e}"}

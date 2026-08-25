@@ -36,6 +36,7 @@ const state = {
   activeResTab: 'body',
   aiEnabled: false,       // 서버에 AI(NVIDIA/로컬 NIM) 설정됨 여부
   aiVariants: [],         // AI가 생성한 우회 변형 페이로드
+  aiCandidates: [],       // AI 테스트 후보 페이로드
 };
 
 /* ── Utils ── */
@@ -615,6 +616,123 @@ async function generateBypassVariants() {
     toast(`우회 변형 ${variants.length}개 생성됨 — 좌측 "🤖 AI 우회 변형"에서 선택`, 'success');
   } catch (e) {
     toast('AI 변형 오류: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AI 테스트 — 현재 요청을 AI가 인식해 페이로드 후보 생성 → GO TEST
+   ══════════════════════════════════════════════════════════════════ */
+
+// 현재 메인 폼의 요청 스냅샷
+function _currentRequestForm() {
+  return {
+    method: document.getElementById('methodSelect').value,
+    url: document.getElementById('urlInput').value.trim(),
+    params: kvToObj(state.kvParams),
+    body: document.getElementById('bodyEditor').value.trim() || null,
+    headerNames: (state.kvHeaders || []).map(r => r.key).filter(Boolean),
+  };
+}
+
+async function generateAiCandidates() {
+  if (!state.aiEnabled) { toast('AI 미설정 — .env 에 NVIDIA_API_KEY 를 넣으세요', 'error'); return; }
+  const req = _currentRequestForm();
+  if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
+
+  switchSidebarTab('aitest');
+  const listEl = document.getElementById('aiCandidateList');
+  const metaEl = document.getElementById('aiSuggestMeta');
+  metaEl.textContent = '';
+  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">AI 후보 생성 중…</div></div>';
+
+  try {
+    const res = await API.aiSuggest({
+      method: req.method, url: req.url, params: req.params,
+      body: req.body, header_names: req.headerNames, count: 10,
+    });
+    if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
+    state.aiCandidates = res.candidates || [];
+    renderAiCandidates(res);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'💻', ssti:'🔧', redirect:'↪️', idor:'🏢', nosql:'🍃', other:'🔎' };
+
+function renderAiCandidates(res) {
+  const listEl = document.getElementById('aiCandidateList');
+  const metaEl = document.getElementById('aiSuggestMeta');
+  const cands = res.candidates || [];
+  metaEl.innerHTML = `🧠 <b>${escapeHtml(res.test_type || '분석 완료')}</b> — ${escapeHtml(res.summary || '')} <span style="color:var(--text-muted)">(${escapeHtml(res.model||'')})</span>`;
+  if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
+
+  listEl.innerHTML = cands.map((c, i) => `
+    <div class="payload-item" style="align-items:flex-start;gap:6px" title="${escapeHtml(c.why || '')}">
+      <input type="checkbox" class="ai-cand-chk" data-idx="${i}" checked style="margin-top:3px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--accent)">${_CAT_ICON[c.category]||'🔎'} ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
+        <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
+        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)}</div>` : ''}
+        <div class="ai-cand-result" data-idx="${i}" style="font-size:11px;margin-top:3px"></div>
+      </div>
+    </div>`).join('');
+  document.getElementById('goTestBtn').style.display = '';
+}
+
+// 후보 하나를 현재 요청에 적용한 요청 payload 생성
+function _applyCandidate(base, c) {
+  let url = base.url;
+  const params = { ...base.params };
+  const headers = getHeadersObj();
+  let body = base.body;
+  if (c.location === 'header') {
+    headers[c.param || 'X-Test-Payload'] = c.payload;
+  } else if (c.location === 'body') {
+    try { const bd = body ? JSON.parse(body) : {}; bd[c.param || 'q'] = c.payload; body = JSON.stringify(bd); }
+    catch { body = c.payload; }
+  } else { // param
+    const k = c.param || 'q';
+    // URL 쿼리에 이미 있으면 그 자리 교체, 아니면 params 로
+    const re = new RegExp('([?&]' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=)[^&#]*');
+    if (re.test(url)) url = url.replace(re, '$1' + encodeURIComponent(c.payload));
+    else params[k] = c.payload;
+  }
+  return {
+    method: base.method, url, headers, params, body,
+    payload: c.payload, category: c.category,
+    default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
+  };
+}
+
+async function goTest() {
+  const checks = [...document.querySelectorAll('.ai-cand-chk')].filter(c => c.checked);
+  if (!checks.length) { toast('실행할 후보를 선택하세요', 'error'); return; }
+  const base = _currentRequestForm();
+  if (!base.url) { toast('요청 URL이 없습니다', 'error'); return; }
+
+  const btn = document.getElementById('goTestBtn');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = '실행 중…';
+  const V = { blocked:['차단','tag-green'], passed:['통과','tag-yellow'], bypass:['우회!','tag-red'], error:['에러','tag-blue'], timeout:['타임아웃','tag-blue'] };
+
+  try {
+    for (const chk of checks) {
+      const idx = +chk.dataset.idx;
+      const cand = state.aiCandidates[idx];
+      const cell = document.querySelector(`.ai-cand-result[data-idx="${idx}"]`);
+      cell.innerHTML = '<span class="spinner" style="width:10px;height:10px"></span> 전송…';
+      try {
+        const r = await API.request(_applyCandidate(base, cand));
+        const v = r.analysis?.verdict || 'error';
+        const [label, cls] = V[v] || [v, 'tag-blue'];
+        cell.innerHTML = `<span class="tag ${cls}">${label}</span> <span style="color:var(--text-muted)">HTTP ${r.status_code} · ${Math.round(r.response_time)}ms · risk ${escapeHtml(r.analysis?.risk_level||'-')}</span>`;
+      } catch (e) {
+        cell.innerHTML = `<span class="tag tag-blue">실패</span> ${escapeHtml(e.message)}`;
+      }
+    }
+    toast('GO TEST 완료', 'success');
   } finally {
     btn.disabled = false; btn.textContent = orig;
   }
@@ -2616,11 +2734,12 @@ function deleteCustomPayload(payloadId) {
 }
 
 function switchSidebarTab(tab) {
+  const panelId = { payloads: 'sidebarPayloads', aitest: 'sidebarAitest', history: 'sidebarHistory' }[tab] || 'sidebarPayloads';
   document.querySelectorAll('.sidebar-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.stab === tab)
   );
   document.querySelectorAll('.sidebar-panel').forEach(p =>
-    p.classList.toggle('active', p.id === (tab === 'payloads' ? 'sidebarPayloads' : 'sidebarHistory'))
+    p.classList.toggle('active', p.id === panelId)
   );
   if (tab === 'history') renderHistoryList();
 }
@@ -2756,8 +2875,12 @@ document.addEventListener('DOMContentLoaded', () => {
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
 
-  // 서버 AI 설정 여부 확인 (우회변형 버튼 노출 판단)
-  API.aiStatus().then(s => { state.aiEnabled = !!s.enabled; });
+  // 서버 AI 설정 여부 확인 (AI 버튼 노출 판단)
+  API.aiStatus().then(s => {
+    state.aiEnabled = !!s.enabled;
+    const b = document.getElementById('aiSuggestBtn');
+    if (b) b.style.display = state.aiEnabled ? '' : 'none';
+  });
 
   // Enter key on URL
   document.getElementById('urlInput').addEventListener('keydown', e => {
