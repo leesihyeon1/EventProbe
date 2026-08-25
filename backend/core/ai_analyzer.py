@@ -197,14 +197,44 @@ _SUGGEST_SYSTEM = (
 
 
 def _salvage_candidates(text: str) -> list:
-    """잘린 JSON 에서 'payload' 를 포함한 완성된 후보 객체만 개별 파싱해 건져낸다."""
+    """잘리거나 깨진 JSON 에서 완성된 후보 객체만 건져낸다.
+    문자열/이스케이프/중괄호 깊이를 추적하므로 payload 안의 {{7*7}}/${..} 같은
+    중괄호나 응답 truncation 에도 안전하다."""
+    start_at = text.find('"candidates"')
+    if start_at == -1:
+        start_at = 0
     out = []
-    # 중첩 없는 평면 객체 {...} 중 "payload" 를 포함하는 것만
-    for m in re.finditer(r'\{[^{}]*?"payload"[^{}]*?\}', text, re.DOTALL):
-        try:
-            out.append(json.loads(m.group(0)))
-        except json.JSONDecodeError:
+    depth = 0
+    obj_start = None
+    in_str = False
+    esc = False
+    for j in range(start_at, len(text)):
+        ch = text[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
             continue
+        if ch == '"':
+            in_str = True
+        elif ch == '{':
+            if depth == 0:
+                obj_start = j
+            depth += 1
+        elif ch == '}':
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and obj_start is not None:
+                    seg = text[obj_start:j + 1]
+                    if '"payload"' in seg:
+                        try:
+                            out.append(json.loads(seg))
+                        except json.JSONDecodeError:
+                            pass
+                    obj_start = None
     return out
 
 
