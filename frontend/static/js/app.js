@@ -1328,7 +1328,7 @@ function renderAiCard(ai) {
   if (ai.error) {
     return `
     <div class="analysis-card" data-card-id="ai">
-      <div class="analysis-card-header">🤖 AI 상세 분석</div>
+      <div class="analysis-card-header">AI 상세 분석</div>
       <div class="analysis-card-body">
         <div class="detail-item" style="color:var(--danger)">${escapeHtml(ai.error)}</div>
       </div>
@@ -1341,7 +1341,7 @@ function renderAiCard(ai) {
   const ev = Array.isArray(ai.evidence) ? ai.evidence : (ai.evidence ? [ai.evidence] : []);
   return `
     <div class="analysis-card" data-card-id="ai">
-      <div class="analysis-card-header">🤖 AI 상세 분석 <span style="font-size:10px;color:var(--text-muted);font-weight:400">${escapeHtml(ai.model || 'NVIDIA NIM')}</span></div>
+      <div class="analysis-card-header">AI 상세 분석 <span style="font-size:10px;color:var(--text-muted);font-weight:400">${escapeHtml(ai.model || 'NVIDIA NIM')}</span></div>
       <div class="analysis-card-body">
         <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
           <span class="tag ${succ}">${escapeHtml(succLabel)}</span>
@@ -1391,7 +1391,7 @@ function renderAttackCard(a) {
 
   return `
     <div class="analysis-card" data-card-id="attack" style="border-color:${border}">
-      <div class="analysis-card-header">🎯 공격 결과 분석
+      <div class="analysis-card-header">공격 결과 분석
         <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
           <span class="tag ${cls}">${label}</span>
           ${a.attack_confidence != null ? `<span style="font-size:10px;color:var(--text-muted)">${a.attack_confidence}</span>` : ''}
@@ -1414,7 +1414,7 @@ function renderVerdictCard(a, confidenceColor) {
     return `
       <div class="analysis-card" data-card-id="verdict" style="border-color:rgba(188,140,255,.35)">
         <div class="analysis-card-header">판정 결과
-          <span style="margin-left:auto;font-size:9px;color:var(--purple);font-weight:400">🤖 AI · ${escapeHtml(ai.model || '')}</span>
+          <span style="margin-left:auto;font-size:9px;color:var(--purple);font-weight:400">AI · ${escapeHtml(ai.model || '')}</span>
         </div>
         <div class="analysis-card-body">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
@@ -1502,7 +1502,7 @@ function renderAnalysis(a, result) {
     <!-- 에러 누출 -->
     ${a.error_leaks?.length ? `
     <div class="analysis-card" style="border-color:rgba(248,81,73,.4)">
-      <div class="analysis-card-header" style="color:var(--danger)">⚠️ 에러 정보 누출</div>
+      <div class="analysis-card-header" style="color:var(--danger)">에러 정보 누출</div>
       <div class="analysis-card-body">
         <div class="tag-list">
           ${a.error_leaks.map(l => `<span class="tag tag-red">${escapeHtml(l)}</span>`).join('')}
@@ -1513,7 +1513,7 @@ function renderAnalysis(a, result) {
     <!-- 민감 정보 -->
     ${a.sensitive_data?.length ? `
     <div class="analysis-card" style="border-color:rgba(255,107,107,.5)">
-      <div class="analysis-card-header" style="color:var(--critical)">🔴 민감 정보 노출</div>
+      <div class="analysis-card-header" style="color:var(--critical)">민감 정보 노출</div>
       <div class="analysis-card-body">
         <div class="tag-list">
           ${a.sensitive_data.map(s => `<span class="tag tag-red">${escapeHtml(s)}</span>`).join('')}
@@ -1527,7 +1527,7 @@ function renderAnalysis(a, result) {
       <div class="analysis-card-header">이상 징후</div>
       <div class="analysis-card-body">
         <div class="detail-list">
-          ${a.response_anomalies.map(x => `<div class="detail-item">⚡ ${escapeHtml(x)}</div>`).join('')}
+          ${a.response_anomalies.map(x => `<div class="detail-item">${escapeHtml(x)}</div>`).join('')}
         </div>
       </div>
     </div>` : ''}
@@ -1864,7 +1864,7 @@ function renderAlerts(alerts) {
 
   section.innerHTML = `
     <div class="analysis-card-header" style="color:var(--accent)">
-      🔔 보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건${customCount ? ` · 커스텀 ${customCount}` : ''})</span>
+      보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건${customCount ? ` · 커스텀 ${customCount}` : ''})</span>
       <button onclick="event.stopPropagation();openAlertRuleModal()"
         style="margin-left:auto;background:transparent;border:1px solid rgba(88,166,255,.4);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:2px 7px;margin-right:6px">
         + 커스텀 룰
@@ -1879,7 +1879,7 @@ function renderAlerts(alerts) {
       <!-- Informational 더보기 버튼 -->
       <div id="alertInfoMore" style="display:none;text-align:center;padding:6px 0">
         <button class="alert-more-btn" onclick="toggleInfoAlerts()">
-          🔵 정보성 ${counts.informational}건 더보기 ▼
+          정보성 ${counts.informational}건 더보기 ▼
         </button>
       </div>
     </div>`;
@@ -1919,7 +1919,7 @@ function renderAlertList(section, alerts, filter) {
   if (filter === 'all' && counts.informational > 0 && !section._showInfo) {
     moreBtn.style.display = 'block';
     moreBtn.querySelector('.alert-more-btn').textContent =
-      `🔵 정보성 ${counts.informational}건 더보기 ▼`;
+      `정보성 ${counts.informational}건 더보기 ▼`;
   } else {
     moreBtn.style.display = 'none';
   }
