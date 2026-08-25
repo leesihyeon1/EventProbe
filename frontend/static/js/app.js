@@ -462,7 +462,7 @@ async function loadSidebar() {
     if (!cats.length) return;
     const plCount = cats.reduce((n, c) => n + c.payloads.length, 0);
     const section = document.createElement('div');
-    section.className = 'sidebar-group open';
+    section.className = 'sidebar-group';   // 기본 접힘 (클릭해서 펼침)
     section.dataset.group = g.id;
     section.innerHTML = `
       <div class="sidebar-group-header" onclick="toggleSidebarGroup(this)">
@@ -497,10 +497,11 @@ function filterSidebar(query) {
     group.style.display = (!q || hasVisible) ? '' : 'none';
     group.classList.toggle('open', !!q && hasVisible);   // 검색 중이면 해당 카테고리 펼침
   });
-  // 상위 그룹: 보이는 카테고리가 없으면 그룹째 숨김
+  // 상위 그룹: 보이는 카테고리가 없으면 그룹째 숨김. 검색 중이면 매칭 그룹을 펼침(끝나면 다시 접힘)
   document.querySelectorAll('.sidebar-group').forEach(sec => {
     const anyCat = [...sec.querySelectorAll('.category-group')].some(cg => cg.style.display !== 'none');
     sec.style.display = anyCat ? '' : 'none';
+    sec.classList.toggle('open', !!q && anyCat);
   });
 }
 
