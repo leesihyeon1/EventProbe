@@ -1,6 +1,7 @@
 """
 응답 분석 엔진 - WAF/IDS 차단 여부, 취약점 탐지, ZAP 스타일 Alert 생성
 """
+import ast
 import re
 from typing import Optional
 
@@ -1372,6 +1373,155 @@ ALERT_RULES = [
 ]
 
 
+# ════════════════════════════════════════════════════════════════════════════════
+# ALERT 증거 추출 — 각 룰의 check 람다에서 정규식/문자열/헤더 키를 정적 분석으로 뽑아,
+# 매칭 시 "응답에서 실제로 탐지된 문자열"을 evidence 로 함께 반환한다(사용자가 검색·검증용).
+# 룰 196개를 수정하지 않고, 이 파일 소스를 AST 로 한 번만 파싱해 인덱스를 만든다.
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _eval_re_flags(node) -> int:
+    try:
+        return int(eval(compile(ast.Expression(node), "<flags>", "eval"), {"re": re}))
+    except Exception:
+        return 0
+
+
+def _build_evidence_index() -> dict:
+    """자기 자신(analyzer.py) 소스를 AST 로 파싱해 rule id → 증거 추출 스펙 맵을 만든다."""
+    index = {}
+    try:
+        with open(__file__, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+    except Exception:
+        return index
+
+    # ALERT_RULES 대입문의 값(리스트)만 대상으로 한다
+    rules_node = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "ALERT_RULES":
+                    rules_node = node.value
+    if rules_node is None:
+        return index
+
+    def _lit(n):
+        return n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else None
+
+    for elt in getattr(rules_node, "elts", []):
+        if not isinstance(elt, ast.Dict):
+            continue
+        rid = None
+        check = None
+        for k, v in zip(elt.keys, elt.values):
+            key = _lit(k)
+            if key == "id":
+                rid = _lit(v)
+            elif key == "check":
+                check = v
+        if not rid or not isinstance(check, ast.Lambda):
+            continue
+
+        spec = {"regex": [], "lit_b": [], "lit_bl": [], "hdr": []}
+        for sub in ast.walk(check):
+            # re.search / re.match / re.findall(pattern, target[, flags])
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
+                    and isinstance(sub.func.value, ast.Name) and sub.func.value.id == "re" \
+                    and sub.func.attr in ("search", "match", "findall") and len(sub.args) >= 2:
+                pat = _lit(sub.args[0])
+                if pat is None:
+                    continue
+                tgt = sub.args[1]
+                tgt_name = None
+                if isinstance(tgt, ast.Name):
+                    tgt_name = tgt.id
+                elif isinstance(tgt, ast.BoolOp) and tgt.values and isinstance(tgt.values[0], ast.Name):
+                    tgt_name = tgt.values[0].id  # `b or ""`
+                is_bl = tgt_name in ("bl", "body_lower")
+                flags = _eval_re_flags(sub.args[2]) if len(sub.args) >= 3 else 0
+                spec["regex"].append((pat, flags, is_bl))
+            # `"literal" in bl` / `in b` / `in h` / `in h.get("key",...)`
+            elif isinstance(sub, ast.Compare) and len(sub.ops) == 1 and isinstance(sub.ops[0], ast.In):
+                left = _lit(sub.left)
+                right = sub.comparators[0]
+                if left is None:
+                    continue
+                if isinstance(right, ast.Name) and right.id in ("bl", "body_lower"):
+                    spec["lit_bl"].append(left)
+                elif isinstance(right, ast.Name) and right.id in ("b", "body"):
+                    spec["lit_b"].append(left)
+                elif isinstance(right, ast.Name) and right.id == "h":
+                    spec["hdr"].append(left)  # `"x-powered-by" in h`
+                elif isinstance(right, ast.Call) and isinstance(right.func, ast.Attribute) \
+                        and right.func.attr == "get" and isinstance(right.func.value, ast.Name) \
+                        and right.func.value.id == "h" and right.args:
+                    key = _lit(right.args[0])
+                    if key:
+                        spec["hdr"].append(key)  # `"unsafe-inline" in h.get("csp","")`
+            # `h.get("key", ...)` 단독 사용(== "*", startswith 등)
+            elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
+                    and sub.func.attr == "get" and isinstance(sub.func.value, ast.Name) \
+                    and sub.func.value.id == "h" and sub.args:
+                key = _lit(sub.args[0])
+                if key:
+                    spec["hdr"].append(key)
+
+        # 중복 제거(순서 유지)
+        for kk in ("lit_b", "lit_bl", "hdr"):
+            spec[kk] = list(dict.fromkeys(spec[kk]))
+        index[rid] = spec
+    return index
+
+
+_EVIDENCE_INDEX = _build_evidence_index()
+
+
+def _clip_evidence(text: str, limit: int = 180) -> str:
+    """증거 스니펫을 검색 가능한 형태로 정리(제어문자 정돈·길이 제한)."""
+    if not text:
+        return ""
+    text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ").strip()
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    return text
+
+
+def _extract_alert_evidence(rule_id: str, headers_lower: dict, body: str, body_lower: str) -> str:
+    """매칭된 룰에 대해 응답에서 실제 탐지된 증거 문자열을 뽑는다(없으면 "")."""
+    spec = _EVIDENCE_INDEX.get(rule_id)
+    if not spec:
+        return ""
+    body = body or ""
+    body_lower = body_lower or ""
+
+    # 1) 정규식 매칭(원본 body 로 실제 대소문자 보존; bl 대상이었으면 대소문자 무시)
+    for pat, flags, is_bl in spec["regex"]:
+        try:
+            m = re.search(pat, body, flags | (re.I if is_bl else 0))
+        except Exception:
+            m = None
+        if m:
+            return _clip_evidence(m.group(0))
+
+    # 2) body 리터럴(대소문자 유지 원본 슬라이스)
+    for lit in spec["lit_b"]:
+        idx = body.find(lit)
+        if idx >= 0:
+            return _clip_evidence(body[idx:idx + len(lit)])
+    for lit in spec["lit_bl"]:
+        idx = body_lower.find(lit)
+        if idx >= 0:
+            return _clip_evidence(body[idx:idx + len(lit)])
+
+    # 3) 헤더 값(존재하는 헤더만; 누락 기반 룰은 여기서 자연히 빈 값)
+    for key in spec["hdr"]:
+        val = headers_lower.get(key)
+        if val:
+            return _clip_evidence(f"{key}: {val}")
+
+    return ""
+
+
 def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code: int) -> list:
     """ALERT 룰셋 전체 실행 후 발견된 Alert 목록 반환"""
     alerts = []
@@ -1391,6 +1541,7 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
                     "description": desc,
                     "solution":    rule["solution"],
                     "reference":   rule["reference"],
+                    "evidence":    _extract_alert_evidence(rule["id"], headers_lower, body, body_lower),
                 })
         except Exception:
             pass
@@ -1639,20 +1790,24 @@ def analyze_response(
             result["verdict"] = "blocked"
             result["confidence"] = min(result["confidence"] + 15, 95)
 
-    # 4. 에러 누출 탐지
+    # 4. 에러 누출 탐지 (실제 탐지된 증거 문자열을 함께 표기 → 응답에서 검색·검증 가능)
     for pattern, desc in ERROR_LEAK_PATTERNS:
-        if re.search(pattern, body, re.IGNORECASE):
-            result["error_leaks"].append(desc)
-            result["details"].append(f"⚠️ 에러 정보 누출: {desc}")
+        m = re.search(pattern, body, re.IGNORECASE)
+        if m:
+            ev = _clip_evidence(m.group(0), 120)
+            result["error_leaks"].append(f"{desc}: {ev}" if ev else desc)
+            result["details"].append(f"⚠️ 에러 정보 누출: {desc}" + (f" — {ev}" if ev else ""))
             if result["verdict"] == "passed":
                 result["verdict"] = "bypass"
             result["risk_level"] = "high"
 
-    # 5. 민감 정보 탐지
+    # 5. 민감 정보 탐지 (실제 탐지된 증거 문자열을 함께 표기)
     for pattern, desc in SENSITIVE_PATTERNS:
-        if re.search(pattern, body, re.IGNORECASE):
-            result["sensitive_data"].append(desc)
-            result["details"].append(f"🔴 민감 정보 노출: {desc}")
+        m = re.search(pattern, body, re.IGNORECASE)
+        if m:
+            ev = _clip_evidence(m.group(0), 120)
+            result["sensitive_data"].append(f"{desc}: {ev}" if ev else desc)
+            result["details"].append(f"🔴 민감 정보 노출: {desc}" + (f" — {ev}" if ev else ""))
             result["verdict"] = "bypass"
             result["risk_level"] = "critical"
 

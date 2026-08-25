@@ -1010,6 +1010,17 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border-radius:4px; padding:1px 5px; flex-shrink:0;
 }
 
+.alert-evidence-badge {
+  font-size:9px; font-weight:700; color:#e3b341;
+  background:rgba(227,179,65,.12); border:1px solid rgba(227,179,65,.4);
+  border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+
+.evidence-hint {
+  font-weight:400; text-transform:none; letter-spacing:0;
+  color:var(--text-muted); font-size:9px;
+}
+
 .baseline-indicator {
   font-size: 10px;
   color: var(--accent);

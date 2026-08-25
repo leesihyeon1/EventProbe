@@ -1939,12 +1939,18 @@ function buildAlertCard(alert, confidenceLabel) {
       <div class="alert-title">${escapeHtml(alert.name)}</div>
       <div class="alert-badges">
         ${alert._custom ? '<span class="custom-alert-badge">커스텀</span>' : ''}
+        ${alert.evidence ? '<span class="alert-evidence-badge" title="응답에서 실제 탐지된 증거 있음">증거</span>' : ''}
         <span class="alert-risk-badge badge-${alert.risk}">${riskKo(alert.risk)}</span>
         <span class="alert-confidence-badge">${(confidenceLabel || {})[alert.confidence] ?? alert.confidence}</span>
       </div>
       <span class="alert-chevron">▶</span>
     </div>
     <div class="alert-body">
+      ${alert.evidence ? `
+      <div class="alert-section">
+        <div class="alert-section-label">탐지된 증거 <span class="evidence-hint">(응답에서 검색해 확인)</span></div>
+        <div class="attack-evidence">${escapeHtml(alert.evidence)}</div>
+      </div>` : ''}
       <div class="alert-section">
         <div class="alert-section-label">설명</div>
         <div class="alert-section-text">${escapeHtml(alert.description)}</div>
