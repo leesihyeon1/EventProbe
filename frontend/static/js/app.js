@@ -41,6 +41,7 @@ const state = {
   aiEnabled: false,       // 서버에 AI(NVIDIA/로컬 NIM) 설정됨 여부
   aiVariants: [],         // AI가 생성한 우회 변형 페이로드
   aiCandidates: [],       // AI 테스트 후보 페이로드
+  aiBaseSnapshot: null,   // 후보 생성 시점의 원본 요청(클릭마다 이 기준으로 적용)
 };
 
 /* ── Utils ── */
@@ -658,6 +659,8 @@ async function generateAiCandidates() {
     });
     if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
     state.aiCandidates = res.candidates || [];
+    // 후보 클릭 시 매번 이 원본 요청 기준으로 적용하도록 스냅샷 저장(누적 방지)
+    state.aiBaseSnapshot = captureRequestForm();
     renderAiCandidates(res);
   } catch (e) {
     listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
@@ -686,10 +689,12 @@ function renderAiCandidates(res) {
   const gt = document.getElementById('goTestBtn'); if (gt) gt.style.display = 'none';
 }
 
-// 후보 클릭 → 현재 요청 폼에 payload 주입 (이후 사용자가 ▶ 전송)
+// 후보 클릭 → 원본 요청 스냅샷으로 되돌린 뒤 payload 주입 (클릭마다 누적 방지)
 function applyAiCandidate(idx) {
   const c = state.aiCandidates[idx];
   if (!c) return;
+  // 매번 원본 기준(깊은 복사로 복원 — 스냅샷이 이후 주입으로 오염되지 않게)
+  if (state.aiBaseSnapshot) restoreRequestForm(JSON.parse(JSON.stringify(state.aiBaseSnapshot)));
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   if (c.location === 'path') {
