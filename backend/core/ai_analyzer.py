@@ -21,6 +21,9 @@ import httpx
 def _api_key():  return os.getenv("NVIDIA_API_KEY", "").strip()
 def _model():    return os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct").strip()
 def _base_url(): return os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+def _timeout():
+    try: return max(10.0, float(os.getenv("AI_TIMEOUT", "120")))
+    except ValueError: return 120.0
 
 _BODY_LIMIT = 4000   # LLM 에 보낼 응답 본문 최대 길이(토큰/비용 관리)
 
@@ -103,7 +106,7 @@ async def ai_analyze(ctx: dict) -> dict | None:
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
             r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}", "model": model}
@@ -146,11 +149,11 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
             {"role": "user", "content": user},
         ],
         "temperature": 0.7,
-        "max_tokens": 700,
+        "max_tokens": 1000,
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
             r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
@@ -168,33 +171,41 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
 
 
 _SUGGEST_SYSTEM = (
-    "You are a web application pentest planner for AUTHORIZED testing. "
-    "Given a single HTTP request (Host removed for privacy), infer the endpoint and propose "
-    "HIGH-SIGNAL, endpoint-appropriate tests. Follow these rules strictly:\n"
-    "1) RECOGNIZE well-known endpoints from the path and prioritize endpoint-specific tests, e.g.: "
-    "/manager/html or /manager/* = Apache Tomcat Manager (default creds, auth-bypass path tricks like "
-    "/manager/html/..;/, known CVEs) ; /wp-admin,/wp-login.php,/xmlrpc.php = WordPress ; "
-    "/.env,/.git/config = secret exposure ; /actuator/* = Spring Boot Actuator ; /phpmyadmin,/solr,/jenkins,/console. "
-    "Name the detected app/tech in test_type.\n"
-    "2) INJECTION-SURFACE PRIORITY: (a) existing query params, (b) the URL PATH itself "
-    "(path traversal / segment tricks), (c) request body fields. Use these before anything else.\n"
-    "3) DO NOT spray payloads into generic headers. NEVER put XSS/SSRF/SSTI/SQLi into User-Agent, "
-    "Accept, Content-Type, Accept-Language etc. — they are not reflected/executed. "
-    "Only use a header when the technique specifically targets it: Host / X-Forwarded-For / "
-    "X-Forwarded-Host / X-Original-URL / Referer for host-header injection, cache poisoning, "
-    "SSRF-via-header, or access-control bypass.\n"
-    "4) If there are NO injectable query params, focus on PATH-based tests and endpoint-specific "
-    "checks — do not fall back to header spam.\n"
-    "5) Each candidate must test something DISTINCT (no near-duplicates). Max 8. "
-    "Only include categories that genuinely fit this endpoint.\n"
-    "location must be one of: param | path | body | header. "
-    "For location=path, 'payload' is appended to the URL path (e.g. traversal like /..;/ or ../.. ). "
-    "Respond ONLY with a JSON object, no prose: "
-    '{"test_type":"detected app / endpoint","summary":"1-2 sentences (Korean)",'
+    "You are a web app pentest planner (authorized testing). Given one HTTP request (Host removed), "
+    "propose payload candidates as JSON. HARD RULES:\n"
+    "- location MUST be 'param' (existing query param), 'path' (append to URL path), or 'body'. "
+    "Use 'header' ONLY for Host / X-Forwarded-For / X-Forwarded-Host / X-Original-URL / Referer.\n"
+    "- NEVER use User-Agent, Content-Type, Accept, or Accept-* as an injection target. Do not put "
+    "payloads in them. If you have no query param, use 'path'.\n"
+    "- Identify the app from the path and pick fitting tests. Examples: "
+    "/manager* = Tomcat Manager -> path auth-bypass '/manager/html/..;/', read '/..;/WEB-INF/web.xml'. "
+    "/autodiscover* = MS Exchange -> path traversal, SSRF via path, CVE-2021-26855(ProxyLogon)-style path. "
+    "/.env /.git = secret file read. /actuator* = Spring Boot (/actuator/env, /actuator/heapdump). "
+    "/wp-* = WordPress. If a query param exists, test it for sqli/xss/lfi/etc.\n"
+    "- 6-8 DISTINCT candidates, no duplicates.\n"
+    "Output ONLY this JSON (no prose):\n"
+    '{"test_type":"app/endpoint","summary":"Korean 1 sentence",'
     '"candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other",'
-    '"param":"target param/header name, or empty for path","location":"param|path|body|header",'
-    '"payload":"the payload string","why":"why relevant to THIS endpoint (Korean, short)"}]}'
+    '"location":"param|path|body|header","param":"name or empty for path",'
+    '"payload":"string","why":"Korean short"}]}\n'
+    "EXAMPLE for GET /autodiscover/autodiscover.json (no params):\n"
+    '{"test_type":"MS Exchange Autodiscover","summary":"Exchange Autodiscover 엔드포인트 - 경로 기반 취약점 점검",'
+    '"candidates":[{"category":"authbypass","location":"path","param":"","payload":"/autodiscover/..;/ecp/",'
+    '"why":"경로 세그먼트 우회로 ECP 접근 시도"},{"category":"lfi","location":"path","param":"",'
+    '"payload":"/autodiscover/../../../../etc/passwd","why":"경로 traversal 파일 읽기"}]}'
 )
+
+
+def _salvage_candidates(text: str) -> list:
+    """잘린 JSON 에서 'payload' 를 포함한 완성된 후보 객체만 개별 파싱해 건져낸다."""
+    out = []
+    # 중첩 없는 평면 객체 {...} 중 "payload" 를 포함하는 것만
+    for m in re.finditer(r'\{[^{}]*?"payload"[^{}]*?\}', text, re.DOTALL):
+        try:
+            out.append(json.loads(m.group(0)))
+        except json.JSONDecodeError:
+            continue
+    return out
 
 
 async def ai_suggest_payloads(method: str, path: str, params: dict,
@@ -219,35 +230,62 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
             {"role": "user", "content": user},
         ],
         "temperature": 0.4,
-        "max_tokens": 900,
+        "max_tokens": 1100,
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
             r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
         content = r.json()["choices"][0]["message"]["content"]
-        parsed = _extract_json(content)
-        cands = parsed.get("candidates") or []
-        # 방어적 정규화
-        norm = []
+        try:
+            parsed = _extract_json(content)
+            cands = parsed.get("candidates") or []
+            test_type = str(parsed.get("test_type", ""))
+            summary = str(parsed.get("summary", ""))
+        except json.JSONDecodeError:
+            # 응답이 max_tokens 등으로 잘렸을 때: 완성된 후보 객체만 살려낸다
+            cands = _salvage_candidates(content)
+            if not cands:
+                return {"error": "AI 후보 응답 파싱 실패"}
+            mt = re.search(r'"test_type"\s*:\s*"([^"]*)"', content)
+            ms = re.search(r'"summary"\s*:\s*"([^"]*)"', content)
+            test_type = (mt.group(1) if mt else "(부분 파싱)")
+            summary = (ms.group(1) if ms else "") + " ⚠️ 응답이 잘려 일부 후보만 표시"
+        # 헤더 주입이 의미 있는 헤더만 허용 (일반 헤더 남용 방지)
+        INJECTABLE_HEADERS = {
+            "host", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto",
+            "x-original-url", "x-rewrite-url", "referer", "true-client-ip",
+            "x-real-ip", "forwarded", "cf-connecting-ip", "x-host", "x-custom-ip-authorization",
+        }
+        # 방어적 정규화 + 품질 필터
+        norm, seen = [], set()
         for c in cands:
             if not isinstance(c, dict) or not c.get("payload"):
                 continue
             loc = str(c.get("location", "param")).lower()
             if loc not in ("param", "path", "body", "header"):
                 loc = "param"
+            param = str(c.get("param", ""))
+            # 일반 헤더(User-Agent/Content-Type 등)에 주입류를 꽂은 후보는 버림
+            if loc == "header" and param.lower() not in INJECTABLE_HEADERS:
+                continue
+            payload = str(c.get("payload"))
+            key = (loc, param.lower(), payload)
+            if key in seen:      # 중복 제거
+                continue
+            seen.add(key)
             norm.append({
                 "category": str(c.get("category", "other")),
-                "param": str(c.get("param", "")),
+                "param": param,
                 "location": loc,
-                "payload": str(c.get("payload")),
+                "payload": payload,
                 "why": str(c.get("why", "")),
             })
         return {
-            "test_type": str(parsed.get("test_type", "")),
-            "summary": str(parsed.get("summary", "")),
+            "test_type": test_type,
+            "summary": summary,
             "candidates": norm[:count],
             "model": model,
         }
