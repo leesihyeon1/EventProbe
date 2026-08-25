@@ -416,41 +416,67 @@ async function loadSidebar() {
     ...aiCat,
     ...state.payloads.categories,
     ...customState.categories.filter(c => c.payloads.length > 0).map(c => ({
-      ...c, _custom: true
+      ...c, _custom: true, group: 'custom'
     })),
   ];
   // 벌크 모달용 전체 목록 저장
   state.payloads._allCategories = allCategories;
 
-  const container = document.getElementById('sidebarList');
-  container.innerHTML = '';
+  // 상위 그룹 정의(펼침 순서)
+  const GROUP_DEFS = [
+    { id: 'custom', name: '커스텀 / AI' },
+    { id: 'server', name: '서버사이드 인젝션 · 실행' },
+    { id: 'client', name: '클라이언트사이드' },
+    { id: 'auth',   name: '인증 · 세션 · 권한' },
+    { id: 'http',   name: 'HTTP · 헤더 · 인프라' },
+  ];
 
-  allCategories.forEach(cat => {
-    const group = document.createElement('div');
-    group.className = 'category-group';
-    group.dataset.catId = cat.id;
-
+  const catHtml = (cat) => {
     const customBadge = cat._custom
       ? `<span style="font-size:9px;color:var(--accent);background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.3);border-radius:4px;padding:1px 5px;margin-right:2px">커스텀</span>`
       : '';
-
-    group.innerHTML = `
-      <div class="category-header" onclick="toggleCategory(this)">
-        <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${escapeHtml(cat.name)}</span>
-        ${customBadge}
-        <span class="category-badge">${cat.payloads.length}</span>
-        <span class="category-chevron">▶</span>
-      </div>
-      <div class="payload-list">
-        ${cat.payloads.map(p => `
-          <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
-            <span class="risk-dot ${p.risk || 'medium'}"></span>
-            <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
-            ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
-          </div>`).join('')}
+    return `
+      <div class="category-group" data-cat-id="${escapeHtml(cat.id)}">
+        <div class="category-header" onclick="toggleCategory(this)">
+          <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${escapeHtml(cat.name)}</span>
+          ${customBadge}
+          <span class="category-badge">${cat.payloads.length}</span>
+          <span class="category-chevron">▶</span>
+        </div>
+        <div class="payload-list">
+          ${cat.payloads.map(p => `
+            <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
+              <span class="risk-dot ${p.risk || 'medium'}"></span>
+              <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
+              ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
+            </div>`).join('')}
+        </div>
       </div>`;
-    container.appendChild(group);
+  };
+
+  const container = document.getElementById('sidebarList');
+  container.innerHTML = '';
+
+  GROUP_DEFS.forEach(g => {
+    const cats = allCategories.filter(c => (c.group || 'server') === g.id);
+    if (!cats.length) return;
+    const plCount = cats.reduce((n, c) => n + c.payloads.length, 0);
+    const section = document.createElement('div');
+    section.className = 'sidebar-group open';
+    section.dataset.group = g.id;
+    section.innerHTML = `
+      <div class="sidebar-group-header" onclick="toggleSidebarGroup(this)">
+        <span class="group-chevron">▾</span>
+        <span class="group-name">${escapeHtml(g.name)}</span>
+        <span class="group-count">${cats.length}종 · ${plCount}</span>
+      </div>
+      <div class="sidebar-group-body">${cats.map(catHtml).join('')}</div>`;
+    container.appendChild(section);
   });
+}
+
+function toggleSidebarGroup(header) {
+  header.parentElement.classList.toggle('open');
 }
 
 function toggleCategory(header) {
@@ -469,6 +495,12 @@ function filterSidebar(query) {
       if (show) hasVisible = true;
     });
     group.style.display = (!q || hasVisible) ? '' : 'none';
+    group.classList.toggle('open', !!q && hasVisible);   // 검색 중이면 해당 카테고리 펼침
+  });
+  // 상위 그룹: 보이는 카테고리가 없으면 그룹째 숨김
+  document.querySelectorAll('.sidebar-group').forEach(sec => {
+    const anyCat = [...sec.querySelectorAll('.category-group')].some(cg => cg.style.display !== 'none');
+    sec.style.display = anyCat ? '' : 'none';
   });
 }
 

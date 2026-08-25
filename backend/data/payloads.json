@@ -352,7 +352,8 @@
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "xss",
@@ -674,7 +675,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
         }
-      ]
+      ],
+      "group": "client"
     },
     {
       "id": "ssrf",
@@ -878,7 +880,8 @@
           "risk": "critical",
           "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "lfi",
@@ -1108,7 +1111,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "cmdi",
@@ -1307,7 +1311,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "xxe",
@@ -1413,7 +1418,8 @@
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/pentesting-web/xxe-xee-xml-external-entity"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "ssti",
@@ -1564,7 +1570,8 @@
           "risk": "critical",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "nosql",
@@ -1668,7 +1675,8 @@
           "risk": "medium",
           "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "redirect",
@@ -1796,7 +1804,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
         }
-      ]
+      ],
+      "group": "client"
     },
     {
       "id": "jwt",
@@ -1902,7 +1911,8 @@
           "risk": "high",
           "reference": "https://portswigger.net/web-security/jwt"
         }
-      ]
+      ],
+      "group": "auth"
     },
     {
       "id": "header",
@@ -2086,7 +2096,8 @@
           "risk": "low",
           "reference": "https://book.hacktricks.xyz/pentesting-web"
         }
-      ]
+      ],
+      "group": "http"
     },
     {
       "id": "prototype",
@@ -2184,7 +2195,8 @@
           "risk": "high",
           "reference": "https://portswigger.net/web-security/prototype-pollution/client-side"
         }
-      ]
+      ],
+      "group": "client"
     },
     {
       "id": "ldap",
@@ -2274,7 +2286,8 @@
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "business",
@@ -2424,7 +2437,8 @@
           "risk": "medium",
           "reference": "https://owasp.org/www-project-web-security-testing-guide/"
         }
-      ]
+      ],
+      "group": "auth"
     },
     {
       "id": "xpath",
@@ -2480,7 +2494,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XPath%20Injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "crlf",
@@ -2536,7 +2551,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
         }
-      ]
+      ],
+      "group": "http"
     },
     {
       "id": "cors",
@@ -2592,7 +2608,8 @@
           "risk": "high",
           "reference": "https://portswigger.net/web-security/cors"
         }
-      ]
+      ],
+      "group": "http"
     },
     {
       "id": "graphql",
@@ -2648,7 +2665,8 @@
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/graphql"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "ssi",
@@ -2696,7 +2714,8 @@
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/pentesting-web/esi-injection"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "upload",
@@ -2768,7 +2787,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Upload%20Insecure%20Files"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "hpp",
@@ -2816,7 +2836,8 @@
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/HTTP%20Parameter%20Pollution"
         }
-      ]
+      ],
+      "group": "http"
     },
     {
       "id": "cache",
@@ -2872,7 +2893,8 @@
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/pentesting-web/web-cache-deception"
         }
-      ]
+      ],
+      "group": "http"
     },
     {
       "id": "email",
@@ -2920,7 +2942,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
         }
-      ]
+      ],
+      "group": "http"
     },
     {
       "id": "deserial",
@@ -2976,7 +2999,8 @@
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Insecure%20Deserialization/Ruby.md"
         }
-      ]
+      ],
+      "group": "server"
     },
     {
       "id": "csv",
@@ -3032,7 +3056,8 @@
           "risk": "high",
           "reference": "https://owasp.org/www-project-web-security-testing-guide/"
         }
-      ]
+      ],
+      "group": "client"
     }
   ]
 }

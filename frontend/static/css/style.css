@@ -1752,3 +1752,18 @@ mark.search-hit.current { background: #f0a500; color: #1a1a1a; }
 /* 페이로드 출처 링크 */
 .payload-item .payload-ref { margin-left:auto; font-size:11px; color:var(--text-muted); text-decoration:none; opacity:.6; padding:0 4px; }
 .payload-item .payload-ref:hover { color:var(--accent); opacity:1; }
+
+/* 사이드바 상위 그룹 (그룹 → 카테고리 → payload 3단) */
+.sidebar-group { border-bottom: 1px solid var(--border); }
+.sidebar-group-header {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px; cursor: pointer;
+  font-size: 12px; font-weight: 700; color: var(--text-secondary);
+  background: var(--bg-secondary); user-select: none; text-transform: none;
+}
+.sidebar-group-header:hover { color: var(--text-primary); }
+.sidebar-group-header .group-chevron { font-size: 10px; transition: transform .15s; color: var(--text-muted); }
+.sidebar-group:not(.open) .group-chevron { transform: rotate(-90deg); }
+.sidebar-group-header .group-name { flex: 1; }
+.sidebar-group-header .group-count { font-size: 10px; font-weight: 500; color: var(--text-muted); }
+.sidebar-group:not(.open) .sidebar-group-body { display: none; }
+.sidebar-group-body .category-header { padding-left: 20px; }
