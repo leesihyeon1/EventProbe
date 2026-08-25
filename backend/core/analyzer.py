@@ -841,6 +841,175 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# 공격 결과 분석 — "이 공격이 실제로 통했는가"를 증거 기반으로 판정 (결정적)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 파일 읽기 성공 마커 (LFI/XXE)
+_FILE_READ_MARKERS = [
+    (r"root:.*?:0:0:",                         "리눅스 /etc/passwd 내용"),
+    (r"\[extensions\]|\[fonts\]|16-bit app support", "Windows win.ini 내용"),
+    (r"<\?php[\s\S]{0,40}",                     "PHP 소스코드 노출"),
+    (r"DB_PASSWORD|DB_USERNAME|APP_KEY=",       ".env 설정 노출"),
+    (r"BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY",  "개인키 노출"),
+]
+# 명령 실행 출력 마커 (Command Injection)
+_CMD_OUTPUT_MARKERS = [
+    (r"uid=\d+\([^)]+\)\s+gid=\d+",            "id 출력(uid/gid)"),
+    (r"Microsoft Windows \[Version",            "Windows ver 출력"),
+    (r"Volume in drive [A-Z] |Directory of ",   "Windows dir 출력"),
+]
+# 클라우드 메타데이터 마커 (SSRF)
+_SSRF_MARKERS = [
+    (r"ami-id|instance-id|iam/security-credentials|InstanceProfileArn", "AWS 메타데이터"),
+    (r"computeMetadata|metadata\.google\.internal",                     "GCP 메타데이터"),
+    (r"\"compute\"\s*:|\"network\"\s*:.*macAddress",                    "Azure 메타데이터"),
+]
+
+
+def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
+    """payload가 응답에 반사됐는지 + 미인코딩 여부 + 컨텍스트 추정."""
+    if not payload or len(payload) < 3 or payload not in body:
+        return None
+    idx = body.find(payload)
+    seg = body[:idx]
+    # 컨텍스트 추정
+    open_s = seg.rfind("<script")
+    close_s = seg.rfind("</script")
+    if open_s > close_s:
+        ctx = "JavaScript(script 내부)"
+    elif re.search(r'=\s*"[^"]*$', seg) or re.search(r"=\s*'[^']*$", seg):
+        ctx = "HTML 속성값"
+    else:
+        ctx = "HTML 본문"
+    # 미인코딩: payload에 특수문자가 있고 원문 그대로 존재하면 미인코딩(실행 위험)
+    has_special = any(c in payload for c in "<>\"'")
+    start = max(0, idx - 40)
+    end = min(len(body), idx + len(payload) + 40)
+    return {
+        "reflected": True,
+        "unescaped": bool(has_special),   # 특수문자 원문 반사 = 실행 가능성
+        "context": ctx,
+        "snippet": body[start:end],
+        "payload": payload,
+    }
+
+
+def _extract_sleep_seconds(payload: str) -> Optional[int]:
+    if not payload:
+        return None
+    for pat in (r"sleep\(\s*(\d+)", r"pg_sleep\(\s*(\d+)", r"WAITFOR\s+DELAY\s+'0:0:(\d+)",
+                r"RECEIVE_MESSAGE\([^,]+,\s*(\d+)", r"\bsleep\s+(\d+)"):
+        m = re.search(pat, payload, re.I)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline):
+    """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환."""
+    findings = []
+    body_lower = (body or "").lower()
+
+    # ① payload 반사
+    refl = _detect_reflection(body or "", payload)
+    if refl:
+        if refl["unescaped"]:
+            findings.append({"name": "payload 미인코딩 반사", "verdict": "성공", "confidence": 88,
+                             "why": f"payload가 {refl['context']}에 인코딩 없이 반영됨 → XSS 등 실행 가능",
+                             "evidence": refl["snippet"]})
+        else:
+            findings.append({"name": "payload 반사", "verdict": "미확정", "confidence": 40,
+                             "why": f"{refl['context']}에 반영되나 특수문자 없음/인코딩 가능",
+                             "evidence": refl["snippet"]})
+
+    # ② 카테고리별 성공 신호
+    def _hit(markers):
+        for pat, label in markers:
+            m = re.search(pat, body or "", re.I)
+            if m:
+                s = max(0, m.start() - 20)
+                return label, (body or "")[s:m.end() + 40]
+        return None
+
+    if category in ("lfi", "xxe"):
+        h = _hit(_FILE_READ_MARKERS)
+        if h:
+            findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,
+                             "why": h[0], "evidence": h[1]})
+    if category == "cmdi":
+        h = _hit(_CMD_OUTPUT_MARKERS)
+        if h:
+            findings.append({"name": "명령 실행 출력", "verdict": "성공", "confidence": 93,
+                             "why": h[0], "evidence": h[1]})
+    if category == "ssrf":
+        h = _hit(_SSRF_MARKERS)
+        if h:
+            findings.append({"name": "내부/메타데이터 응답", "verdict": "성공", "confidence": 85,
+                             "why": h[0], "evidence": h[1]})
+    if category == "ssti" and payload and re.search(r"7\s*\*\s*7|7\*'7'", payload):
+        # 49 가 payload 자체가 아니라 결과로 나왔는지
+        if "49" in (body or "") and "7*7" not in (body or ""):
+            findings.append({"name": "템플릿 평가됨(7*7=49)", "verdict": "성공", "confidence": 90,
+                             "why": "표현식이 서버에서 계산됨 → SSTI", "evidence": "응답에 '49' 포함"})
+    if category == "sqli":
+        for pat, desc in ERROR_LEAK_PATTERNS:
+            if re.search(pat, body or "", re.I):
+                findings.append({"name": "SQL 에러 노출", "verdict": "성공", "confidence": 85,
+                                 "why": f"{desc} — error-based 성공 가능", "evidence": desc})
+                break
+    if category == "redirect":
+        loc = headers_lower.get("location", "")
+        if status_code in (301, 302, 303, 307, 308) and re.search(r"^https?://|^//", loc):
+            findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
+                             "why": f"Location 헤더가 외부로 이동: {loc[:80]}", "evidence": loc[:120]})
+
+    # ③ 타이밍 (time-based)
+    n = _extract_sleep_seconds(payload)
+    if n:
+        if response_time >= n * 1000 * 0.8:
+            findings.append({"name": "시간 지연 일치", "verdict": "성공", "confidence": 90,
+                             "why": f"지연 {n}s 요청 → 실제 {response_time/1000:.1f}s 지연 (Blind time-based)",
+                             "evidence": f"{response_time:.0f}ms ≈ {n}s"})
+        else:
+            findings.append({"name": "시간 지연 없음", "verdict": "미확정", "confidence": 30,
+                             "why": f"{n}s 지연 payload지만 응답 {response_time:.0f}ms — 미영향/필터",
+                             "evidence": f"{response_time:.0f}ms"})
+
+    # ④ 베이스라인 Diff
+    if baseline:
+        b_status = baseline.get("status_code")
+        b_body = baseline.get("body") or ""
+        dl = len(body or "") - len(b_body)
+        changed = []
+        if b_status is not None and b_status != status_code:
+            changed.append(f"상태 {b_status}→{status_code}")
+        if abs(dl) >= 32:
+            changed.append(f"본문 {'+' if dl > 0 else ''}{dl}B")
+        if changed:
+            findings.append({"name": "베이스라인 대비 변화", "verdict": "미확정", "confidence": 55,
+                             "why": "정상 대비 응답이 달라짐 — boolean/인증우회 판단 근거: " + ", ".join(changed),
+                             "evidence": ", ".join(changed)})
+
+    # ⑤ 차단 신호
+    blocked = status_code in (403, 406, 429, 503) or any(k in body_lower for k in BLOCK_KEYWORDS)
+
+    # 종합 판정
+    success = [f for f in findings if f["verdict"] == "성공"]
+    if success:
+        outcome = "success"
+        conf = max(f["confidence"] for f in success)
+    elif blocked:
+        outcome = "blocked"
+        conf = 70
+        findings.append({"name": "차단됨", "verdict": "차단", "confidence": 70,
+                         "why": f"상태 {status_code} 또는 차단 응답 — WAF/필터가 막음", "evidence": f"HTTP {status_code}"})
+    else:
+        outcome = "inconclusive"
+        conf = 30
+    return findings, outcome, conf
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # 메인 분석 함수
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -851,6 +1020,7 @@ def analyze_response(
     response_time: float,
     payload: Optional[str] = None,
     category: Optional[str] = None,
+    baseline: Optional[dict] = None,
 ) -> dict:
     """HTTP 응답을 분석하여 보안 판정 결과 반환"""
 
@@ -866,6 +1036,9 @@ def analyze_response(
         "details": [],
         "score": 0,
         "alerts": [],          # ZAP 스타일 Alert 목록
+        "findings": [],        # 공격 결과 신호(증거 기반)
+        "attack_outcome": None,  # success | blocked | inconclusive
+        "reflection": None,
     }
 
     body = body or ""
@@ -958,6 +1131,21 @@ def analyze_response(
     else:
         result["risk_level"] = "medium"
         result["score"] = 40
+
+    # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반
+    findings, outcome, aconf = attack_findings(
+        status_code, headers_lower, body, response_time, payload, category, baseline
+    )
+    result["reflection"] = _detect_reflection(body, payload)
+    result["findings"] = findings
+    result["attack_outcome"] = outcome
+    result["attack_confidence"] = aconf
+    # 공격 성공이 확인되면 종합 판정/위험도 격상(상태코드 relabel보다 신뢰도 높음)
+    if outcome == "success":
+        result["verdict"] = "bypass"
+        if result["risk_level"] not in ("critical",):
+            result["risk_level"] = "high"
+        result["score"] = max(result["score"], aconf)
 
     return result
 

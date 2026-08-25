@@ -965,6 +965,7 @@ async function sendRequest() {
       default_headers: getDefaultHeaderProfile(),
       use_defaults: getUseDefaults(),
       http_version: getHttpVersion(),
+      baseline: baseline ? { status_code: baseline.status_code, body: baseline.body } : null,
     };
 
     const result = await API.request(reqPayload);
@@ -1357,6 +1358,51 @@ function renderAiCard(ai) {
     </div>`;
 }
 
+// 공격 결과 분석 카드 — outcome + 증거 신호
+function renderAttackCard(a) {
+  const findings = a.findings || [];
+  if (!findings.length && !a.attack_outcome) return '';
+  const OUT = {
+    success:      ['공격 성공',   'tag-red',   'rgba(248,81,73,.4)'],
+    blocked:      ['차단됨',      'tag-green', 'var(--border)'],
+    inconclusive: ['미확정',      'tag-blue',  'var(--border)'],
+  };
+  const [label, cls, border] = OUT[a.attack_outcome] || ['분석', 'tag-blue', 'var(--border)'];
+  const V = { '성공': 'tag-red', '차단': 'tag-green', '미확정': 'tag-blue' };
+
+  const rows = findings.map(f => {
+    let ev = escapeHtml(String(f.evidence || ''));
+    // 반사 증거면 payload 하이라이트
+    if (a.reflection && a.reflection.payload && f.evidence && String(f.evidence).includes(a.reflection.payload)) {
+      const p = escapeHtml(a.reflection.payload);
+      ev = ev.split(p).join(`<mark class="search-hit current">${p}</mark>`);
+    }
+    return `
+      <div class="attack-finding">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span class="tag ${V[f.verdict] || 'tag-blue'}">${escapeHtml(f.verdict)}</span>
+          <b style="font-size:12px">${escapeHtml(f.name)}</b>
+          <span style="font-size:10px;color:var(--text-muted)">신뢰도 ${f.confidence ?? '-'}</span>
+        </div>
+        ${f.why ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${escapeHtml(f.why)}</div>` : ''}
+        ${f.evidence ? `<div class="attack-evidence">${ev}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="analysis-card" data-card-id="attack" style="border-color:${border}">
+      <div class="analysis-card-header">🎯 공격 결과 분석
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <span class="tag ${cls}">${label}</span>
+          ${a.attack_confidence != null ? `<span style="font-size:10px;color:var(--text-muted)">${a.attack_confidence}</span>` : ''}
+        </span>
+      </div>
+      <div class="analysis-card-body">
+        ${rows || '<div class="detail-item" style="color:var(--text-muted)">뚜렷한 공격 성공 신호 없음</div>'}
+      </div>
+    </div>`;
+}
+
 function renderAnalysis(a, result) {
   if (!a) return;
 
@@ -1454,10 +1500,13 @@ function renderAnalysis(a, result) {
       </div>
     </div>` : ''}
 
-    <!-- 상세 -->
+    <!-- 공격 결과 분석 (증거 기반) -->
+    ${renderAttackCard(a)}
+
+    <!-- 원시 로그(기존 상세) — 접힘 -->
     ${a.details?.length ? `
-    <div class="analysis-card" data-card-id="details">
-      <div class="analysis-card-header">상세 분석</div>
+    <div class="analysis-card collapsed" data-card-id="details">
+      <div class="analysis-card-header">원시 로그 <span class="analysis-card-chevron">▼</span></div>
       <div class="analysis-card-body">
         <div class="detail-list">
           ${a.details.map(d => `<div class="detail-item">${escapeHtml(d)}</div>`).join('')}

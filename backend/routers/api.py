@@ -88,6 +88,7 @@ class SingleRequest(BaseModel):
     default_headers: dict = {}
     use_defaults: bool = True
     http_version: Optional[str] = None   # 지정 시(비 HTTP/1.1) raw 소켓으로 요청라인 버전 그대로 전송
+    baseline: Optional[dict] = None      # {status_code, body} — 공격 결과 Diff 판정용(정상 응답)
 
 class BulkRequest(BaseModel):
     method: str
@@ -169,6 +170,7 @@ async def send_request(req: SingleRequest):
             analysis = analyze_response(
                 status_code=r["status_code"], headers=r["headers"], body=r["body"],
                 response_time=r["response_time"], payload=req.payload, category=req.category,
+                baseline=req.baseline,
             )
             if response_analysis_enabled():
                 analysis["ai"] = await ai_analyze({
@@ -205,6 +207,7 @@ async def send_request(req: SingleRequest):
             response_time=elapsed,
             payload=req.payload,
             category=req.category,
+            baseline=req.baseline,
         )
 
         # AI 상세 분석 — 응답 body 를 외부로 보내므로 기본 비활성(AI_RESPONSE_ANALYSIS=true 일 때만).
