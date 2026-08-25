@@ -1180,17 +1180,19 @@ function renderResponse(result) {
 function buildRawRequest(req) {
   const method = (req.method || 'GET').toUpperCase();
   const urlStr = req.url || '';
+  // new URL() 은 경로의 ..;/ ../ %2e 등을 정규화·디코딩해 익스플로잇 경로를 훼손하므로
+  // origin/path/query 를 문자열로 직접 분해해 원문 그대로 표시(실제 전송과 일치).
   let host = '', path = '/';
-  try {
-    const u = new URL(urlStr);
-    host = u.host;
-    path = u.pathname || '/';
-    const sp = new URLSearchParams(u.search);
-    Object.entries(req.params || {}).forEach(([k, v]) => sp.append(k, v));
-    const qs = sp.toString();
-    if (qs) path += '?' + qs;
-  } catch (e) {
-    path = urlStr;
+  const m = urlStr.match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]+)([^#]*)?/i);
+  if (m) { host = m[1]; path = m[2] || '/'; }
+  else { path = urlStr || '/'; }
+  // kvParams 병합(백엔드와 동일한 최소 인코딩: @ / : ; + = 등 보존)
+  const pairs = Object.entries(req.params || {});
+  if (pairs.length) {
+    const esc = s => encodeURIComponent(String(s)).replace(/%(40|3A|2F|3B|2B|2C|24|21|28|29|2A|7E)/gi,
+      m => decodeURIComponent(m));
+    const qs = pairs.map(([k, v]) => `${esc(k)}=${esc(v)}`).join('&');
+    path += (path.includes('?') ? '&' : '?') + qs;
   }
   const sentH = req._sentHeaders && Object.keys(req._sentHeaders).length;
   const headers = { ...((sentH ? req._sentHeaders : req.headers) || {}) };
