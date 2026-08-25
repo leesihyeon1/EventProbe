@@ -12,6 +12,35 @@ from core.analyzer import analyze_response, generate_summary
 
 router = APIRouter(prefix="/api")
 
+# ── 기본 헤더 프로파일 ──────────────────────────────────────
+# 헤더 미입력 시 python-httpx UA로 나가 WAF/서버가 다르게 반응하는 문제 보완.
+# fill-missing-only: 사용자가 지정한 헤더는 절대 덮지 않고, 빠진 것만 보충.
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate",
+    "Upgrade-Insecure-Requests": "1",
+    "sec-ch-ua": "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\"",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+}
+
+def merge_headers(user_headers: dict, profile: dict = None, use_defaults: bool = True) -> dict:
+    """기본 헤더 위에 사용자 헤더를 얹음(사용자 값 우선, 대소문자 무시). use_defaults=False면 사용자 헤더만."""
+    user_headers = user_headers or {}
+    if not use_defaults:
+        return dict(user_headers)
+    base = dict(profile) if profile else dict(DEFAULT_HEADERS)
+    lower_map = {k.lower(): k for k in base}
+    for k, v in user_headers.items():
+        base[lower_map.get(k.lower(), k)] = v
+    return base
+
 # ── 요청 모델 ──────────────────────────────────────────────
 class SingleRequest(BaseModel):
     method: str
@@ -23,6 +52,8 @@ class SingleRequest(BaseModel):
     payload_id: Optional[str] = None
     category: Optional[str] = None
     timeout: int = 10
+    default_headers: dict = {}
+    use_defaults: bool = True
 
 class BulkRequest(BaseModel):
     method: str
@@ -35,6 +66,8 @@ class BulkRequest(BaseModel):
     payload_ids: list[str]
     category: str
     timeout: int = 10
+    default_headers: dict = {}
+    use_defaults: bool = True
 
 # 다중 타겟 일괄 테스트
 class MultiTargetRequest(BaseModel):
@@ -49,6 +82,8 @@ class MultiTargetRequest(BaseModel):
     category: str = ""
     custom_payloads: list[dict] = []   # 직접 입력 페이로드
     timeout: int = 10
+    default_headers: dict = {}
+    use_defaults: bool = True
 
 # 포트 스캔
 class PortScanRequest(BaseModel):
@@ -82,12 +117,13 @@ def find_payload_by_id(payload_id: str):
 @router.post("/request")
 async def send_request(req: SingleRequest):
     try:
+        sent_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
         async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             start = time.time()
             response = await client.request(
                 method=req.method.upper(),
                 url=req.url,
-                headers=req.headers,
+                headers=sent_headers,
                 params=req.params,
                 content=req.body.encode() if req.body else None,
                 timeout=req.timeout,
@@ -110,6 +146,7 @@ async def send_request(req: SingleRequest):
             "body": body_text,
             "response_time": round(elapsed, 2),
             "body_size": len(response.content),
+            "sent_headers": sent_headers,
             "analysis": analysis,
         }
     except httpx.TimeoutException:
@@ -154,11 +191,12 @@ async def bulk_test(req: BulkRequest):
         raise HTTPException(status_code=404, detail="페이로드를 찾을 수 없습니다")
 
     results = []
+    _base_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
         for p in payloads_to_test:
             # 파라미터 조립
             params = dict(req.params)
-            headers = dict(req.headers)
+            headers = dict(_base_headers)
             body = req.body
 
             if req.inject_in == "params":
@@ -259,6 +297,7 @@ async def multi_target_test(req: MultiTargetRequest):
             raise HTTPException(status_code=404, detail="페이로드를 찾을 수 없습니다")
 
     target_results = []
+    _base_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
 
     async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
         for url in req.urls:
@@ -268,7 +307,7 @@ async def multi_target_test(req: MultiTargetRequest):
             results = []
             for p in payloads_to_test:
                 params  = dict(req.params)
-                headers = dict(req.headers)
+                headers = dict(_base_headers)
                 body    = req.body
 
                 # 빈 페이로드면 삽입 없이 그대로 요청

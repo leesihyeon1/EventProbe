@@ -85,6 +85,11 @@
       </select>
       <input id="urlInput" class="url-input" type="text" placeholder="https://target.example.com/api/endpoint">
       <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기" style="white-space:nowrap">📋 붙여넣기</button>
+      <label class="defhdr-toggle" title="켜면 빠진 헤더를 브라우저 기본값으로 보충(사용자 지정 헤더는 유지). 붙여넣기 시 자동으로 꺼집니다.">
+        <input type="checkbox" id="useDefaultsChk" checked>
+        <span>기본헤더</span>
+      </label>
+      <button class="btn btn-secondary" onclick="openHeaderProfileModal()" title="기본 헤더 프로파일 편집" style="white-space:nowrap">⚙️</button>
       <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
     </div>
 
@@ -272,6 +277,32 @@
 </div><!-- /app-body -->
 
 <!-- ══════════════════════════════ BULK TEST MODAL ═════════════════════════════ -->
+<!-- ═══════════════════════ DEFAULT HEADER PROFILE MODAL ═══════════════════════ -->
+<div class="modal-overlay hidden" id="hdrProfileModal">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <h2>⚙️ 기본 헤더 프로파일</h2>
+      <button class="btn btn-secondary" onclick="closeHeaderProfileModal()">✕ 닫기</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:4px">
+        여기 설정한 헤더는 <b>요청에 해당 헤더가 없을 때만</b> 보충됩니다(사용자 지정/붙여넣은 헤더는 절대 덮지 않음).
+        URL 바의 <b>기본헤더</b> 체크를 끄면 이 프로파일을 무시하고 raw 그대로 전송합니다.
+      </div>
+      <div class="form-group">
+        <label class="form-label">헤더 목록 (Key: Value, 한 줄에 하나)</label>
+        <textarea id="hdrProfileRaw" class="code-editor" rows="12" spellcheck="false"
+          style="min-height:240px;font-size:12px"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="resetHeaderProfile()">기본값 복원</button>
+      <button class="btn btn-secondary" onclick="closeHeaderProfileModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveHeaderProfile()">✓ 저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════════════ REQUEST IMPORT MODAL ══════════════════════════ -->
 <div class="modal-overlay hidden" id="importModal">
   <div class="modal" style="width:720px">

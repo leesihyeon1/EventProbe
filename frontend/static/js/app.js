@@ -334,6 +334,9 @@ function fillFromParsed(n) {
 
   document.getElementById('bodyEditor').value = n.body || '';
   switchReqTab(n.body ? 'body' : 'params');
+  // import된 요청은 원본 충실 재현 → 기본 헤더 보충 끔
+  const _chk = document.getElementById('useDefaultsChk');
+  if (_chk) _chk.checked = false;
 }
 
 const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP' };
@@ -546,10 +549,13 @@ async function sendRequest() {
       body,
       payload: state.selectedPayload?.payload,
       category: state.selectedCategory?.id,
+      default_headers: getDefaultHeaderProfile(),
+      use_defaults: getUseDefaults(),
     };
 
     const result = await API.request(reqPayload);
     result._req = reqPayload;   // 요청 원본 첨부
+    if (result.sent_headers) reqPayload._sentHeaders = result.sent_headers;
 
     state.lastResult = result;
     renderResponse(result);
@@ -780,78 +786,81 @@ function renderResponse(result) {
   renderRequestSummary(result._req);
 }
 
+function buildRawRequest(req) {
+  const method = (req.method || 'GET').toUpperCase();
+  const urlStr = req.url || '';
+  let host = '', path = '/';
+  try {
+    const u = new URL(urlStr);
+    host = u.host;
+    path = u.pathname || '/';
+    const sp = new URLSearchParams(u.search);
+    Object.entries(req.params || {}).forEach(([k, v]) => sp.append(k, v));
+    const qs = sp.toString();
+    if (qs) path += '?' + qs;
+  } catch (e) {
+    path = urlStr;
+  }
+  const sentH = req._sentHeaders && Object.keys(req._sentHeaders).length;
+  const headers = { ...((sentH ? req._sentHeaders : req.headers) || {}) };
+  const lines = [`${method} ${path} HTTP/1.1`];
+  if (host) lines.push(`Host: ${host}`);
+  Object.entries(headers).forEach(([k, v]) => { if (k.toLowerCase() !== 'host') lines.push(`${k}: ${v}`); });
+  let raw = lines.join('\n');
+  if (req.body) raw += '\n\n' + req.body;
+  return raw;
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+}
+
+function copyRawRequest(btn) {
+  const pre = document.getElementById('rawReqPre');
+  const text = pre ? (pre.dataset.raw || pre.textContent) : '';
+  const done = () => { const o = btn.textContent; btn.textContent = '✓ 복사됨'; setTimeout(() => btn.textContent = o, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => { fallbackCopy(text); done(); });
+  } else { fallbackCopy(text); done(); }
+}
+
 function renderRequestSummary(req) {
   if (!req) return;
   const el = document.getElementById('reqSummaryBody');
+  const sentH = req._sentHeaders && Object.keys(req._sentHeaders).length;
+  const raw = buildRawRequest(req);
 
-  const method  = req.method?.toUpperCase() || '-';
-  const url     = req.url || '-';
-  const params  = Object.entries(req.params || {});
-  const headers = Object.entries(req.headers || {});
-  const body    = req.body || null;
-
-  // 최종 URL 조립 (params 포함)
-  let fullUrl = url;
-  if (params.length) {
-    const qs = params.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-    fullUrl += (url.includes('?') ? '&' : '?') + qs;
-  }
+  // 요청 라인/헤더/바디를 색상 강조 (복사용 원문은 dataset.raw에 보관)
+  const idx = raw.indexOf('\n\n');
+  const headPart = idx === -1 ? raw : raw.slice(0, idx);
+  const bodyPart = idx === -1 ? '' : raw.slice(idx + 2);
+  const headLines = headPart.split('\n');
+  const reqLine = headLines.shift() || '';
+  const sp = reqLine.indexOf(' ');
+  const reqLineHtml = sp === -1
+    ? escapeHtml(reqLine)
+    : `<span style="color:var(--accent);font-weight:700">${escapeHtml(reqLine.slice(0, sp))}</span> ${escapeHtml(reqLine.slice(sp + 1))}`;
+  const headHtml = headLines.map(l => {
+    const c = l.indexOf(':');
+    if (c === -1) return escapeHtml(l);
+    return `<span style="color:var(--purple)">${escapeHtml(l.slice(0, c))}</span><span style="color:var(--text-muted)">:</span>${escapeHtml(l.slice(c + 1))}`;
+  }).join('\n');
+  const bodyHtml = bodyPart ? `\n\n<span style="color:var(--text-secondary)">${escapeHtml(bodyPart)}</span>` : '';
 
   el.innerHTML = `
-    <!-- Request Line -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Request Line</div>
-      <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;word-break:break-all">
-        <span style="color:var(--accent);font-weight:700">${escapeHtml(method)}</span>
-        <span style="color:var(--text-primary);margin-left:8px">${escapeHtml(fullUrl)}</span>
-        <span style="color:var(--text-muted);margin-left:6px">HTTP/1.1</span>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">Raw Request${sentH ? ' · <span style="color:var(--accent)">기본헤더 병합</span>' : ''}</span>
+      <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px" onclick="copyRawRequest(this)">📋 복사</button>
     </div>
-
-    <!-- 전송 헤더 -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">
-        Request Headers
-        <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0"> (${headers.length}개)</span>
-      </div>
-      ${headers.length ? `
-        <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px">
-          ${headers.map(([k,v]) => `
-            <div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid var(--border)">
-              <span style="color:var(--purple);min-width:160px;flex-shrink:0">${escapeHtml(k)}</span>
-              <span style="color:var(--text-secondary)">${escapeHtml(v)}</span>
-            </div>`).join('')}
-        </div>` :
-        `<div style="color:var(--text-muted);font-size:11px;padding:4px 2px">(헤더 없음)</div>`}
-    </div>
-
-    <!-- Query Params -->
-    <div style="margin-bottom:12px">
-      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">
-        Query Parameters
-        <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0"> (${params.length}개)</span>
-      </div>
-      ${params.length ? `
-        <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px">
-          ${params.map(([k,v]) => `
-            <div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid var(--border)">
-              <span style="color:var(--orange);min-width:160px;flex-shrink:0">${escapeHtml(k)}</span>
-              <span style="color:var(--text-secondary)">${escapeHtml(v)}</span>
-            </div>`).join('')}
-        </div>` :
-        `<div style="color:var(--text-muted);font-size:11px;padding:4px 2px">(파라미터 없음)</div>`}
-    </div>
-
-    <!-- Request Body -->
-    <div>
-      <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Request Body</div>
-      ${body ? `
-        <pre style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;margin:0">${escapeHtml((() => { try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; } })())}</pre>` :
-        `<div style="color:var(--text-muted);font-size:11px;padding:4px 2px">(바디 없음)</div>`}
-    </div>
-  `;
+    <pre id="rawReqPre" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;color:var(--text-primary)">${reqLineHtml}
+${headHtml}${bodyHtml}</pre>`;
+  const preEl = el.querySelector('#rawReqPre');
+  if (preEl) preEl.dataset.raw = raw;
 }
-
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
   if (bytes < 1024) return bytes + ' B';
@@ -1573,6 +1582,7 @@ async function runMultiTargetTest() {
     requestBody = {
       method, urls, target_param: targetParam,
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
+      default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
       category: '_custom', payload_ids: [],
       custom_payloads: customPayloads,
     };
@@ -1586,6 +1596,7 @@ async function runMultiTargetTest() {
     requestBody = {
       method, urls, target_param: targetParam,
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
+      default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
       category: catId, payload_ids: checkedIds,
     };
   }
@@ -1863,6 +1874,8 @@ async function runBulkTest() {
       headers: kvToObj(state.kvHeaders),
       category: catId,
       payload_ids: checkedIds,
+      default_headers: getDefaultHeaderProfile(),
+      use_defaults: getUseDefaults(),
     });
 
     state.bulkResults = result;
@@ -2710,4 +2723,57 @@ function onGlobalPaste(e) {
 }
 
 document.addEventListener('paste', onGlobalPaste);
+
+/* ==================================================================
+   기본 헤더 프로파일 - 미입력 헤더 보충 (fill-missing-only)
+   ================================================================== */
+const DEFAULT_HEADER_PROFILE = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Accept-Encoding": "gzip, deflate",
+  "Upgrade-Insecure-Requests": "1",
+  "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+};
+
+function getDefaultHeaderProfile() {
+  try { const s = localStorage.getItem('ep_hdr_profile'); if (s) return JSON.parse(s); } catch (e) {}
+  return { ...DEFAULT_HEADER_PROFILE };
+}
+function saveDefaultHeaderProfile(obj) {
+  localStorage.setItem('ep_hdr_profile', JSON.stringify(obj));
+}
+function getUseDefaults() {
+  const c = document.getElementById('useDefaultsChk');
+  return c ? c.checked : true;
+}
+
+function openHeaderProfileModal() {
+  const prof = getDefaultHeaderProfile();
+  document.getElementById('hdrProfileRaw').value =
+    Object.entries(prof).map(([k, v]) => k + ': ' + v).join('\n');
+  document.getElementById('hdrProfileModal').classList.remove('hidden');
+}
+function closeHeaderProfileModal() {
+  document.getElementById('hdrProfileModal').classList.add('hidden');
+}
+function saveHeaderProfile() {
+  const rows = parseRawHeaders(document.getElementById('hdrProfileRaw').value);
+  const obj = {};
+  rows.forEach(r => { if (r.key) obj[r.key] = r.value; });
+  saveDefaultHeaderProfile(obj);
+  closeHeaderProfileModal();
+  toast('기본 헤더 프로파일 저장됨', 'success');
+}
+function resetHeaderProfile() {
+  document.getElementById('hdrProfileRaw').value =
+    Object.entries(DEFAULT_HEADER_PROFILE).map(([k, v]) => k + ': ' + v).join('\n');
+  toast('기본값으로 초기화 (저장하려면 저장 클릭)', 'info');
+}
 
