@@ -694,7 +694,7 @@ async function generateAiCandidates() {
   const listEl = document.getElementById('aiCandidateList');
   const metaEl = document.getElementById('aiSuggestMeta');
   metaEl.textContent = '';
-  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">AI 후보 생성 중…</div></div>';
+  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">AI 페이로드 생성 중…</div></div>';
 
   try {
     const res = await API.aiSuggest({
