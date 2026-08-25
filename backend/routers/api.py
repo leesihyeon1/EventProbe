@@ -25,7 +25,7 @@ def _url_with_params(url: str, params: dict) -> str:
         for k, v in params.items()
     )
     return url + ("&" if "?" in url else "?") + q
-from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, is_enabled as ai_enabled, response_analysis_enabled
+from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
 from core.raw_http import raw_send
 
 router = APIRouter(prefix="/api")
@@ -181,6 +181,13 @@ async def send_request(req: SingleRequest):
                     "base_verdict": analysis.get("verdict"),
                     "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
                 })
+            if ai_verdict_enabled():
+                analysis["ai_verdict"] = await ai_verdict({
+                    "category": req.category, "status": r["status_code"], "time": r["response_time"],
+                    "outcome": analysis.get("attack_outcome"),
+                    "findings": [f["name"] for f in analysis.get("findings", [])],
+                    "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
+                })
             return {
                 "status_code": r["status_code"], "headers": r["headers"], "body": r["body"],
                 "response_time": r["response_time"], "body_size": r["body_size"],
@@ -224,6 +231,15 @@ async def send_request(req: SingleRequest):
                 "resp_body": body_text,
                 "base_verdict": analysis.get("verdict"),
                 "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
+            })
+
+        # AI 종합 판정 — 라벨(판정/신호 이름·상태·시간)만 전송, 대상 응답 데이터 미전송(유출 없음)
+        if ai_verdict_enabled():
+            analysis["ai_verdict"] = await ai_verdict({
+                "category": req.category, "status": response.status_code, "time": round(elapsed, 2),
+                "outcome": analysis.get("attack_outcome"),
+                "findings": [f["name"] for f in analysis.get("findings", [])],
+                "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
             })
 
         return {

@@ -55,6 +55,14 @@ def response_analysis_enabled() -> bool:
     return os.getenv("AI_RESPONSE_ANALYSIS", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
+def ai_verdict_enabled() -> bool:
+    """AI 종합 판정 — 대상 응답 데이터를 보내지 않고 라벨(판정/신호 이름·상태·시간)만 전송하므로
+    유출 위험이 없어 키만 있으면 기본 ON. 끄려면 .env 에 AI_VERDICT=false."""
+    if not _api_key():
+        return False
+    return os.getenv("AI_VERDICT", "true").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _build_user_prompt(ctx: dict) -> str:
     body = (ctx.get("resp_body") or "")[:_BODY_LIMIT]
     return (
@@ -325,3 +333,66 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
         return {"error": "AI 후보 응답 파싱 실패"}
     except Exception as e:
         return {"error": f"AI 후보 오류: {type(e).__name__} {e}"}
+
+
+_VERDICT_SYSTEM = (
+    "You are a web application security analyst. You are given ONLY the labels/results of a "
+    "deterministic scan (attack signals, alert names, status, timing) — NO raw response data. "
+    "Your job is to SYNTHESIZE (narrate/prioritize/remediate), NOT to re-judge. RULES:\n"
+    "- 'outcome' MUST equal deterministic_outcome. Do NOT change it. "
+    "attack_signals decide attack success (반사/파일읽기/명령출력/시간지연 일치 = 성공). "
+    "security_alerts are SEPARATE response-hygiene issues and do NOT mean the attack was blocked.\n"
+    "- severity: use the highest of the attack outcome and alert risks.\n"
+    "- reasoning: explain WHY, referencing the given signals only. Do not invent findings.\n"
+    "Respond ONLY with a JSON object, no prose: "
+    '{"outcome":"success|blocked|inconclusive","severity":"critical|high|medium|low|info",'
+    '"confidence":0-100,"reasoning":"1-2 sentences in Korean",'
+    '"priority":"what to verify first, Korean short","remediation":"Korean short fix"}'
+)
+
+
+async def ai_verdict(ctx: dict) -> dict | None:
+    """라벨-only AI 종합 판정. 대상 응답 데이터를 보내지 않음(유출 없음)."""
+    key = _api_key()
+    if not key:
+        return None
+    model, base_url = _model(), _base_url()
+    findings = ctx.get("findings") or []
+    alerts = ctx.get("alerts") or []
+    user = (
+        f"category: {ctx.get('category') or '(none)'}\n"
+        f"http_status: {ctx.get('status')}\n"
+        f"response_time_ms: {ctx.get('time')}\n"
+        f"deterministic_outcome: {ctx.get('outcome')}\n"
+        f"attack_signals: {json.dumps(findings, ensure_ascii=False)}\n"
+        f"security_alerts: {json.dumps(alerts, ensure_ascii=False)}\n"
+        f"Give the overall verdict."
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _VERDICT_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 400,
+    }
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
+            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+        if r.status_code != 200:
+            return {"error": f"NVIDIA API {r.status_code}", "model": model}
+        content = r.json()["choices"][0]["message"]["content"]
+        parsed = _extract_json(content)
+        # outcome 은 결정적 엔진 값으로 강제(모델이 뒤집지 못하게). AI 는 서술만 담당.
+        if ctx.get("outcome"):
+            parsed["outcome"] = ctx["outcome"]
+        parsed["model"] = model
+        return parsed
+    except httpx.TimeoutException:
+        return {"error": "AI 판정 시간 초과", "model": model}
+    except json.JSONDecodeError:
+        return {"error": "AI 판정 파싱 실패", "model": model}
+    except Exception as e:
+        return {"error": f"AI 판정 오류: {type(e).__name__}", "model": model}

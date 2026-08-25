@@ -1403,18 +1403,34 @@ function renderAttackCard(a) {
     </div>`;
 }
 
-function renderAnalysis(a, result) {
-  if (!a) return;
-
-  // 헤더 verdict badge
-  document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
-
-  const container = document.getElementById('analysisContent');
-
-  const confidenceColor = a.confidence >= 70 ? 'var(--success)' : a.confidence >= 40 ? 'var(--warning)' : 'var(--danger)';
-
-  container.innerHTML = `
-    <!-- 판정 카드 -->
+// 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
+function renderVerdictCard(a, confidenceColor) {
+  const ai = a.ai_verdict;
+  if (ai && !ai.error) {
+    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], inconclusive: ['미확정', 'tag-blue'] };
+    const [label, cls] = OUT[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
+    const sev = String(ai.severity || 'info');
+    const sevCls = (sev === 'critical' || sev === 'high') ? 'tag-red' : sev === 'medium' ? 'tag-yellow' : 'tag-blue';
+    return `
+      <div class="analysis-card" data-card-id="verdict" style="border-color:rgba(188,140,255,.35)">
+        <div class="analysis-card-header">판정 결과
+          <span style="margin-left:auto;font-size:9px;color:var(--purple);font-weight:400">🤖 AI · ${escapeHtml(ai.model || '')}</span>
+        </div>
+        <div class="analysis-card-body">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+            <span class="tag ${cls}">${label}</span>
+            <span class="tag ${sevCls}">위험도 ${escapeHtml(sev)}</span>
+            <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
+          </div>
+          ${ai.reasoning ? `<div class="detail-item">${escapeHtml(ai.reasoning)}</div>` : ''}
+          ${ai.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority)}</div>` : ''}
+          ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation)}</div>` : ''}
+        </div>
+      </div>`;
+  }
+  // 결정적 판정 (기본/폴백)
+  const aiErr = ai && ai.error ? `<div style="font-size:10px;color:var(--text-muted)">AI 판정 실패: ${escapeHtml(ai.error)}</div>` : '';
+  return `
     <div class="analysis-card" data-card-id="verdict">
       <div class="analysis-card-header">판정 결과</div>
       <div class="analysis-card-body">
@@ -1428,8 +1444,24 @@ function renderAnalysis(a, result) {
           </div>
           ${riskBadge(a.risk_level)}
         </div>
+        ${aiErr}
       </div>
-    </div>
+    </div>`;
+}
+
+function renderAnalysis(a, result) {
+  if (!a) return;
+
+  // 헤더 verdict badge
+  document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
+
+  const container = document.getElementById('analysisContent');
+
+  const confidenceColor = a.confidence >= 70 ? 'var(--success)' : a.confidence >= 40 ? 'var(--warning)' : 'var(--danger)';
+
+  container.innerHTML = `
+    <!-- 판정 카드 (AI 종합 판정 있으면 대체, 없으면 결정적 판정) -->
+    ${renderVerdictCard(a, confidenceColor)}
 
     <!-- 응답 메타 -->
     <div class="analysis-card" data-card-id="res-info">
