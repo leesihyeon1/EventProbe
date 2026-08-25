@@ -446,9 +446,8 @@ body {
 /* ── Request Panel ── */
 .request-panel {
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible;
   min-height: 80px;
-  max-height: 60vh;
 }
 
 /* ── 수직 리사이저 (요청 패널 ↕ 응답 패널) ── */
@@ -740,7 +739,8 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 
 /* ── Split Pane (Response) ── */
 .response-area {
-  flex: 1;
+  flex: 0 0 auto;
+  min-height: 460px;
   display: flex;
   overflow: hidden;
 }
@@ -1660,7 +1660,7 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 
 /* ── View toggle ── */
 .view-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
-.view-area > .view { flex: 1; overflow: hidden; display: none; flex-direction: column; }
+.view-area > .view { flex: 1; overflow-y: auto; display: none; flex-direction: column; }
 .view-area > .view.active { display: flex; }
 
 /* ── Report ── */

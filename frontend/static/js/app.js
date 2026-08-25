@@ -2595,55 +2595,13 @@ function switchView(view) {
    수직 리사이저 — 요청 패널 ↕ 응답 패널 세로 크기 조정
    ══════════════════════════════════════════════════════════════════ */
 function initRowResizer() {
-  const divider    = document.getElementById('rowDivider');
-  const reqPanel   = document.getElementById('requestPanel');
-  if (!divider || !reqPanel) return;
-
-  // 저장된 높이 복원
-  const saved = localStorage.getItem('requestPanelHeight');
-  if (saved) reqPanel.style.height = saved + 'px';
-
-  let dragging = false;
-  let startY   = 0;
-  let startH   = 0;
-
-  divider.addEventListener('mousedown', e => {
-    dragging = true;
-    startY   = e.clientY;
-    startH   = reqPanel.getBoundingClientRect().height;
-    divider.classList.add('dragging');
-    document.body.style.cursor     = 'row-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    const delta = e.clientY - startY;
-    const newH  = Math.min(Math.max(startH + delta, 80), window.innerHeight * 0.6);
-    reqPanel.style.height = newH + 'px';
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (!dragging) return;
-    dragging = false;
-    divider.classList.remove('dragging');
-    document.body.style.cursor     = '';
-    document.body.style.userSelect = '';
-    localStorage.setItem('requestPanelHeight',
-      reqPanel.getBoundingClientRect().height);
-  });
-
-  // Ctrl + 휠로도 조정
-  reqPanel.addEventListener('wheel', e => {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    const curH = reqPanel.getBoundingClientRect().height;
-    const step = e.deltaY > 0 ? -20 : 20;
-    const newH = Math.min(Math.max(curH + step, 80), window.innerHeight * 0.6);
-    reqPanel.style.height = newH + 'px';
-    localStorage.setItem('requestPanelHeight', newH);
-  }, { passive: false });
+  // 단일 스크롤 컬럼 방식으로 전환 — 요청/응답이 한 흐름으로 위아래 스크롤되고
+  // 요청 패널은 내용(특히 Body 에디터) 높이대로 커진다. 예전 고정 높이 리사이저는 비활성화.
+  const reqPanel = document.getElementById('requestPanel');
+  const divider  = document.getElementById('rowDivider');
+  if (reqPanel) reqPanel.style.height = '';        // 저장된 고정 높이 제거(Body 눌림 방지)
+  localStorage.removeItem('requestPanelHeight');
+  if (divider) divider.style.display = 'none';      // 분리 리사이저 숨김
 }
 
 /* ══════════════════════════════════════════════════════════════════
