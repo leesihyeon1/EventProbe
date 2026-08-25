@@ -446,9 +446,16 @@ body {
 /* ── Request Panel ── */
 .request-panel {
   flex-shrink: 0;
-  overflow: visible;
-  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;      /* 내부(탭 콘텐츠)에서 스크롤 */
+  min-height: 90px;
+  max-height: 75vh;
+  height: 260px;          /* 기본 높이 — 리사이저로 조절 */
 }
+/* 탭 바 아래 콘텐츠가 남은 높이를 채우고 내부 스크롤 */
+.request-panel > .tab-bar { flex-shrink: 0; }
+.request-panel > .req-tab-content { flex: 1; overflow-y: auto; min-height: 0; }
 
 /* ── 수직 리사이저 (요청 패널 ↕ 응답 패널) ── */
 .row-divider {
@@ -739,8 +746,8 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 
 /* ── Split Pane (Response) ── */
 .response-area {
-  flex: 0 0 auto;
-  min-height: 460px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   overflow: hidden;
 }
@@ -1660,7 +1667,7 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 
 /* ── View toggle ── */
 .view-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
-.view-area > .view { flex: 1; overflow-y: auto; display: none; flex-direction: column; }
+.view-area > .view { flex: 1; overflow: hidden; display: none; flex-direction: column; }
 .view-area > .view.active { display: flex; }
 
 /* ── Report ── */
