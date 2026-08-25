@@ -2189,12 +2189,8 @@ function renderMultiTargetResults(data) {
   const allResults   = data.targets?.flatMap(t => t.results) || [];
   const globalSummary = generateClientSummary(allResults);
 
-  // 글로벌 요약 업데이트
-  document.getElementById('summaryTotal').textContent   = globalSummary.total;
-  document.getElementById('summaryBlocked').textContent = globalSummary.blocked;
-  document.getElementById('summaryPassed').textContent  = globalSummary.passed;
-  document.getElementById('summaryBypass').textContent  = globalSummary.bypass;
-  document.getElementById('summaryRate').textContent    = globalSummary.detection_rate + '%';
+  // 글로벌 요약 업데이트 (응답 사실 기반)
+  setSummary(bulkSummaryCards(allResults));
 
   area.innerHTML = `
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
@@ -2206,10 +2202,16 @@ function renderMultiTargetResults(data) {
           <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">#${i+1}</span>
           <span class="target-url">${escapeHtml(t.url)}</span>
           <div class="multi-summary-chips">
-            <span class="alert-count-chip chip-high">차단 ${t.summary?.blocked||0}</span>
-            <span class="alert-count-chip chip-medium">통과 ${t.summary?.passed||0}</span>
-            ${t.summary?.bypass ? `<span class="alert-count-chip" style="background:rgba(255,107,107,.1);color:var(--critical);border-color:rgba(255,107,107,.3)">우회 ${t.summary.bypass}</span>` : ''}
-            <span class="alert-count-chip chip-informational">${t.summary?.detection_rate||0}%</span>
+            ${(() => {
+              const rs = t.results || [];
+              const resp = rs.filter(r => (r.status_code || 0) > 0).length;
+              const noResp = rs.length - resp;
+              const find = rs.filter(r => r.analysis?.verdict === 'bypass').length;
+              return `
+                <span class="alert-count-chip chip-informational">응답 ${resp}</span>
+                ${noResp ? `<span class="alert-count-chip chip-medium">무응답 ${noResp}</span>` : ''}
+                ${find ? `<span class="alert-count-chip" style="background:rgba(255,107,107,.1);color:var(--critical);border-color:rgba(255,107,107,.3)">취약 ${find}</span>` : ''}`;
+            })()}
           </div>
           <span class="target-chevron">▼</span>
         </div>
@@ -2248,6 +2250,43 @@ function generateClientSummary(results) {
   const bypass   = results.filter(r => r.analysis?.verdict === 'bypass').length;
   return { total, blocked, passed, bypass,
     detection_rate: total ? Math.round(blocked/total*100) : 0 };
+}
+
+// 상단 요약 카드(5개 공유)를 각 화면이 명시적으로 세팅.
+// cards: [{id, label, value, title?}] — 목록에 없는 카드는 숨김.
+function setSummary(cards) {
+  const ALL = ['summaryTotal', 'summaryBlocked', 'summaryPassed', 'summaryBypass', 'summaryRate'];
+  const shown = new Set(cards.map(c => c.id));
+  ALL.forEach(id => {
+    const num = document.getElementById(id);
+    const card = num && num.closest('.summary-card');
+    if (card) card.style.display = shown.has(id) ? '' : 'none';
+  });
+  cards.forEach((c, i) => {
+    const num = document.getElementById(c.id);
+    if (!num) return;
+    num.textContent = c.value;
+    const card = num.closest('.summary-card');
+    if (card) card.style.order = i;   // 배열 순서대로 표시(카드 DOM 순서 무시)
+    const lbl = num.nextElementSibling;
+    if (lbl && lbl.classList.contains('lbl')) {
+      lbl.textContent = c.label;
+      if (c.title) lbl.title = c.title; else lbl.removeAttribute('title');
+    }
+  });
+}
+
+// 일괄/다중 결과용 요약 카드 — 판정(WAF) 관점이 아니라 응답 사실 기반.
+function bulkSummaryCards(results) {
+  const total     = results.length;
+  const responded = results.filter(r => (r.status_code || 0) > 0).length;
+  const findings  = results.filter(r => r.analysis?.verdict === 'bypass').length;
+  return [
+    { id: 'summaryTotal',  label: '총 테스트', value: total },
+    { id: 'summaryRate',   label: '응답 받음', value: responded, title: 'HTTP 응답을 받은 요청 수' },
+    { id: 'summaryPassed', label: '응답 없음', value: total - responded, title: '타임아웃·연결 실패 등 응답을 못 받은 요청 수' },
+    { id: 'summaryBypass', label: '취약 의심', value: findings, title: '에러 정보 누출·민감정보 노출·공격 성공 신호가 확인된 응답 수' },
+  ];
 }
 
 /* ── 포트 스캔 ── */
@@ -2306,17 +2345,13 @@ function renderPortScanResults(data) {
 
   // 요약 카드 업데이트 (포트 스캔 용도)
   const totalScanned = hostList.reduce((s, h) => s + (h.total_scanned || 0), 0);
-  document.getElementById('summaryTotal').textContent   = data.host_count;
-  document.getElementById('summaryBlocked').textContent = data.total_open;
-  document.getElementById('summaryPassed').textContent  = data.total_risky;
-  document.getElementById('summaryBypass').textContent  = totalScanned;
-  document.getElementById('summaryRate').textContent    = data.total_open;
-
-  document.querySelector('.num-total   + .lbl').textContent = '대상 수';
-  document.querySelector('.num-blocked + .lbl').textContent = '열린 포트';
-  document.querySelector('.num-passed  + .lbl').textContent = '위험 포트';
-  document.querySelector('.num-bypass  + .lbl').textContent = '스캔 포트 수';
-  document.querySelector('.num-rate    + .lbl').textContent = '오픈 합계';
+  setSummary([
+    { id: 'summaryTotal',   label: '대상 수',      value: data.host_count },
+    { id: 'summaryBlocked', label: '열린 포트',    value: data.total_open },
+    { id: 'summaryPassed',  label: '위험 포트',    value: data.total_risky },
+    { id: 'summaryBypass',  label: '스캔 포트 수', value: totalScanned },
+    { id: 'summaryRate',    label: '오픈 합계',    value: data.total_open },
+  ]);
 
   const container = document.querySelector('.results-view');
   ['portScanArea', 'multiResultsArea'].forEach(id => document.getElementById(id)?.remove());
@@ -2451,11 +2486,7 @@ function hideLoadingOverlay() {
 function renderBulkResults(data) {
   const { results, summary } = data;
 
-  document.getElementById('summaryTotal').textContent = summary.total;
-  document.getElementById('summaryBlocked').textContent = summary.blocked;
-  document.getElementById('summaryPassed').textContent = summary.passed;
-  document.getElementById('summaryBypass').textContent = summary.bypass;
-  document.getElementById('summaryRate').textContent = summary.detection_rate + '%';
+  setSummary(bulkSummaryCards(results));
 
   const tbody = document.getElementById('resultsTableBody');
   tbody.innerHTML = results.map((r, i) => {
