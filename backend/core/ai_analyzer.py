@@ -40,7 +40,16 @@ _SYSTEM_PROMPT = (
 
 
 def is_enabled() -> bool:
+    """AI 기능 전반(페이로드 생성 등, 저유출) 사용 가능 여부 — 키만 있으면 True."""
     return bool(_api_key())
+
+
+def response_analysis_enabled() -> bool:
+    """AI '응답 분석' 사용 여부 — 응답 body 를 외부로 보내 유출 위험이 있으므로 기본 OFF.
+    켜려면 .env 에 AI_RESPONSE_ANALYSIS=true 를 명시해야 한다(키만으론 켜지지 않음)."""
+    if not _api_key():
+        return False
+    return os.getenv("AI_RESPONSE_ANALYSIS", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _build_user_prompt(ctx: dict) -> str:

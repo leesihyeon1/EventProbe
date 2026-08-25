@@ -9,7 +9,7 @@ from typing import Optional
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary
-from core.ai_analyzer import ai_analyze, ai_generate_variants, is_enabled as ai_enabled
+from core.ai_analyzer import ai_analyze, ai_generate_variants, is_enabled as ai_enabled, response_analysis_enabled
 
 router = APIRouter(prefix="/api")
 
@@ -156,8 +156,8 @@ async def send_request(req: SingleRequest):
             category=req.category,
         )
 
-        # AI 상세 분석 (NVIDIA_API_KEY 설정 시 자동). 실패해도 메인 분석엔 영향 없음.
-        if ai_enabled():
+        # AI 상세 분석 — 응답 body 를 외부로 보내므로 기본 비활성(AI_RESPONSE_ANALYSIS=true 일 때만).
+        if response_analysis_enabled():
             analysis["ai"] = await ai_analyze({
                 "method": req.method.upper(),
                 "url": req.url,
