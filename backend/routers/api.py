@@ -203,7 +203,28 @@ async def send_request(req: SingleRequest):
             },
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # 연결 실패/DNS/헤더 거부 등 — 500 대신 구조화된 에러로 반환해
+        # 단일 전송·GO TEST UI 가 "HTTP undefined" 대신 명확히 표시하도록 함
+        return {
+            "status_code": 0,
+            "headers": {},
+            "body": "",
+            "response_time": 0,
+            "body_size": 0,
+            "error": f"{type(e).__name__}: {e}",
+            "analysis": {
+                "verdict": "error",
+                "confidence": 0,
+                "waf_detected": None,
+                "block_reason": [],
+                "error_leaks": [],
+                "sensitive_data": [],
+                "response_anomalies": [],
+                "risk_level": "info",
+                "details": [f"요청 실패: {type(e).__name__}: {e}"],
+                "score": 0,
+            },
+        }
 
 
 # ── AI 상태 / 페이로드 변형 ─────────────────────────────────

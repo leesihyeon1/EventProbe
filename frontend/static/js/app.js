@@ -731,7 +731,12 @@ async function goTest() {
         const r = await API.request(_applyCandidate(base, cand));
         const v = r.analysis?.verdict || 'error';
         const [label, cls] = V[v] || [v, 'tag-blue'];
-        cell.innerHTML = `<span class="tag ${cls}">${label}</span> <span style="color:var(--text-muted)">HTTP ${r.status_code} · ${Math.round(r.response_time)}ms · risk ${escapeHtml(r.analysis?.risk_level||'-')}</span>`;
+        if (r.error || r.detail || r.status_code === 0) {
+          // 연결 실패 등 구조화 에러
+          cell.innerHTML = `<span class="tag tag-blue">에러</span> <span style="color:var(--text-muted)">${escapeHtml(r.error || r.detail || '요청 실패')}</span>`;
+        } else {
+          cell.innerHTML = `<span class="tag ${cls}">${label}</span> <span style="color:var(--text-muted)">HTTP ${r.status_code} · ${Math.round(r.response_time)}ms · risk ${escapeHtml(r.analysis?.risk_level||'-')}</span>`;
+        }
       } catch (e) {
         cell.innerHTML = `<span class="tag tag-blue">실패</span> ${escapeHtml(e.message)}`;
       }
