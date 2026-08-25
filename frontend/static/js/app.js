@@ -677,7 +677,7 @@ function renderAiCandidates(res) {
     <div class="payload-item ai-cand-item" data-idx="${i}" onclick="applyAiCandidate(${i})"
          style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
       <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--accent)">${_CAT_ICON[c.category]||'🔎'} ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
+        <div style="font-size:11px;color:var(--accent)"><b>${i + 1}.</b> ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
         <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
         ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)}</div>` : ''}
       </div>

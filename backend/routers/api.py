@@ -9,7 +9,22 @@ from typing import Optional
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
+
+# 쿼리에서 RFC3986 상 합법이며 보안 페이로드에 흔히 쓰이는 문자는 보존하고
+# (@ / : ; + , = ! $ ( ) * 등), 구조를 깨는 문자(공백·&·#·%)만 인코딩한다.
+# httpx 의 params= 는 @·/ 까지 전부 인코딩해 ProxyLogon 등 페이로드를 깨뜨리므로,
+# 파라미터를 URL 쿼리에 직접 병합해서 원문을 최대한 보존한다.
+_QUERY_SAFE = "@:/;+,=!$()*~-._'"
+
+def _url_with_params(url: str, params: dict) -> str:
+    if not params:
+        return url
+    q = "&".join(
+        f"{quote(str(k), safe=_QUERY_SAFE)}={quote(str(v), safe=_QUERY_SAFE)}"
+        for k, v in params.items()
+    )
+    return url + ("&" if "?" in url else "?") + q
 from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, is_enabled as ai_enabled, response_analysis_enabled
 
 router = APIRouter(prefix="/api")
@@ -139,9 +154,8 @@ async def send_request(req: SingleRequest):
             start = time.time()
             response = await client.request(
                 method=req.method.upper(),
-                url=req.url,
+                url=_url_with_params(req.url, req.params),
                 headers=sent_headers,
-                params=req.params,
                 content=req.body.encode() if req.body else None,
                 timeout=req.timeout,
             )
@@ -319,9 +333,8 @@ async def bulk_test(req: BulkRequest):
                 start = time.time()
                 response = await client.request(
                     method=req.method.upper(),
-                    url=req.url,
+                    url=_url_with_params(req.url, params),
                     headers=headers,
-                    params=params,
                     content=body.encode() if body else None,
                     timeout=req.timeout,
                 )
@@ -431,8 +444,8 @@ async def multi_target_test(req: MultiTargetRequest):
                 try:
                     start = time.time()
                     resp  = await client.request(
-                        method=req.method.upper(), url=url,
-                        headers=headers, params=params,
+                        method=req.method.upper(), url=_url_with_params(url, params),
+                        headers=headers,
                         content=body.encode() if body else None,
                         timeout=req.timeout,
                     )
