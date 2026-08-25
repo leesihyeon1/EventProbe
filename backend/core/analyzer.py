@@ -809,6 +809,236 @@ ALERT_RULES = [
         "reference": "",
         "check": lambda h, b, bl, s: bool(re.search(r'"__schema"|"__type"|graphql', bl)),
     },
+
+    # ══════════════════════════════════════════════════════════════════
+    # 확장 룰 (OWASP Secure Headers / Nuclei / ZAP / gitleaks 기준)
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── 추가 보안 헤더 ─────────────────────────────────────────────────
+    {
+        "id": "10063-referrer", "name": "Referrer-Policy 헤더 누락", "risk": "low", "confidence": "certain",
+        "description": "Referrer-Policy 헤더가 없어 외부 사이트로 Referer 를 통한 정보 유출 가능성이 있습니다.",
+        "solution": "Referrer-Policy: no-referrer 또는 strict-origin-when-cross-origin 을 설정하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "referrer-policy" not in h and s == 200,
+    },
+    {
+        "id": "90004-coop", "name": "Cross-Origin-Opener-Policy 누락", "risk": "low", "confidence": "firm",
+        "description": "COOP 헤더가 없어 교차 오리진 창 간 격리가 되지 않습니다(XS-Leaks/Spectre 노출).",
+        "solution": "Cross-Origin-Opener-Policy: same-origin 을 설정하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "cross-origin-opener-policy" not in h and s == 200,
+    },
+    {
+        "id": "90004-corp", "name": "Cross-Origin-Resource-Policy 누락", "risk": "informational", "confidence": "tentative",
+        "description": "CORP 헤더가 없어 리소스가 타 오리진에 임베드될 수 있습니다.",
+        "solution": "Cross-Origin-Resource-Policy: same-origin 을 검토하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "cross-origin-resource-policy" not in h and s == 200,
+    },
+    {
+        "id": "10063-xpcdp", "name": "X-Permitted-Cross-Domain-Policies 누락", "risk": "informational", "confidence": "tentative",
+        "description": "Adobe 크로스도메인 정책 제어 헤더가 없습니다.",
+        "solution": "X-Permitted-Cross-Domain-Policies: none 을 설정하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "x-permitted-cross-domain-policies" not in h and s == 200,
+    },
+    {
+        "id": "10098-cors-methods", "name": "CORS — Allow-Methods 와일드카드", "risk": "low", "confidence": "certain",
+        "description": "Access-Control-Allow-Methods 가 * 로 모든 메서드를 허용합니다.",
+        "solution": "필요한 메서드만 명시하세요.",
+        "reference": "https://portswigger.net/web-security/cors",
+        "check": lambda h, b, bl, s: h.get("access-control-allow-methods", "").strip() == "*",
+    },
+    {
+        "id": "10098-cors-headers", "name": "CORS — Allow-Headers 와일드카드", "risk": "low", "confidence": "certain",
+        "description": "Access-Control-Allow-Headers 가 * 로 모든 헤더를 허용합니다.",
+        "solution": "허용 헤더를 제한하세요.",
+        "reference": "https://portswigger.net/web-security/cors",
+        "check": lambda h, b, bl, s: h.get("access-control-allow-headers", "").strip() == "*",
+    },
+    {
+        "id": "10038-cspro", "name": "CSP 가 Report-Only 로만 설정", "risk": "medium", "confidence": "firm",
+        "description": "Content-Security-Policy-Report-Only 만 있고 실제 강제(CSP)가 없어 XSS 를 차단하지 못합니다.",
+        "solution": "테스트 후 Content-Security-Policy 로 강제 적용하세요.",
+        "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html",
+        "check": lambda h, b, bl, s: "content-security-policy-report-only" in h and "content-security-policy" not in h,
+    },
+    {
+        "id": "10054-samesite-none", "name": "쿠키 SameSite=None + Secure 누락", "risk": "medium", "confidence": "firm",
+        "description": "SameSite=None 쿠키에 Secure 가 없어 최신 브라우저에서 거부되거나 평문 전송됩니다.",
+        "solution": "SameSite=None 쿠키에는 반드시 Secure 를 함께 설정하세요.",
+        "reference": "https://owasp.org/www-community/SameSite",
+        "check": lambda h, b, bl, s: "samesite=none" in h.get("set-cookie", "").lower()
+                                      and "secure" not in h.get("set-cookie", "").lower(),
+    },
+    {
+        "id": "10037-via", "name": "Via 헤더 — 프록시 정보 노출", "risk": "informational", "confidence": "certain",
+        "description": lambda h, **_: f"Via 헤더로 프록시/캐시 정보가 노출됩니다: {h.get('via','')}",
+        "solution": "Via 헤더 노출을 최소화하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "via" in h,
+    },
+
+    # ── 시크릿/토큰 노출 (gitleaks 계열) ───────────────────────────────
+    {
+        "id": "secret-aws", "name": "AWS Access Key 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 AWS Access Key ID(AKIA…) 로 보이는 문자열이 있습니다.",
+        "solution": "키를 즉시 폐기·회전하고 응답에서 제거하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b", b or "")),
+    },
+    {
+        "id": "secret-gcp", "name": "Google API Key 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 Google API 키(AIza…) 로 보이는 문자열이 있습니다.",
+        "solution": "키를 폐기·제한하고 응답에서 제거하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\bAIza[0-9A-Za-z_\-]{35}\b", b or "")),
+    },
+    {
+        "id": "secret-github", "name": "GitHub 토큰 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 GitHub 토큰(ghp_/gho_/github_pat_) 이 노출됩니다.",
+        "solution": "토큰을 폐기하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\b(ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36}\b|github_pat_[0-9A-Za-z_]{22,}", b or "")),
+    },
+    {
+        "id": "secret-slack", "name": "Slack 토큰/웹훅 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 Slack 토큰(xox…) 또는 웹훅 URL 이 노출됩니다.",
+        "solution": "토큰/웹훅을 폐기하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"xox[baprs]-[0-9A-Za-z-]{10,}|hooks\.slack\.com/services/", b or "")),
+    },
+    {
+        "id": "secret-stripe", "name": "Stripe 라이브 키 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 Stripe 라이브 시크릿 키(sk_live_) 가 노출됩니다.",
+        "solution": "키를 즉시 폐기하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\bsk_live_[0-9A-Za-z]{24,}\b|\brk_live_[0-9A-Za-z]{24,}\b", b or "")),
+    },
+    {
+        "id": "secret-jwt", "name": "JWT 토큰 노출", "risk": "medium", "confidence": "firm",
+        "description": "응답 본문에 JWT 로 보이는 토큰이 노출됩니다(민감 클레임·세션 가능).",
+        "solution": "토큰이 본문에 노출되지 않도록 하세요.",
+        "reference": "https://portswigger.net/web-security/jwt",
+        "check": lambda h, b, bl, s: bool(re.search(r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", b or "")),
+    },
+    {
+        "id": "secret-pw-json", "name": "패스워드 필드 노출(JSON)", "risk": "high", "confidence": "tentative",
+        "description": "응답 JSON 에 password/passwd 값이 평문으로 포함되어 있을 수 있습니다.",
+        "solution": "비밀번호 등 민감 필드를 응답에서 제거하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r'"(password|passwd|pwd)"\s*:\s*"[^"]{3,}"', b or "", re.I)),
+    },
+
+    # ── 프레임워크 디버그/에러 페이지 ──────────────────────────────────
+    {
+        "id": "debug-django", "name": "Django DEBUG 페이지 노출", "risk": "high", "confidence": "certain",
+        "description": "Django 디버그 페이지가 노출되어 소스·설정·환경변수가 유출됩니다.",
+        "solution": "프로덕션에서 DEBUG=False 로 설정하세요.",
+        "reference": "https://docs.djangoproject.com/en/stable/ref/settings/#debug",
+        "check": lambda h, b, bl, s: "you're seeing this error because you have" in bl or "django.core.exceptions" in bl,
+    },
+    {
+        "id": "debug-flask", "name": "Werkzeug/Flask 디버거 노출", "risk": "high", "confidence": "certain",
+        "description": "Werkzeug 대화형 디버거가 노출됩니다. PIN 우회 시 원격 코드 실행이 가능합니다.",
+        "solution": "프로덕션에서 디버그 모드를 끄세요.",
+        "reference": "https://werkzeug.palletsprojects.com/",
+        "check": lambda h, b, bl, s: "werkzeug debugger" in bl or "the console has been disabled" in bl,
+    },
+    {
+        "id": "debug-rails", "name": "Rails 예외 페이지 노출", "risk": "high", "confidence": "certain",
+        "description": "Rails 상세 예외 페이지가 노출되어 소스/스택이 유출됩니다.",
+        "solution": "config.consider_all_requests_local = false 로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "action controller: exception caught" in bl or "actionview::template::error" in bl,
+    },
+    {
+        "id": "debug-laravel", "name": "Laravel 디버그(Ignition) 노출", "risk": "high", "confidence": "certain",
+        "description": "Laravel Whoops/Ignition 디버그 페이지가 노출됩니다(CVE-2021-3129 이력).",
+        "solution": "APP_DEBUG=false 로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: ("whoops" in bl and "laravel" in bl) or "illuminate\\" in bl or "ignition" in bl and "laravel" in bl,
+    },
+    {
+        "id": "debug-spring", "name": "Spring Whitelabel 에러 노출", "risk": "medium", "confidence": "firm",
+        "description": "Spring Boot Whitelabel 에러 페이지가 노출됩니다(스택/버전 유출 가능).",
+        "solution": "server.error.whitelabel.enabled=false 및 상세 에러 숨김.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "whitelabel error page" in bl,
+    },
+    {
+        "id": "debug-aspnet", "name": "ASP.NET 상세 오류(YSOD) 노출", "risk": "high", "confidence": "certain",
+        "description": "ASP.NET 노란 오류 화면이 노출되어 스택/소스가 유출됩니다.",
+        "solution": "customErrors mode=On, <deployment retail=true> 설정.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "server error in '/' application" in bl and "stack trace" in bl,
+    },
+    {
+        "id": "debug-symfony", "name": "Symfony 프로파일러/예외 노출", "risk": "medium", "confidence": "firm",
+        "description": "Symfony 디버그 툴바/예외 페이지가 노출됩니다.",
+        "solution": "APP_ENV=prod, APP_DEBUG=0 으로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "symfony\\component" in bl or "sf-toolbar" in bl or "x-debug-token" in h,
+    },
+    {
+        "id": "debug-php", "name": "PHP 오류/경고 노출", "risk": "medium", "confidence": "firm",
+        "description": "PHP Fatal/Warning/Notice 등 오류가 노출되어 경로·코드가 유출됩니다.",
+        "solution": "display_errors=Off 로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r"<b>(fatal error|warning|notice|parse error)</b>|on line <b>\d+</b>", bl)),
+    },
+    {
+        "id": "debug-phpinfo", "name": "phpinfo() 노출", "risk": "high", "confidence": "certain",
+        "description": "phpinfo() 출력이 노출되어 서버 구성 전체가 유출됩니다.",
+        "solution": "phpinfo 페이지를 제거하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "phpinfo()" in bl or (">php version<" in bl and "configuration" in bl and "php credits" in bl),
+    },
+
+    # ── 노출 파일/디렉토리 ─────────────────────────────────────────────
+    {
+        "id": "expose-dirlist", "name": "디렉토리 리스팅 노출", "risk": "medium", "confidence": "firm",
+        "description": "디렉토리 인덱스가 노출되어 파일 구조가 공개됩니다.",
+        "solution": "Options -Indexes 등으로 디렉토리 리스팅을 비활성화하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: ("<title>index of /" in bl or "directory listing for" in bl) and "parent directory" in bl or "<title>index of /" in bl,
+    },
+    {
+        "id": "expose-git", "name": ".git 저장소 노출", "risk": "high", "confidence": "certain",
+        "description": ".git 설정/객체가 노출되어 전체 소스 복원이 가능합니다.",
+        "solution": ".git 디렉토리 외부 접근을 차단하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "[core]" in bl and "repositoryformatversion" in bl,
+    },
+    {
+        "id": "expose-env", "name": ".env 환경파일 노출", "risk": "critical", "confidence": "certain",
+        "description": ".env 파일이 노출되어 DB/API 키 등 시크릿이 유출됩니다.",
+        "solution": ".env 접근을 차단하고 노출된 시크릿을 폐기하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r"(app_key|db_password|db_username|aws_secret|secret_key)\s*=", bl)),
+    },
+    {
+        "id": "expose-swagger", "name": "API 문서(Swagger/OpenAPI) 노출", "risk": "informational", "confidence": "firm",
+        "description": "Swagger/OpenAPI 문서가 노출되어 전체 API 표면이 공개됩니다.",
+        "solution": "프로덕션에서 API 문서 접근을 제한하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r'"swagger"\s*:|"openapi"\s*:|swagger-ui', bl)),
+    },
+    {
+        "id": "expose-actuator", "name": "Spring Actuator 노출", "risk": "high", "confidence": "firm",
+        "description": "Spring Boot Actuator 엔드포인트(env/heapdump 등)가 노출됩니다.",
+        "solution": "management.endpoints 노출을 제한하고 인증을 적용하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r'"_links"\s*:.*"(env|health|heapdump|beans|mappings)"|activeprofiles', bl)),
+    },
+    {
+        "id": "expose-ds-store", "name": ".DS_Store / 백업 흔적 노출", "risk": "low", "confidence": "tentative",
+        "description": "OS/에디터 임시·백업 파일 흔적이 노출됩니다.",
+        "solution": "불필요한 파일을 제거하고 접근을 차단하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "bud1" in bl and ".ds_store" in bl,
+    },
 ]
 
 
