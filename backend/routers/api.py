@@ -127,13 +127,19 @@ class PortScanRequest(BaseModel):
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "payloads.json")
 
 _PAYLOAD_CACHE = None
+_PAYLOAD_MTIME = None
 
 def load_payloads():
-    # 기동 후 최초 1회만 디스크에서 읽고 이후 캐시 반환
-    global _PAYLOAD_CACHE
-    if _PAYLOAD_CACHE is None:
+    # 파일 수정 시각(mtime)이 바뀌면 다시 읽어 반영(서버 재시작 없이 payloads.json 편집 가능)
+    global _PAYLOAD_CACHE, _PAYLOAD_MTIME
+    try:
+        mtime = os.path.getmtime(DATA_FILE)
+    except OSError:
+        mtime = None
+    if _PAYLOAD_CACHE is None or mtime != _PAYLOAD_MTIME:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             _PAYLOAD_CACHE = json.load(f)
+        _PAYLOAD_MTIME = mtime
     return _PAYLOAD_CACHE
 
 def find_payload_by_id(payload_id: str):

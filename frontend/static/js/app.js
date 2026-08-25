@@ -446,6 +446,7 @@ async function loadSidebar() {
           <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
             <span class="risk-dot ${p.risk || 'medium'}"></span>
             <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
+            ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
           </div>`).join('')}
       </div>`;
     container.appendChild(group);

@@ -1748,3 +1748,7 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 /* 응답 검색 하이라이트 */
 mark.search-hit { background: rgba(240, 200, 60, .35); color: inherit; border-radius: 2px; padding: 0 1px; }
 mark.search-hit.current { background: #f0a500; color: #1a1a1a; }
+
+/* 페이로드 출처 링크 */
+.payload-item .payload-ref { margin-left:auto; font-size:11px; color:var(--text-muted); text-decoration:none; opacity:.6; padding:0 4px; }
+.payload-item .payload-ref:hover { color:var(--accent); opacity:1; }
