@@ -2036,6 +2036,7 @@ function openBulkModal() {
 
   loadBulkPayloadList(document.getElementById('bulkCategory').value);
   loadMultiPayloadList(document.getElementById('multiCategory').value);
+  switchMultiPayloadMode('custom');   // 다중 타겟은 기본 '직접 입력'(공격 구문 자동 삽입 방지)
   switchModalTab('single');
   document.getElementById('bulkModal').classList.remove('hidden');
 }
@@ -2084,7 +2085,7 @@ function selectAllMultiPayloads(checked) {
 
 /* ── 다중 타겟 일괄 테스트 ── */
 /* ── 다중 타겟 페이로드 모드 전환 ── */
-let multiPayloadMode = 'list';
+let multiPayloadMode = 'custom';   // 기본값: 직접 입력(공격 페이로드 자동 삽입 방지)
 
 function switchMultiPayloadMode(mode) {
   multiPayloadMode = mode;
