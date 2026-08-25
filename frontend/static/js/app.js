@@ -731,12 +731,15 @@ async function goTest() {
         const r = await API.request(_applyCandidate(base, cand));
         const v = r.analysis?.verdict || 'error';
         const [label, cls] = V[v] || [v, 'tag-blue'];
-        if (r.error || r.detail || r.status_code === 0) {
-          // 연결 실패 등 구조화 에러
-          cell.innerHTML = `<span class="tag tag-blue">에러</span> <span style="color:var(--text-muted)">${escapeHtml(r.error || r.detail || '요청 실패')}</span>`;
+        let extra;
+        if (r.status_code === 0) {
+          // 응답 없음 — 타임아웃/연결실패 등. 실제 사유 우선 노출
+          const to = (base.timeout || 10);
+          extra = r.error || r.detail || (v === 'timeout' ? `응답 시간 초과 (~${to}s) — 대상 무응답/지연` : '응답 없음 — 대상 도달 불가 가능성');
         } else {
-          cell.innerHTML = `<span class="tag ${cls}">${label}</span> <span style="color:var(--text-muted)">HTTP ${r.status_code} · ${Math.round(r.response_time)}ms · risk ${escapeHtml(r.analysis?.risk_level||'-')}</span>`;
+          extra = `HTTP ${r.status_code} · ${Math.round(r.response_time)}ms · risk ${escapeHtml(r.analysis?.risk_level||'-')}`;
         }
+        cell.innerHTML = `<span class="tag ${cls}">${label}</span> <span style="color:var(--text-muted)">${escapeHtml(extra)}</span>`;
       } catch (e) {
         cell.innerHTML = `<span class="tag tag-blue">실패</span> ${escapeHtml(e.message)}`;
       }
