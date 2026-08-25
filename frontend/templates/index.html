@@ -475,9 +475,15 @@
             </select>
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">대상 파라미터 이름</label>
-          <input id="multiTargetParam" class="form-input" type="text" placeholder="q">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">대상 파라미터 이름</label>
+            <input id="multiTargetParam" class="form-input" type="text" placeholder="q">
+          </div>
+          <div class="form-group">
+            <label class="form-label" title="한 번에 병렬로 보낼 요청 수. 높이면 빠르지만 WAF/레이트리밋에 걸릴 수 있음(1~30)">동시 실행 수</label>
+            <input id="multiConcurrency" class="form-input" type="number" min="1" max="30" value="12">
+          </div>
         </div>
         <!-- 페이로드 입력 모드 선택 -->
         <div class="form-group">

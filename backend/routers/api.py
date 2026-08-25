@@ -119,6 +119,7 @@ class MultiTargetRequest(BaseModel):
     timeout: int = 10
     default_headers: dict = {}
     use_defaults: bool = True
+    concurrency: int = 12              # 동시 요청 수(속도) — 대상 부하/차단 방지 상한 적용
 
 # 포트 스캔
 class PortScanRequest(BaseModel):
@@ -467,35 +468,47 @@ async def multi_target_test(req: MultiTargetRequest):
         if not payloads_to_test:
             raise HTTPException(status_code=404, detail="페이로드를 찾을 수 없습니다")
 
-    target_results = []
     _base_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
+    urls = [u.strip() for u in req.urls if u and u.strip()]
 
-    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
-        for url in req.urls:
-            url = url.strip()
-            if not url:
-                continue
-            results = []
-            for p in payloads_to_test:
-                params  = dict(req.params)
-                headers = dict(_base_headers)
-                body    = req.body
+    # 동시 실행 수 — 속도↑. 대상 서버 부하/차단 방지를 위해 상한(30)을 둔다.
+    concurrency = max(1, min(req.concurrency or 12, 30))
+    sem = asyncio.Semaphore(concurrency)
+    limits = httpx.Limits(max_connections=concurrency + 10, max_keepalive_connections=concurrency)
 
-                # 빈 페이로드면 삽입 없이 그대로 요청
-                if p.get("payload", ""):
-                    if req.inject_in == "params":
-                        params[req.target_param] = p["payload"]
-                    elif req.inject_in == "body":
-                        try:
-                            bd = json.loads(body) if body else {}
-                            bd[req.target_param] = p["payload"]
-                            body = json.dumps(bd)
-                            headers.setdefault("Content-Type", "application/json")
-                        except Exception:
-                            body = p["payload"]
-                    elif req.inject_in == "headers":
-                        headers[req.target_param] = p["payload"]
+    def _fail_result(p, verdict, block, risk, detail, score, rtime):
+        return {
+            "payload_id": p["id"], "payload_name": p["name"],
+            "payload": p["payload"], "description": p["description"],
+            "risk": p["risk"], "status_code": 0, "response_time": rtime,
+            "analysis": {"verdict": verdict, "confidence": 30 if verdict == "timeout" else 0,
+                "waf_detected": None, "block_reason": block,
+                "error_leaks": [], "sensitive_data": [], "response_anomalies": [],
+                "risk_level": risk, "details": detail, "score": score, "alerts": []},
+        }
 
+    async with httpx.AsyncClient(verify=False, follow_redirects=True, limits=limits) as client:
+        async def run_one(url, p):
+            params  = dict(req.params)
+            headers = dict(_base_headers)
+            body    = req.body
+
+            # 빈 페이로드면 삽입 없이 그대로 요청
+            if p.get("payload", ""):
+                if req.inject_in == "params":
+                    params[req.target_param] = p["payload"]
+                elif req.inject_in == "body":
+                    try:
+                        bd = json.loads(body) if body else {}
+                        bd[req.target_param] = p["payload"]
+                        body = json.dumps(bd)
+                        headers.setdefault("Content-Type", "application/json")
+                    except Exception:
+                        body = p["payload"]
+                elif req.inject_in == "headers":
+                    headers[req.target_param] = p["payload"]
+
+            async with sem:
                 try:
                     start = time.time()
                     resp  = await client.request(
@@ -507,41 +520,32 @@ async def multi_target_test(req: MultiTargetRequest):
                     elapsed = (time.time() - start) * 1000
                     bt = resp.text[:5000]
                     analysis = analyze_response(resp.status_code, dict(resp.headers), bt, elapsed, p["payload"], req.category)
-                    results.append({
+                    return {
                         "payload_id": p["id"], "payload_name": p["name"],
                         "payload": p["payload"], "description": p["description"],
                         "risk": p["risk"], "status_code": resp.status_code,
                         "response_time": round(elapsed, 2), "analysis": analysis,
-                    })
+                    }
                 except httpx.TimeoutException:
-                    results.append({
-                        "payload_id": p["id"], "payload_name": p["name"],
-                        "payload": p["payload"], "description": p["description"],
-                        "risk": p["risk"], "status_code": 0,
-                        "response_time": req.timeout * 1000,
-                        "analysis": {"verdict": "timeout", "confidence": 30,
-                            "waf_detected": None, "block_reason": ["타임아웃"],
-                            "error_leaks": [], "sensitive_data": [],
-                            "response_anomalies": [], "risk_level": "medium",
-                            "details": ["타임아웃"], "score": 35, "alerts": []},
-                    })
+                    return _fail_result(p, "timeout", ["타임아웃"], "medium", ["타임아웃"], 35, req.timeout * 1000)
                 except Exception as e:
-                    results.append({
-                        "payload_id": p["id"], "payload_name": p["name"],
-                        "payload": p["payload"], "description": p["description"],
-                        "risk": p["risk"], "status_code": 0, "response_time": 0,
-                        "analysis": {"verdict": "error", "confidence": 0,
-                            "waf_detected": None, "block_reason": [str(e)],
-                            "error_leaks": [], "sensitive_data": [],
-                            "response_anomalies": [], "risk_level": "info",
-                            "details": [f"에러: {e}"], "score": 0, "alerts": []},
-                    })
+                    return _fail_result(p, "error", [str(e)], "info", [f"에러: {e}"], 0, 0)
 
-            target_results.append({
-                "url": url,
-                "results": results,
-                "summary": generate_summary(results),
-            })
+        # 모든 (url × payload) 조합을 동시에 실행(세마포어로 상한) 후 URL별로 재그룹화
+        tasks = [(url, asyncio.create_task(run_one(url, p)))
+                 for url in urls for p in payloads_to_test]
+        gathered = await asyncio.gather(*[t for _, t in tasks])
+
+    # 결과를 URL 순서·페이로드 순서 그대로 재구성(gather 는 태스크 생성 순서를 보존)
+    by_url = {url: [] for url in urls}
+    for (url, _), res in zip(tasks, gathered):
+        by_url[url].append(res)
+
+    target_results = [{
+        "url": url,
+        "results": by_url[url],
+        "summary": generate_summary(by_url[url]),
+    } for url in urls]
 
     return {"targets": target_results, "target_count": len(target_results)}
 

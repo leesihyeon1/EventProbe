@@ -2114,6 +2114,7 @@ async function runMultiTargetTest() {
   const targetParam = document.getElementById('multiTargetParam').value.trim() || 'q';
   const injectIn    = document.getElementById('multiInjectIn').value;
   const method      = document.getElementById('multiMethod').value;
+  const concurrency = Math.max(1, Math.min(parseInt(document.getElementById('multiConcurrency')?.value, 10) || 12, 30));
 
   let requestBody;
 
@@ -2131,7 +2132,7 @@ async function runMultiTargetTest() {
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
       default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
       category: '_custom', payload_ids: [],
-      custom_payloads: customPayloads,
+      custom_payloads: customPayloads, concurrency,
     };
   } else {
     // 체크리스트 모드
@@ -2144,7 +2145,7 @@ async function runMultiTargetTest() {
       method, urls, target_param: targetParam,
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
       default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
-      category: catId, payload_ids: checkedIds,
+      category: catId, payload_ids: checkedIds, concurrency,
     };
   }
 
