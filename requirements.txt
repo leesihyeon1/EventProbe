@@ -1,7 +1,10 @@
 fastapi>=0.100.0
 uvicorn>=0.22.0
-httpx>=0.24.0
+httpx>=0.28.0
 jinja2>=3.1.0
 pydantic>=2.0.0
 aiofiles>=23.0.0
 python-multipart>=0.0.6
+brotli>=1.1.0          # httpx 가 Content-Encoding: br 응답을 디코딩하기 위함
+zstandard>=0.22.0      # httpx 가 Content-Encoding: zstd 응답을 디코딩하기 위함
+python-dotenv>=1.0.0   # .env 파일에서 NVIDIA_API_KEY 등 로드

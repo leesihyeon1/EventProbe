@@ -9,6 +9,7 @@ from typing import Optional
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary
+from core.ai_analyzer import ai_analyze, ai_generate_variants, is_enabled as ai_enabled
 
 router = APIRouter(prefix="/api")
 
@@ -30,16 +31,31 @@ DEFAULT_HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 
+# httpx가 body/전송 계층 기준으로 직접 계산·관리하는 헤더.
+# 캡처/붙여넣기한 raw 패킷에 그대로 들어있으면 실제 body 길이와 충돌해
+# "Too little data for declared Content-Length" 같은 오류로 전송이 실패한다.
+# (Host 는 Host 헤더 인젝션 테스트를 위해 일부러 남겨둔다)
+# 캡처/붙여넣기 패킷의 Accept-Encoding(br/zstd 포함)은 그대로 보내되,
+# 응답 디코딩은 requirements 의 brotli/zstandard 로 httpx 가 처리한다.
+# (디코더가 없으면 br/zstd 응답이 깨진 바이트로 들어오므로 두 패키지는 필수 의존성)
+_AUTO_MANAGED_HEADERS = {"content-length", "transfer-encoding", "connection", "keep-alive", "proxy-connection"}
+
+
+def _strip_auto_managed(headers: dict) -> dict:
+    return {k: v for k, v in headers.items() if k.lower() not in _AUTO_MANAGED_HEADERS}
+
+
 def merge_headers(user_headers: dict, profile: dict = None, use_defaults: bool = True) -> dict:
-    """기본 헤더 위에 사용자 헤더를 얹음(사용자 값 우선, 대소문자 무시). use_defaults=False면 사용자 헤더만."""
+    """기본 헤더 위에 사용자 헤더를 얹음(사용자 값 우선, 대소문자 무시). use_defaults=False면 사용자 헤더만.
+    전송 계층이 직접 관리하는 헤더(Content-Length 등)는 제거해 body 길이 충돌을 방지한다."""
     user_headers = user_headers or {}
     if not use_defaults:
-        return dict(user_headers)
+        return _strip_auto_managed(dict(user_headers))
     base = dict(profile) if profile else dict(DEFAULT_HEADERS)
     lower_map = {k.lower(): k for k in base}
     for k, v in user_headers.items():
         base[lower_map.get(k.lower(), k)] = v
-    return base
+    return _strip_auto_managed(base)
 
 # ── 요청 모델 ──────────────────────────────────────────────
 class SingleRequest(BaseModel):
@@ -140,6 +156,22 @@ async def send_request(req: SingleRequest):
             category=req.category,
         )
 
+        # AI 상세 분석 (NVIDIA_API_KEY 설정 시 자동). 실패해도 메인 분석엔 영향 없음.
+        if ai_enabled():
+            analysis["ai"] = await ai_analyze({
+                "method": req.method.upper(),
+                "url": req.url,
+                "payload": req.payload,
+                "category": req.category,
+                "req_body": req.body,
+                "status_code": response.status_code,
+                "response_time": round(elapsed, 2),
+                "resp_headers": dict(response.headers),
+                "resp_body": body_text,
+                "base_verdict": analysis.get("verdict"),
+                "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
+            })
+
         return {
             "status_code": response.status_code,
             "headers": dict(response.headers),
@@ -171,6 +203,25 @@ async def send_request(req: SingleRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── AI 상태 / 페이로드 변형 ─────────────────────────────────
+class AiVariantRequest(BaseModel):
+    base_payload: str
+    category: str = ""
+    waf: str = ""
+    count: int = 8
+
+@router.get("/ai-status")
+def ai_status():
+    return {"enabled": ai_enabled()}
+
+@router.post("/ai-payloads")
+async def ai_payloads(req: AiVariantRequest):
+    if not ai_enabled():
+        raise HTTPException(status_code=400, detail="AI 미설정 (.env 의 NVIDIA_API_KEY 없음)")
+    count = max(1, min(req.count, 20))
+    return await ai_generate_variants(req.base_payload, req.category, req.waf, count)
 
 
 # ── 다중 페이로드 일괄 테스트 ───────────────────────────────
