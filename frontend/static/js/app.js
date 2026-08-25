@@ -1337,6 +1337,7 @@ function renderAiCard(ai) {
   const succ = { yes: 'tag-red', no: 'tag-green', inconclusive: 'tag-blue' }[ai.attack_success] || 'tag-blue';
   const succLabel = { yes: '공격 성공', no: '공격 실패/미영향', inconclusive: '판단 불가' }[ai.attack_success] || String(ai.attack_success || '-');
   const sev = String(ai.severity || 'info');
+  const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
   const fp = { low: '낮음', medium: '중간', high: '높음' }[ai.false_positive_risk] || (ai.false_positive_risk || '-');
   const ev = Array.isArray(ai.evidence) ? ai.evidence : (ai.evidence ? [ai.evidence] : []);
   return `
@@ -1345,7 +1346,7 @@ function renderAiCard(ai) {
       <div class="analysis-card-body">
         <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
           <span class="tag ${succ}">${escapeHtml(succLabel)}</span>
-          <span class="tag tag-${sev === 'critical' || sev === 'high' ? 'red' : sev === 'medium' ? 'yellow' : 'blue'}">위험도 ${escapeHtml(sev)}</span>
+          <span class="tag tag-${sev === 'critical' || sev === 'high' ? 'red' : sev === 'medium' ? 'yellow' : 'blue'}">위험도 ${escapeHtml(sevKo)}</span>
           <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
           <span class="tag tag-blue">오탐위험 ${escapeHtml(fp)}</span>
         </div>
@@ -1407,9 +1408,10 @@ function renderAttackCard(a) {
 function renderVerdictCard(a, confidenceColor) {
   const ai = a.ai_verdict;
   if (ai && !ai.error) {
-    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], inconclusive: ['미확정', 'tag-blue'] };
+    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
     const [label, cls] = OUT[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
     const sev = String(ai.severity || 'info');
+    const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
     const sevCls = (sev === 'critical' || sev === 'high') ? 'tag-red' : sev === 'medium' ? 'tag-yellow' : 'tag-blue';
     return `
       <div class="analysis-card" data-card-id="verdict" style="border-color:rgba(188,140,255,.35)">
@@ -1419,7 +1421,7 @@ function renderVerdictCard(a, confidenceColor) {
         <div class="analysis-card-body">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
             <span class="tag ${cls}">${label}</span>
-            <span class="tag ${sevCls}">위험도 ${escapeHtml(sev)}</span>
+            <span class="tag ${sevCls}">위험도 ${escapeHtml(sevKo)}</span>
             <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
           </div>
           ${ai.reasoning ? `<div class="detail-item">${escapeHtml(ai.reasoning)}</div>` : ''}

@@ -336,18 +336,29 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
 
 
 _VERDICT_SYSTEM = (
-    "You are a web application security analyst. You are given ONLY the labels/results of a "
-    "deterministic scan (attack signals, alert names, status, timing) — NO raw response data. "
-    "Your job is to SYNTHESIZE (narrate/prioritize/remediate), NOT to re-judge. RULES:\n"
-    "- 'outcome' MUST equal deterministic_outcome. Do NOT change it. "
-    "attack_signals decide attack success (반사/파일읽기/명령출력/시간지연 일치 = 성공). "
-    "security_alerts are SEPARATE response-hygiene issues and do NOT mean the attack was blocked.\n"
-    "- severity: use the highest of the attack outcome and alert risks.\n"
-    "- reasoning: explain WHY, referencing the given signals only. Do not invent findings.\n"
-    "Respond ONLY with a JSON object, no prose: "
+    "당신은 웹 보안 분석가입니다. 결정적 스캐너가 뽑은 라벨/결과(공격 성공 신호, 알림 이름·위험도, "
+    "상태코드, 응답시간)만 받습니다 — 원본 응답 데이터는 없습니다. 당신의 일은 재판정이 아니라, 이 신호들을 "
+    "사람이 읽기 좋은 자연스러운 한국어로 요약·우선순위화·조치 제안하는 것입니다.\n"
+    "규칙:\n"
+    "1) outcome 은 주어진 '확정_판정'을 그대로 따른다(뒤집지 말 것). 공격 성공 신호가 있으면 success, "
+    "없으면 inconclusive. 보안 헤더/쿠키 같은 '응답 위생' 문제는 별개이며 '공격이 차단됐다'는 뜻이 아니다.\n"
+    "2) severity 는 공격 결과와 알림 위험도 중 가장 높은 값.\n"
+    "3) 문장은 자연스러운 한국어로 쓰고, 내부 필드명·변수명(attack_signals, security_alerts, outcome 등)을 "
+    "그대로 노출하지 말 것. 무엇을 확인해서 무엇을 확인한다는 식의 동어반복·순환 문장 금지. 신호가 실제로 "
+    "의미하는 바를 구체적으로 서술한다.\n"
+    "4) confidence(0-100)는 이 판정을 얼마나 확신하는지. 반사·파일읽기·명령출력·시간지연 일치 등 직접 증거가 "
+    "있으면 85-100, 성공 신호가 전혀 없어 미확인이면 50-70. 미확인(inconclusive)에 100 을 주지 말 것.\n"
+    "5) reasoning 은 무엇이 관찰됐고 그래서 어떤 상태인지 1-2문장. priority 는 다음에 실제로 확인/수행할 구체적 "
+    "행동(없으면 빈 문자열). remediation 은 구체적 수정(없으면 빈 문자열). 없는 내용을 지어내지 말 것.\n"
+    "오직 JSON 객체 하나만 출력(그 외 설명 금지): "
     '{"outcome":"success|blocked|inconclusive","severity":"critical|high|medium|low|info",'
-    '"confidence":0-100,"reasoning":"1-2 sentences in Korean",'
-    '"priority":"what to verify first, Korean short","remediation":"Korean short fix"}'
+    '"confidence":0-100,"reasoning":"한국어 1-2문장","priority":"한국어 짧게 또는 빈 문자열",'
+    '"remediation":"한국어 짧게 또는 빈 문자열"}\n'
+    "좋은 예: "
+    '{"outcome":"inconclusive","severity":"low","confidence":65,'
+    '"reasoning":"공격이 성공했다는 신호는 없고, 보안 헤더 누락과 세션 쿠키 Secure 미설정 같은 경미한 응답 위생 문제만 확인됩니다.",'
+    '"priority":"같은 요청을 정상 파라미터로 보내 기준 응답과 비교해 오탐 여부를 확인",'
+    '"remediation":"Content-Security-Policy 헤더 추가, 세션 쿠키에 Secure·HttpOnly 플래그 설정"}'
 )
 
 
@@ -360,13 +371,13 @@ async def ai_verdict(ctx: dict) -> dict | None:
     findings = ctx.get("findings") or []
     alerts = ctx.get("alerts") or []
     user = (
-        f"category: {ctx.get('category') or '(none)'}\n"
-        f"http_status: {ctx.get('status')}\n"
-        f"response_time_ms: {ctx.get('time')}\n"
-        f"deterministic_outcome: {ctx.get('outcome')}\n"
-        f"attack_signals: {json.dumps(findings, ensure_ascii=False)}\n"
-        f"security_alerts: {json.dumps(alerts, ensure_ascii=False)}\n"
-        f"Give the overall verdict."
+        f"공격_유형: {ctx.get('category') or '(없음)'}\n"
+        f"상태코드: {ctx.get('status')}\n"
+        f"응답시간_ms: {ctx.get('time')}\n"
+        f"확정_판정: {ctx.get('outcome')}\n"
+        f"공격_성공_신호: {json.dumps(findings, ensure_ascii=False)}\n"
+        f"응답_보안_점검: {json.dumps(alerts, ensure_ascii=False)}\n"
+        f"위 신호만 근거로 종합 판정을 JSON 으로 주세요."
     )
     payload = {
         "model": model,
