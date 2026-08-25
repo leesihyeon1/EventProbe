@@ -398,8 +398,15 @@
     <div class="modal-tab-content" id="mtab-multi" style="display:none">
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label">대상 URL 목록 <span style="color:var(--text-muted);font-weight:400">(줄바꿈으로 구분)</span></label>
-          <textarea id="multiUrls" class="code-editor" rows="5" placeholder="https://target1.example.com/search&#10;https://target2.example.com/api/query&#10;https://target3.example.com/login"></textarea>
+          <label class="form-label">대상 URL 목록
+            <span style="color:var(--text-muted);font-weight:400">(줄바꿈으로 구분 · Splunk CSV/로그를 여기로 드래그하거나 <a href="#" onclick="document.getElementById('splunkCsvInput').click();return false;" style="color:var(--accent);text-decoration:none">📁 파일 선택</a>)</span>
+          </label>
+          <input type="file" id="splunkCsvInput" accept=".csv,.txt,.log,.tsv" style="display:none" onchange="handleSplunkPick(this)">
+          <textarea id="multiUrls" class="code-editor" rows="5"
+            ondragover="event.preventDefault();this.classList.add('drop-active')"
+            ondragleave="this.classList.remove('drop-active')"
+            ondrop="this.classList.remove('drop-active');handleSplunkDrop(event)"
+            placeholder="https://target1.example.com/search&#10;https://target2.example.com/api/query&#10;&#10;또는 Splunk CSV/로그 파일을 이 영역에 드래그"></textarea>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-group">

@@ -1738,3 +1738,9 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   padding: 0 2px;
 }
 .defhdr-toggle input { cursor: pointer; margin: 0; }
+
+/* 다중 타겟 - CSV 드래그 하이라이트 */
+.code-editor.drop-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}

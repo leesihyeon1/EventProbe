@@ -2777,3 +2777,133 @@ function resetHeaderProfile() {
   toast('기본값으로 초기화 (저장하려면 저장 클릭)', 'info');
 }
 
+/* ==================================================================
+   Splunk CSV/로그 업로드 -> 다중 타겟 URL 자동 채움 (브라우저 로컬 파싱)
+   WAF/IPS/IDS 로그에서 URL(및 파라미터)을 뽑아 multiUrls 에 채운다.
+   ================================================================== */
+
+function handleSplunkDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) readSplunkFile(f);
+}
+function handleSplunkPick(input) {
+  const f = input.files && input.files[0];
+  if (f) readSplunkFile(f);
+  input.value = '';
+}
+function readSplunkFile(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { fillMultiFromLog(rd.result, file.name); }
+    catch (err) { toast('파싱 실패: ' + err.message, 'error'); }
+  };
+  rd.onerror = () => toast('파일 읽기 실패', 'error');
+  rd.readAsText(file);
+}
+
+// 따옴표/개행을 처리하는 CSV 파서
+function parseCSV(text) {
+  const rows = [];
+  let row = [], cur = '', q = false, i = 0;
+  text = text.replace(/\r\n?/g, '\n');
+  while (i < text.length) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i += 2; continue; }
+        q = false; i++; continue;
+      }
+      cur += c; i++; continue;
+    }
+    if (c === '"') { q = true; i++; continue; }
+    if (c === ',') { row.push(cur); cur = ''; i++; continue; }
+    if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; i++; continue; }
+    cur += c; i++;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(r => r.length && !(r.length === 1 && r[0].trim() === ''));
+}
+
+function fillMultiFromLog(text, name) {
+  const firstLine = (text.split('\n', 1)[0] || '');
+  const looksCsv = firstLine.includes(',');
+  let urls = [];
+
+  if (!looksCsv) {
+    // 단순 URL 목록(한 줄에 하나)
+    urls = text.split('\n').map(v => v.trim()).filter(v => /^https?:\/\//i.test(v));
+  } else {
+    const rows = parseCSV(text);
+    if (rows.length < 2) throw new Error('데이터 행이 없습니다');
+    const headers = rows[0].map(h => h.trim());
+    const body = rows.slice(1);
+    const lower = headers.map(h => h.toLowerCase());
+    const idxOf = (cands) => { for (const c of cands) { const k = lower.indexOf(c); if (k !== -1) return k; } return -1; };
+
+    // 1) 값 기준으로 full-URL 컬럼 탐지 (가장 http(s):// 비율 높은 컬럼)
+    const N = Math.min(body.length, 50);
+    let bestCol = -1, bestScore = 0;
+    for (let ci = 0; ci < headers.length; ci++) {
+      let hit = 0, tot = 0;
+      for (let ri = 0; ri < N; ri++) {
+        const v = (body[ri][ci] || '').trim();
+        if (!v) continue; tot++;
+        if (/^https?:\/\//i.test(v)) hit++;
+      }
+      const score = tot ? hit / tot : 0;
+      if (score > bestScore) { bestScore = score; bestCol = ci; }
+    }
+
+    if (bestScore >= 0.5) {
+      urls = body.map(r => (r[bestCol] || '').trim()).filter(v => /^https?:\/\//i.test(v));
+    } else {
+      // 2) host + path(+query) 조합
+      const hostIdx = idxOf(['dest', 'dest_host', 'dest_name', 'http_host', 'host', 'hostname', 'website', 'site', 'domain', 'url_domain', 'server', 'vip']);
+      const pathIdx = idxOf(['uri_path', 'url_path', 'path', 'cs-uri-stem', 'uri_stem', 'uri', 'request_uri', 'request', 'http_uri', 'url']);
+      const queryIdx = idxOf(['uri_query', 'url_query', 'query', 'cs-uri-query', 'query_string', 'querystring']);
+      if (pathIdx === -1) throw new Error('URL/경로 컬럼을 찾지 못했습니다 (헤더에 url, uri, host 등이 있는지 확인)');
+      urls = body.map(r => {
+        let path = (r[pathIdx] || '').trim();
+        if (!path) return null;
+        const q = queryIdx !== -1 ? (r[queryIdx] || '').trim().replace(/^\?/, '') : '';
+        if (/^https?:\/\//i.test(path)) {          // path 컬럼이 실은 full URL
+          let u = path;
+          if (q && !u.includes('?')) u += '?' + q;
+          return u;
+        }
+        let host = hostIdx !== -1 ? (r[hostIdx] || '').trim() : '';
+        if (!host) return null;
+        let scheme = /:80$/.test(host) ? 'http' : 'https';
+        host = host.replace(/^https?:\/\//i, '');
+        if (!path.startsWith('/')) path = '/' + path;
+        let u = scheme + '://' + host + path;
+        if (q) u += (u.includes('?') ? '&' : '?') + q;
+        return u;
+      }).filter(Boolean);
+    }
+  }
+
+  // 중복 제거 + 상한
+  urls = [...new Set(urls)];
+  const CAP = 1000; let capped = false;
+  if (urls.length > CAP) { urls = urls.slice(0, CAP); capped = true; }
+  if (!urls.length) { toast('URL을 찾지 못했습니다 (컬럼 형식 확인 필요)', 'error'); return; }
+
+  document.getElementById('multiUrls').value = urls.join('\n');
+
+  // 가장 흔한 쿼리 파라미터를 대상 파라미터로 추천
+  const freq = {};
+  urls.forEach(u => {
+    const qi = u.indexOf('?');
+    if (qi === -1) return;
+    u.slice(qi + 1).split('&').forEach(pair => { const k = pair.split('=')[0]; if (k) freq[k] = (freq[k] || 0) + 1; });
+  });
+  const top = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+  const tp = document.getElementById('multiTargetParam');
+  if (top && tp && !tp.value.trim()) tp.value = top[0];
+
+  toast(`${urls.length}개 URL 채움${capped ? ` (상위 ${CAP}개)` : ''}${top ? ` · 파라미터 "${top[0]}" 추천` : ''}`, 'success');
+}
+
