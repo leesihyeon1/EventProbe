@@ -265,9 +265,9 @@ function parseRawHttp(raw) {
   const lines = head.split('\n');
   const reqLine = (lines.shift() || '').trim();
   // HTTP 버전은 선택적으로 처리 — 캡처/복사된 패킷은 "GET /path" 처럼 버전이 없는 경우가 많다
-  const m = reqLine.match(/^([A-Z]+)\s+(\S+)(?:\s+HTTP\/[\d.]+)?$/i);
+  const m = reqLine.match(/^([A-Z]+)\s+(\S+)(?:\s+(HTTP\/[\d.]+))?$/i);
   let method = 'GET', target = '/';
-  if (m) { method = m[1].toUpperCase(); target = m[2]; }
+  if (m) { method = m[1].toUpperCase(); target = m[2]; if (m[3]) state._importedHttpVersion = m[3]; }
   const headerLines = lines.map(l => l.trim()).filter(l => l && l.includes(':'));
   const hostLine = headerLines.find(h => /^host:/i.test(h));
   const host = hostLine ? hostLine.slice(hostLine.indexOf(':') + 1).trim() : '';
@@ -353,6 +353,17 @@ function fillFromParsed(n) {
   // import된 요청은 원본 충실 재현 → 기본 헤더 보충 끔
   const _chk = document.getElementById('useDefaultsChk');
   if (_chk) _chk.checked = false;
+
+  // 붙여넣은 요청라인의 HTTP 버전 반영
+  const sel = document.getElementById('httpVersionSelect');
+  if (sel && state._importedHttpVersion) {
+    const v = state._importedHttpVersion;
+    const opt = [...sel.options].find(o => o.value === v);
+    if (opt) { sel.value = v; }
+    else { sel.value = '__custom__'; document.getElementById('httpVersionCustom').value = v; }
+    onHttpVersionChange();
+    state._importedHttpVersion = null;
+  }
 }
 
 const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP' };
@@ -912,6 +923,20 @@ function resSearchNav(dir) {
 }
 
 /* ── Send Request ── */
+// HTTP 버전 선택 값 (직접입력이면 텍스트박스 값)
+function getHttpVersion() {
+  const sel = document.getElementById('httpVersionSelect');
+  if (!sel) return 'HTTP/1.1';
+  if (sel.value === '__custom__') return (document.getElementById('httpVersionCustom').value || 'HTTP/1.1').trim();
+  return sel.value;
+}
+function onHttpVersionChange() {
+  const sel = document.getElementById('httpVersionSelect');
+  const cust = document.getElementById('httpVersionCustom');
+  cust.style.display = sel.value === '__custom__' ? '' : 'none';
+  if (sel.value === '__custom__') cust.focus();
+}
+
 async function sendRequest() {
   const url = document.getElementById('urlInput').value.trim();
   if (!url) { toast('URL을 입력하세요', 'error'); return; }
@@ -939,6 +964,7 @@ async function sendRequest() {
       category: state.selectedCategory?.id,
       default_headers: getDefaultHeaderProfile(),
       use_defaults: getUseDefaults(),
+      http_version: getHttpVersion(),
     };
 
     const result = await API.request(reqPayload);
@@ -1196,7 +1222,8 @@ function buildRawRequest(req) {
   }
   const sentH = req._sentHeaders && Object.keys(req._sentHeaders).length;
   const headers = { ...((sentH ? req._sentHeaders : req.headers) || {}) };
-  const lines = [`${method} ${path} HTTP/1.1`];
+  const ver = req.http_version && req.http_version.trim() ? req.http_version.trim() : 'HTTP/1.1';
+  const lines = [`${method} ${path} ${ver}`];
   if (host) lines.push(`Host: ${host}`);
   Object.entries(headers).forEach(([k, v]) => { if (k.toLowerCase() !== 'host') lines.push(`${k}: ${v}`); });
   let raw = lines.join('\n');

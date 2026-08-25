@@ -26,6 +26,7 @@ def _url_with_params(url: str, params: dict) -> str:
     )
     return url + ("&" if "?" in url else "?") + q
 from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, is_enabled as ai_enabled, response_analysis_enabled
+from core.raw_http import raw_send
 
 router = APIRouter(prefix="/api")
 
@@ -86,6 +87,7 @@ class SingleRequest(BaseModel):
     timeout: int = 10
     default_headers: dict = {}
     use_defaults: bool = True
+    http_version: Optional[str] = None   # 지정 시(비 HTTP/1.1) raw 소켓으로 요청라인 버전 그대로 전송
 
 class BulkRequest(BaseModel):
     method: str
@@ -156,6 +158,34 @@ def find_payload_by_id(payload_id: str):
 async def send_request(req: SingleRequest):
     try:
         sent_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
+
+        # HTTP 버전 지정(비 HTTP/1.1) → raw 소켓 모드로 요청라인 버전 그대로 전송
+        ver = (req.http_version or "").strip()
+        if ver and ver.upper() != "HTTP/1.1":
+            r = await asyncio.to_thread(
+                raw_send, req.method, _url_with_params(req.url, req.params),
+                sent_headers, req.body or "", ver, float(req.timeout),
+            )
+            analysis = analyze_response(
+                status_code=r["status_code"], headers=r["headers"], body=r["body"],
+                response_time=r["response_time"], payload=req.payload, category=req.category,
+            )
+            if response_analysis_enabled():
+                analysis["ai"] = await ai_analyze({
+                    "method": req.method.upper(), "url": req.url, "payload": req.payload,
+                    "category": req.category, "req_body": req.body,
+                    "status_code": r["status_code"], "response_time": r["response_time"],
+                    "resp_headers": r["headers"], "resp_body": r["body"],
+                    "base_verdict": analysis.get("verdict"),
+                    "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
+                })
+            return {
+                "status_code": r["status_code"], "headers": r["headers"], "body": r["body"],
+                "response_time": r["response_time"], "body_size": r["body_size"],
+                "sent_headers": sent_headers, "raw_mode": True,
+                "request_line": r["request_line"], "analysis": analysis,
+            }
+
         async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
             start = time.time()
             response = await client.request(

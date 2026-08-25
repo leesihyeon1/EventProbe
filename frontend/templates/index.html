@@ -103,6 +103,14 @@
         <option>HEAD</option>
         <option>OPTIONS</option>
       </select>
+      <select id="httpVersionSelect" class="method-select" style="width:110px" title="요청라인 HTTP 버전 (HTTP/1.1 외 선택 시 raw 소켓으로 그대로 전송)" onchange="onHttpVersionChange()">
+        <option value="HTTP/1.1">HTTP/1.1</option>
+        <option value="HTTP/1.0">HTTP/1.0</option>
+        <option value="HTTP/2">HTTP/2</option>
+        <option value="HTTP/0.9">HTTP/0.9</option>
+        <option value="__custom__">직접 입력…</option>
+      </select>
+      <input id="httpVersionCustom" class="url-input" type="text" placeholder="예: HTTP/1.1 (변형)" style="display:none;max-width:150px;flex:0 0 auto" title="비정상/커스텀 버전 문자열 그대로 전송">
       <input id="urlInput" class="url-input" type="text" placeholder="https://target.example.com/api/endpoint">
       <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기" style="white-space:nowrap">📋 붙여넣기</button>
       <label class="defhdr-toggle" title="켜면 빠진 헤더를 브라우저 기본값으로 보충(사용자 지정 헤더는 유지). 붙여넣기 시 자동으로 꺼집니다.">
