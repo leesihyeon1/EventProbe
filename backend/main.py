@@ -3,6 +3,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 
+# 프로젝트 루트의 .env 로드 (NVIDIA_API_KEY 등). 공용 PC에서 키를 파일로만 관리.
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 app = FastAPI(title="SecAPITester", version="1.0.0")
 
 

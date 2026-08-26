@@ -13,6 +13,17 @@ const API = {
     const r = await fetch('/api/bulk-test', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async aiStatus() {
+    try { const r = await fetch('/api/ai-status'); return r.json(); } catch (e) { return { enabled: false }; }
+  },
+  async aiPayloads(data) {
+    const r = await fetch('/api/ai-payloads', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
+  async aiSuggest(data) {
+    const r = await fetch('/api/ai-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
 };
 
 /* ── State ── */
@@ -27,6 +38,10 @@ const state = {
   activeView: 'request',  // request / results / report
   activeReqTab: 'params',
   activeResTab: 'body',
+  aiEnabled: false,       // 서버에 AI(NVIDIA/로컬 NIM) 설정됨 여부
+  aiVariants: [],         // AI가 생성한 우회 변형 페이로드
+  aiCandidates: [],       // AI 테스트 후보 페이로드
+  aiBaseSnapshot: null,   // 후보 생성 시점의 원본 요청(클릭마다 이 기준으로 적용)
 };
 
 /* ── Utils ── */
@@ -249,9 +264,10 @@ function parseRawHttp(raw) {
   const body = sep === -1 ? '' : text.slice(sep + 2);
   const lines = head.split('\n');
   const reqLine = (lines.shift() || '').trim();
-  const m = reqLine.match(/^([A-Z]+)\s+(\S+)\s+HTTP\/[\d.]+$/i);
+  // HTTP 버전은 선택적으로 처리 — 캡처/복사된 패킷은 "GET /path" 처럼 버전이 없는 경우가 많다
+  const m = reqLine.match(/^([A-Z]+)\s+(\S+)(?:\s+(HTTP\/[\d.]+))?$/i);
   let method = 'GET', target = '/';
-  if (m) { method = m[1].toUpperCase(); target = m[2]; }
+  if (m) { method = m[1].toUpperCase(); target = m[2]; if (m[3]) state._importedHttpVersion = m[3]; }
   const headerLines = lines.map(l => l.trim()).filter(l => l && l.includes(':'));
   const hostLine = headerLines.find(h => /^host:/i.test(h));
   const host = hostLine ? hostLine.slice(hostLine.indexOf(':') + 1).trim() : '';
@@ -337,6 +353,17 @@ function fillFromParsed(n) {
   // import된 요청은 원본 충실 재현 → 기본 헤더 보충 끔
   const _chk = document.getElementById('useDefaultsChk');
   if (_chk) _chk.checked = false;
+
+  // 붙여넣은 요청라인의 HTTP 버전 반영
+  const sel = document.getElementById('httpVersionSelect');
+  if (sel && state._importedHttpVersion) {
+    const v = state._importedHttpVersion;
+    const opt = [...sel.options].find(o => o.value === v);
+    if (opt) { sel.value = v; }
+    else { sel.value = '__custom__'; document.getElementById('httpVersionCustom').value = v; }
+    onHttpVersionChange();
+    state._importedHttpVersion = null;
+  }
 }
 
 const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP' };
@@ -393,44 +420,74 @@ async function loadSidebar() {
 
   // 커스텀 페이로드 병합
   loadCustomPayloads();
+  const aiCat = state.aiVariants.length
+    ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, payloads: state.aiVariants }]
+    : [];
   const allCategories = [
+    ...aiCat,
     ...state.payloads.categories,
     ...customState.categories.filter(c => c.payloads.length > 0).map(c => ({
-      ...c, _custom: true
+      ...c, _custom: true, group: 'custom'
     })),
   ];
   // 벌크 모달용 전체 목록 저장
   state.payloads._allCategories = allCategories;
 
-  const container = document.getElementById('sidebarList');
-  container.innerHTML = '';
+  // 상위 그룹 정의(펼침 순서)
+  const GROUP_DEFS = [
+    { id: 'custom', name: '커스텀 / AI' },
+    { id: 'server', name: '서버사이드 인젝션 · 실행' },
+    { id: 'client', name: '클라이언트사이드' },
+    { id: 'auth',   name: '인증 · 세션 · 권한' },
+    { id: 'http',   name: 'HTTP · 헤더 · 인프라' },
+  ];
 
-  allCategories.forEach(cat => {
-    const group = document.createElement('div');
-    group.className = 'category-group';
-    group.dataset.catId = cat.id;
-
+  const catHtml = (cat) => {
     const customBadge = cat._custom
       ? `<span style="font-size:9px;color:var(--accent);background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.3);border-radius:4px;padding:1px 5px;margin-right:2px">커스텀</span>`
       : '';
-
-    group.innerHTML = `
-      <div class="category-header" onclick="toggleCategory(this)">
-        <span>${cat.icon || '📝'}</span>
-        <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${cat.name}</span>
-        ${customBadge}
-        <span class="category-badge">${cat.payloads.length}</span>
-        <span class="category-chevron">▶</span>
-      </div>
-      <div class="payload-list">
-        ${cat.payloads.map(p => `
-          <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
-            <span class="risk-dot ${p.risk || 'medium'}"></span>
-            <span class="payload-name" title="${escapeHtml(p.payload)}">${p.name}</span>
-          </div>`).join('')}
+    return `
+      <div class="category-group" data-cat-id="${escapeHtml(cat.id)}">
+        <div class="category-header" onclick="toggleCategory(this)">
+          <span style="font-size:12px;font-weight:600;color:var(--text-primary)">${escapeHtml(cat.name)}</span>
+          ${customBadge}
+          <span class="category-badge">${cat.payloads.length}</span>
+          <span class="category-chevron">▶</span>
+        </div>
+        <div class="payload-list">
+          ${cat.payloads.map(p => `
+            <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
+              <span class="risk-dot ${p.risk || 'medium'}"></span>
+              <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
+              ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
+            </div>`).join('')}
+        </div>
       </div>`;
-    container.appendChild(group);
+  };
+
+  const container = document.getElementById('sidebarList');
+  container.innerHTML = '';
+
+  GROUP_DEFS.forEach(g => {
+    const cats = allCategories.filter(c => (c.group || 'server') === g.id);
+    if (!cats.length) return;
+    const plCount = cats.reduce((n, c) => n + c.payloads.length, 0);
+    const section = document.createElement('div');
+    section.className = 'sidebar-group';   // 기본 접힘 (클릭해서 펼침)
+    section.dataset.group = g.id;
+    section.innerHTML = `
+      <div class="sidebar-group-header" onclick="toggleSidebarGroup(this)">
+        <span class="group-chevron">▾</span>
+        <span class="group-name">${escapeHtml(g.name)}</span>
+        <span class="group-count">${cats.length}종 · ${plCount}</span>
+      </div>
+      <div class="sidebar-group-body">${cats.map(catHtml).join('')}</div>`;
+    container.appendChild(section);
   });
+}
+
+function toggleSidebarGroup(header) {
+  header.parentElement.classList.toggle('open');
 }
 
 function toggleCategory(header) {
@@ -449,6 +506,13 @@ function filterSidebar(query) {
       if (show) hasVisible = true;
     });
     group.style.display = (!q || hasVisible) ? '' : 'none';
+    group.classList.toggle('open', !!q && hasVisible);   // 검색 중이면 해당 카테고리 펼침
+  });
+  // 상위 그룹: 보이는 카테고리가 없으면 그룹째 숨김. 검색 중이면 매칭 그룹을 펼침(끝나면 다시 접힘)
+  document.querySelectorAll('.sidebar-group').forEach(sec => {
+    const anyCat = [...sec.querySelectorAll('.category-group')].some(cg => cg.style.display !== 'none');
+    sec.style.display = anyCat ? '' : 'none';
+    sec.classList.toggle('open', !!q && anyCat);
   });
 }
 
@@ -471,36 +535,318 @@ function selectPayload(catId, payloadId) {
   document.getElementById('injectPayloadPreview').textContent = payload.payload;
   document.getElementById('injectPayloadName').textContent = `${cat.icon} ${payload.name}`;
   document.getElementById('injectBar').style.display = 'flex';
+  refreshInjectTargets();                 // A: 대상 파라미터/헤더 자동완성 갱신
+  // E: AI 활성 시에만 우회변형 버튼 노출
+  const aiBtn = document.getElementById('aiVariantBtn');
+  if (aiBtn) aiBtn.style.display = state.aiEnabled ? '' : 'none';
+}
+
+// URL 쿼리스트링에서 파라미터 키 추출
+function _paramKeysFromUrl() {
+  const url = document.getElementById('urlInput')?.value || '';
+  const qi = url.indexOf('?');
+  if (qi === -1) return [];
+  return url.slice(qi + 1).split('&').map(p => p.split('=')[0]).filter(Boolean);
+}
+
+// 현재 요청에 존재하는 param/header 키 목록 (중복 제거)
+function existingKeys(target) {
+  if (target === 'param') {
+    const fromKv = (state.kvParams || []).map(r => r.key).filter(Boolean);
+    return [...new Set([..._paramKeysFromUrl(), ...fromKv])];
+  }
+  if (target === 'header') {
+    return [...new Set((state.kvHeaders || []).map(r => r.key).filter(Boolean))];
+  }
+  return [];
+}
+
+// A: 대상 위치 변경 시 — 키 입력창/모드 노출 및 자동완성/기본값 갱신
+function onInjectTargetChange() { refreshInjectTargets(); }
+
+function refreshInjectTargets() {
+  const target = document.getElementById('injectTarget').value;
+  const keyInput = document.getElementById('injectKey');
+  const modeSel  = document.getElementById('injectMode');
+  const list     = document.getElementById('injectKeyList');
+  const needsKey = (target === 'param' || target === 'header');
+
+  keyInput.style.display = needsKey ? '' : 'none';
+  modeSel.style.display  = needsKey ? '' : 'none';
+  if (!needsKey) return;
+
+  const keys = existingKeys(target);
+  list.innerHTML = keys.map(k => `<option value="${escapeHtml(k)}">`).join('');
+  keyInput.placeholder = target === 'param' ? '파라미터명' : '헤더명';
+  // 기본값: 기존 키가 있으면 첫 번째(=가장 유력한 대상), 없으면 관례값
+  if (!keyInput.value || !keys.includes(keyInput.value)) {
+    keyInput.value = keys[0] || (target === 'param' ? 'q' : 'X-Test-Payload');
+  }
+}
+
+// D: 같은 키가 있으면 값 교체(중복 생성 방지), 없으면 추가
+function _setKv(arr, key, value, mode) {
+  const idx = arr.findIndex(r => (r.key || '').toLowerCase() === key.toLowerCase());
+  if (mode === 'replace' && idx !== -1) { arr[idx].value = value; return 'replaced'; }
+  if (idx !== -1 && mode !== 'append') { arr[idx].value = value; return 'replaced'; }
+  arr.push({ key, value });
+  return 'added';
 }
 
 function injectPayload() {
   if (!state.selectedPayload) return;
   const payload = state.selectedPayload.payload;
-  const target = document.getElementById('injectTarget').value;
+  const target  = document.getElementById('injectTarget').value;
+  const mode    = document.getElementById('injectMode').value;   // replace | append
+  const key     = (document.getElementById('injectKey').value || '').trim();
 
   if (target === 'url') {
     const urlInput = document.getElementById('urlInput');
-    const pos = urlInput.selectionStart;
+    const pos = urlInput.selectionStart ?? urlInput.value.length;
     const val = urlInput.value;
     urlInput.value = val.slice(0, pos) + payload + val.slice(pos);
-    toast('URL에 페이로드 삽입됨', 'success');
+    toast('URL 커서 위치에 삽입됨', 'success');
+
   } else if (target === 'body') {
     const bodyEl = document.getElementById('bodyEditor');
-    const pos = bodyEl.selectionStart;
+    const pos = bodyEl.selectionStart ?? bodyEl.value.length;
     bodyEl.value = bodyEl.value.slice(0, pos) + payload + bodyEl.value.slice(pos);
-    // body 탭으로 전환
     switchReqTab('body');
-    toast('Body에 페이로드 삽입됨', 'success');
+    toast('Body 커서 위치에 삽입됨', 'success');
+
   } else if (target === 'header') {
-    state.kvHeaders.push({ key: 'X-Test-Payload', value: payload });
+    const k = key || 'X-Test-Payload';
+    const how = _setKv(state.kvHeaders, k, payload, mode);
     renderKvEditor('headersKv', state.kvHeaders);
     switchReqTab('headers');
-    toast('Header에 페이로드 삽입됨', 'success');
+    toast(`Header ${k} ${how === 'replaced' ? '값 교체' : '추가'}됨`, 'success');
+
   } else if (target === 'param') {
-    state.kvParams.push({ key: 'q', value: payload });
-    renderKvEditor('paramsKv', state.kvParams);
-    switchReqTab('params');
-    toast('Query Param에 페이로드 삽입됨', 'success');
+    const k = key || 'q';
+    // URL 쿼리스트링에만 존재하는 파라미터면, URL 문자열에서 직접 교체
+    const urlKeys = _paramKeysFromUrl();
+    const inKv = (state.kvParams || []).some(r => (r.key || '').toLowerCase() === k.toLowerCase());
+    if (mode === 'replace' && urlKeys.includes(k) && !inKv) {
+      const urlInput = document.getElementById('urlInput');
+      urlInput.value = urlInput.value.replace(
+        new RegExp('([?&]' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=)[^&#]*'),
+        '$1' + encodeURIComponent(payload));
+      toast(`URL 파라미터 ${k} 값 교체됨`, 'success');
+    } else {
+      const how = _setKv(state.kvParams, k, payload, mode);
+      renderKvEditor('paramsKv', state.kvParams);
+      switchReqTab('params');
+      toast(`Query Param ${k} ${how === 'replaced' ? '값 교체' : '추가'}됨`, 'success');
+    }
+  }
+}
+
+// E: 선택된 페이로드의 WAF 우회 변형을 AI로 생성 → 사이드바 "AI 우회 변형"에 추가
+async function generateBypassVariants() {
+  if (!state.selectedPayload) { toast('페이로드를 먼저 선택하세요', 'error'); return; }
+  const base = state.selectedPayload.payload;
+  const category = state.selectedCategory?.id || '';
+  const waf = state.lastResult?.analysis?.waf_detected || '';   // 직전 응답에서 탐지된 WAF
+  const btn = document.getElementById('aiVariantBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '생성 중…';
+  try {
+    const res = await API.aiPayloads({ base_payload: base, category, waf, count: 8 });
+    if (res.error) { toast('AI 변형 실패: ' + res.error, 'error'); return; }
+    const variants = (res.variants || []).filter(Boolean);
+    if (!variants.length) { toast('생성된 변형이 없습니다', 'error'); return; }
+    // 사이드바 카테고리에 반영 (클릭해서 그대로 삽입 가능)
+    state.aiVariants = variants.map((p, i) => ({
+      id: 'aiv_' + Date.now() + '_' + i,
+      name: (p.length > 40 ? p.slice(0, 40) + '…' : p),
+      payload: p, description: `AI 우회 변형${waf ? ' (' + waf + ')' : ''}`, risk: 'high',
+    }));
+    loadSidebar();
+    toast(`우회 변형 ${variants.length}개 생성됨 — 좌측 "🤖 AI 우회 변형"에서 선택`, 'success');
+  } catch (e) {
+    toast('AI 변형 오류: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AI 테스트 — 현재 요청을 AI가 인식해 페이로드 후보 생성 → GO TEST
+   ══════════════════════════════════════════════════════════════════ */
+
+// 현재 메인 폼의 요청 스냅샷
+function _currentRequestForm() {
+  return {
+    method: document.getElementById('methodSelect').value,
+    url: document.getElementById('urlInput').value.trim(),
+    params: kvToObj(state.kvParams),
+    body: document.getElementById('bodyEditor').value.trim() || null,
+    headerNames: (state.kvHeaders || []).map(r => r.key).filter(Boolean),
+  };
+}
+
+async function generateAiCandidates() {
+  if (!state.aiEnabled) { toast('AI 미설정 — .env 에 NVIDIA_API_KEY 를 넣으세요', 'error'); return; }
+  const req = _currentRequestForm();
+  if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
+
+  switchSidebarTab('aitest');
+  const listEl = document.getElementById('aiCandidateList');
+  const metaEl = document.getElementById('aiSuggestMeta');
+  metaEl.textContent = '';
+  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">AI 페이로드 생성 중…</div></div>';
+
+  try {
+    const res = await API.aiSuggest({
+      method: req.method, url: req.url, params: req.params,
+      body: req.body, header_names: req.headerNames, count: 10,
+    });
+    if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
+    state.aiCandidates = res.candidates || [];
+    // 후보 클릭 시 매번 이 원본 요청 기준으로 적용하도록 스냅샷 저장(누적 방지)
+    state.aiBaseSnapshot = captureRequestForm();
+    renderAiCandidates(res);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'💻', ssti:'🔧', redirect:'↪️', idor:'🏢', nosql:'🍃', other:'🔎' };
+
+function renderAiCandidates(res) {
+  const listEl = document.getElementById('aiCandidateList');
+  const metaEl = document.getElementById('aiSuggestMeta');
+  const cands = res.candidates || [];
+  metaEl.innerHTML = `🧠 <b>${escapeHtml(res.test_type || '분석 완료')}</b> — ${escapeHtml(res.summary || '')} <span style="color:var(--text-muted)">(${escapeHtml(res.model||'')})</span>`;
+  if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
+
+  listEl.innerHTML = cands.map((c, i) => `
+    <div class="payload-item ai-cand-item" data-idx="${i}" onclick="applyAiCandidate(${i})"
+         style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--accent)"><b>${i + 1}.</b> ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
+        <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
+        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)}</div>` : ''}
+      </div>
+    </div>`).join('');
+  // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
+  const gt = document.getElementById('goTestBtn'); if (gt) gt.style.display = 'none';
+}
+
+// 후보 클릭 → 원본 요청 스냅샷으로 되돌린 뒤 payload 주입 (클릭마다 누적 방지)
+function applyAiCandidate(idx) {
+  const c = state.aiCandidates[idx];
+  if (!c) return;
+  // 매번 원본 기준(깊은 복사로 복원 — 스냅샷이 이후 주입으로 오염되지 않게)
+  if (state.aiBaseSnapshot) restoreRequestForm(JSON.parse(JSON.stringify(state.aiBaseSnapshot)));
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  if (c.location === 'path') {
+    // URL 을 origin / path / query 로 분해
+    const urlInput = document.getElementById('urlInput');
+    const qIdx = urlInput.value.indexOf('?');
+    const q = qIdx >= 0 ? urlInput.value.slice(qIdx) : '';
+    const base = qIdx >= 0 ? urlInput.value.slice(0, qIdx) : urlInput.value;
+    const m = base.match(/^([a-z][a-z0-9+.-]*:\/\/[^\/]+)(\/.*)?$/i);
+    const origin = m ? m[1] : '';
+    const path = m ? (m[2] || '') : base;
+    // payload 가 / 로 시작하면 전체 경로 교체, 아니면 현재 경로에 이어붙이기
+    const newPath = c.payload.startsWith('/')
+      ? c.payload
+      : path.replace(/\/+$/, '') + '/' + c.payload;
+    urlInput.value = origin + newPath + q;
+  } else if (c.location === 'header') {
+    _setKv(state.kvHeaders, c.param || 'X-Test-Payload', c.payload, 'replace');
+    renderKvEditor('headersKv', state.kvHeaders);
+    switchReqTab('headers');
+  } else if (c.location === 'body') {
+    const bodyEl = document.getElementById('bodyEditor');
+    try { const bd = bodyEl.value.trim() ? JSON.parse(bodyEl.value) : {}; bd[c.param || 'q'] = c.payload; bodyEl.value = JSON.stringify(bd, null, 2); }
+    catch { bodyEl.value = c.payload; }
+    switchReqTab('body');
+  } else { // param
+    const k = c.param || 'q';
+    const urlInput = document.getElementById('urlInput');
+    const re = new RegExp('([?&]' + esc(k) + '=)[^&#]*');
+    if (re.test(urlInput.value)) {
+      urlInput.value = urlInput.value.replace(re, '$1' + encodeURIComponent(c.payload));
+    } else {
+      _setKv(state.kvParams, k, c.payload, 'replace');
+      renderKvEditor('paramsKv', state.kvParams);
+      switchReqTab('params');
+    }
+  }
+  // 분석 시 payload/category 가 전달되도록 선택 상태 기록
+  state.selectedPayload = { payload: c.payload, name: c.category };
+  state.selectedCategory = { id: c.category, icon: _CAT_ICON[c.category] || '🔎' };
+  // 강조 표시
+  document.querySelectorAll('#aiCandidateList .ai-cand-item').forEach(el => el.classList.remove('selected'));
+  const row = document.querySelector(`#aiCandidateList .ai-cand-item[data-idx="${idx}"]`);
+  if (row) row.classList.add('selected');
+  toast('후보 적용됨 — ▶ 전송으로 테스트하세요', 'success');
+}
+
+// 후보 하나를 현재 요청에 적용한 요청 payload 생성
+function _applyCandidate(base, c) {
+  let url = base.url;
+  const params = { ...base.params };
+  const headers = getHeadersObj();
+  let body = base.body;
+  if (c.location === 'header') {
+    headers[c.param || 'X-Test-Payload'] = c.payload;
+  } else if (c.location === 'body') {
+    try { const bd = body ? JSON.parse(body) : {}; bd[c.param || 'q'] = c.payload; body = JSON.stringify(bd); }
+    catch { body = c.payload; }
+  } else { // param
+    const k = c.param || 'q';
+    // URL 쿼리에 이미 있으면 그 자리 교체, 아니면 params 로
+    const re = new RegExp('([?&]' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=)[^&#]*');
+    if (re.test(url)) url = url.replace(re, '$1' + encodeURIComponent(c.payload));
+    else params[k] = c.payload;
+  }
+  return {
+    method: base.method, url, headers, params, body,
+    payload: c.payload, category: c.category,
+    default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
+  };
+}
+
+async function goTest() {
+  const checks = [...document.querySelectorAll('.ai-cand-chk')].filter(c => c.checked);
+  if (!checks.length) { toast('실행할 후보를 선택하세요', 'error'); return; }
+  const base = _currentRequestForm();
+  if (!base.url) { toast('요청 URL이 없습니다', 'error'); return; }
+
+  const btn = document.getElementById('goTestBtn');
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = '실행 중…';
+  const V = { blocked:['차단','tag-green'], passed:['통과','tag-yellow'], bypass:['우회!','tag-red'], error:['에러','tag-blue'], timeout:['타임아웃','tag-blue'] };
+
+  try {
+    for (const chk of checks) {
+      const idx = +chk.dataset.idx;
+      const cand = state.aiCandidates[idx];
+      const cell = document.querySelector(`.ai-cand-result[data-idx="${idx}"]`);
+      cell.innerHTML = '<span class="spinner" style="width:10px;height:10px"></span> 전송…';
+      try {
+        const r = await API.request(_applyCandidate(base, cand));
+        const v = r.analysis?.verdict || 'error';
+        const [label, cls] = V[v] || [v, 'tag-blue'];
+        let extra;
+        if (r.status_code === 0) {
+          // 응답 없음 — 타임아웃/연결실패 등. 실제 사유 우선 노출
+          const to = (base.timeout || 10);
+          extra = r.error || r.detail || (v === 'timeout' ? `응답 시간 초과 (~${to}s) — 대상 무응답/지연` : '응답 없음 — 대상 도달 불가 가능성');
+        } else {
+          extra = `HTTP ${r.status_code} · ${Math.round(r.response_time)}ms · risk ${escapeHtml(r.analysis?.risk_level||'-')}`;
+        }
+        cell.innerHTML = `<span class="tag ${cls}">${label}</span> <span style="color:var(--text-muted)">${escapeHtml(extra)}</span>`;
+      } catch (e) {
+        cell.innerHTML = `<span class="tag tag-blue">실패</span> ${escapeHtml(e.message)}`;
+      }
+    }
+    toast('GO TEST 완료', 'success');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
   }
 }
 
@@ -521,9 +867,76 @@ function switchResTab(tab) {
   );
   // Diff 탭 진입 시 렌더링
   if (tab === 'diff') renderDiff();
+  resSearch(false);   // 탭 전환 시 현재 검색어로 재하이라이트
+}
+
+/* ── 응답 검색 (Body/Headers 하이라이트 + 이동) ── */
+let _resHitIdx = 0;
+
+function _resSearchPane() {
+  if (state.activeResTab === 'body') return document.getElementById('responseBody');
+  if (state.activeResTab === 'res-headers') return document.getElementById('responseHeadersBody');
+  return null;   // req-summary(HTML)/diff 는 하이라이트 대상 아님
+}
+
+function resSearch(resetIdx) {
+  const q = document.getElementById('resSearchInput').value;
+  const countEl = document.getElementById('resSearchCount');
+  const el = _resSearchPane();
+  if (!el) { countEl.textContent = q ? 'Body/Headers 탭' : '-'; return; }
+  const text = el.textContent;          // 마킹돼 있어도 textContent 는 원문
+  if (!q) { el.textContent = text; countEl.textContent = '-'; return; }
+  if (resetIdx) _resHitIdx = 0;
+
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(esc, 'gi');
+  let out = '', last = 0, m, n = 0;
+  while ((m = re.exec(text)) !== null) {
+    out += escapeHtml(text.slice(last, m.index)) + '<mark class="search-hit">' + escapeHtml(m[0]) + '</mark>';
+    last = m.index + m[0].length;
+    n++;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  out += escapeHtml(text.slice(last));
+  el.innerHTML = out;
+  _updateResHit(el, countEl);
+}
+
+function _updateResHit(el, countEl) {
+  const hits = el.querySelectorAll('.search-hit');
+  if (!hits.length) { countEl.textContent = '0'; return; }
+  if (_resHitIdx < 0) _resHitIdx = hits.length - 1;
+  if (_resHitIdx >= hits.length) _resHitIdx = 0;
+  hits.forEach((h, i) => h.classList.toggle('current', i === _resHitIdx));
+  hits[_resHitIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  countEl.textContent = `${_resHitIdx + 1}/${hits.length}`;
+}
+
+function resSearchNav(dir) {
+  const el = _resSearchPane();
+  const countEl = document.getElementById('resSearchCount');
+  if (!el) return;
+  const hits = el.querySelectorAll('.search-hit');
+  if (!hits.length) { resSearch(true); return; }
+  _resHitIdx += dir;
+  _updateResHit(el, countEl);
 }
 
 /* ── Send Request ── */
+// HTTP 버전 선택 값 (직접입력이면 텍스트박스 값)
+function getHttpVersion() {
+  const sel = document.getElementById('httpVersionSelect');
+  if (!sel) return 'HTTP/1.1';
+  if (sel.value === '__custom__') return (document.getElementById('httpVersionCustom').value || 'HTTP/1.1').trim();
+  return sel.value;
+}
+function onHttpVersionChange() {
+  const sel = document.getElementById('httpVersionSelect');
+  const cust = document.getElementById('httpVersionCustom');
+  cust.style.display = sel.value === '__custom__' ? '' : 'none';
+  if (sel.value === '__custom__') cust.focus();
+}
+
 async function sendRequest() {
   const url = document.getElementById('urlInput').value.trim();
   if (!url) { toast('URL을 입력하세요', 'error'); return; }
@@ -551,6 +964,8 @@ async function sendRequest() {
       category: state.selectedCategory?.id,
       default_headers: getDefaultHeaderProfile(),
       use_defaults: getUseDefaults(),
+      http_version: getHttpVersion(),
+      baseline: baseline ? { status_code: baseline.status_code, body: baseline.body } : null,
     };
 
     const result = await API.request(reqPayload);
@@ -784,26 +1199,32 @@ function renderResponse(result) {
 
   // 요청 요약 (보낸 내용)
   renderRequestSummary(result._req);
+
+  // 검색어가 있으면 새 응답에 재적용
+  if (document.getElementById('resSearchInput')?.value) resSearch(true);
 }
 
 function buildRawRequest(req) {
   const method = (req.method || 'GET').toUpperCase();
   const urlStr = req.url || '';
+  // new URL() 은 경로의 ..;/ ../ %2e 등을 정규화·디코딩해 익스플로잇 경로를 훼손하므로
+  // origin/path/query 를 문자열로 직접 분해해 원문 그대로 표시(실제 전송과 일치).
   let host = '', path = '/';
-  try {
-    const u = new URL(urlStr);
-    host = u.host;
-    path = u.pathname || '/';
-    const sp = new URLSearchParams(u.search);
-    Object.entries(req.params || {}).forEach(([k, v]) => sp.append(k, v));
-    const qs = sp.toString();
-    if (qs) path += '?' + qs;
-  } catch (e) {
-    path = urlStr;
+  const m = urlStr.match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]+)([^#]*)?/i);
+  if (m) { host = m[1]; path = m[2] || '/'; }
+  else { path = urlStr || '/'; }
+  // kvParams 병합(백엔드와 동일한 최소 인코딩: @ / : ; + = 등 보존)
+  const pairs = Object.entries(req.params || {});
+  if (pairs.length) {
+    const esc = s => encodeURIComponent(String(s)).replace(/%(40|3A|2F|3B|2B|2C|24|21|28|29|2A|7E)/gi,
+      m => decodeURIComponent(m));
+    const qs = pairs.map(([k, v]) => `${esc(k)}=${esc(v)}`).join('&');
+    path += (path.includes('?') ? '&' : '?') + qs;
   }
   const sentH = req._sentHeaders && Object.keys(req._sentHeaders).length;
   const headers = { ...((sentH ? req._sentHeaders : req.headers) || {}) };
-  const lines = [`${method} ${path} HTTP/1.1`];
+  const ver = req.http_version && req.http_version.trim() ? req.http_version.trim() : 'HTTP/1.1';
+  const lines = [`${method} ${path} ${ver}`];
   if (host) lines.push(`Host: ${host}`);
   Object.entries(headers).forEach(([k, v]) => { if (k.toLowerCase() !== 'host') lines.push(`${k}: ${v}`); });
   let raw = lines.join('\n');
@@ -902,18 +1323,116 @@ function bindAnalysisCardToggles(container) {
   });
 }
 
-function renderAnalysis(a, result) {
-  if (!a) return;
+// AI 상세 분석(NVIDIA NIM) 카드 렌더
+function renderAiCard(ai) {
+  if (ai.error) {
+    return `
+    <div class="analysis-card" data-card-id="ai">
+      <div class="analysis-card-header">AI 상세 분석</div>
+      <div class="analysis-card-body">
+        <div class="detail-item" style="color:var(--danger)">${escapeHtml(ai.error)}</div>
+      </div>
+    </div>`;
+  }
+  const succ = { yes: 'tag-red', no: 'tag-green', inconclusive: 'tag-blue' }[ai.attack_success] || 'tag-blue';
+  const succLabel = { yes: '공격 성공', no: '공격 실패/미영향', inconclusive: '판단 불가' }[ai.attack_success] || String(ai.attack_success || '-');
+  const sev = String(ai.severity || 'info');
+  const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
+  const fp = { low: '낮음', medium: '중간', high: '높음' }[ai.false_positive_risk] || (ai.false_positive_risk || '-');
+  const ev = Array.isArray(ai.evidence) ? ai.evidence : (ai.evidence ? [ai.evidence] : []);
+  return `
+    <div class="analysis-card" data-card-id="ai">
+      <div class="analysis-card-header">AI 상세 분석 <span style="font-size:10px;color:var(--text-muted);font-weight:400">${escapeHtml(ai.model || 'NVIDIA NIM')}</span></div>
+      <div class="analysis-card-body">
+        <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <span class="tag ${succ}">${escapeHtml(succLabel)}</span>
+          <span class="tag tag-${sev === 'critical' || sev === 'high' ? 'red' : sev === 'medium' ? 'yellow' : 'blue'}">위험도 ${escapeHtml(sevKo)}</span>
+          <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
+          <span class="tag tag-blue">오탐위험 ${escapeHtml(fp)}</span>
+        </div>
+        ${ai.vulnerability ? `<div class="imp-row"><span>취약점</span><code>${escapeHtml(ai.vulnerability)}</code></div>` : ''}
+        ${ai.reasoning ? `<div class="detail-item"><b>근거</b> — ${escapeHtml(ai.reasoning)}</div>` : ''}
+        ${ev.length ? `<div class="detail-item"><b>증거</b><ul style="margin:4px 0 0 16px">${ev.map(e => `<li>${escapeHtml(String(e))}</li>`).join('')}</ul></div>` : ''}
+        ${ai.reproduction ? `<div class="detail-item"><b>재현</b> — ${escapeHtml(String(ai.reproduction))}</div>` : ''}
+        ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(String(ai.remediation))}</div>` : ''}
+      </div>
+    </div>`;
+}
 
-  // 헤더 verdict badge
-  document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
+// 공격 결과 분석 카드 — outcome + 증거 신호
+function renderAttackCard(a) {
+  const findings = a.findings || [];
+  if (!findings.length && !a.attack_outcome) return '';
+  const OUT = {
+    success:      ['공격 성공',   'tag-red',   'rgba(248,81,73,.4)'],
+    blocked:      ['차단됨',      'tag-green', 'var(--border)'],
+    inconclusive: ['미확정',      'tag-blue',  'var(--border)'],
+  };
+  const [label, cls, border] = OUT[a.attack_outcome] || ['분석', 'tag-blue', 'var(--border)'];
+  const V = { '성공': 'tag-red', '차단': 'tag-green', '미확정': 'tag-blue' };
 
-  const container = document.getElementById('analysisContent');
+  const rows = findings.map(f => {
+    let ev = escapeHtml(String(f.evidence || ''));
+    // 반사 증거면 payload 하이라이트
+    if (a.reflection && a.reflection.payload && f.evidence && String(f.evidence).includes(a.reflection.payload)) {
+      const p = escapeHtml(a.reflection.payload);
+      ev = ev.split(p).join(`<mark class="search-hit current">${p}</mark>`);
+    }
+    return `
+      <div class="attack-finding">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span class="tag ${V[f.verdict] || 'tag-blue'}">${escapeHtml(f.verdict)}</span>
+          <b style="font-size:12px">${escapeHtml(f.name)}</b>
+          <span style="font-size:10px;color:var(--text-muted)">신뢰도 ${f.confidence ?? '-'}</span>
+        </div>
+        ${f.why ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${escapeHtml(f.why)}</div>` : ''}
+        ${f.evidence ? `<div class="attack-evidence">${ev}</div>` : ''}
+      </div>`;
+  }).join('');
 
-  const confidenceColor = a.confidence >= 70 ? 'var(--success)' : a.confidence >= 40 ? 'var(--warning)' : 'var(--danger)';
+  return `
+    <div class="analysis-card" data-card-id="attack" style="border-color:${border}">
+      <div class="analysis-card-header">공격 결과 분석
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <span class="tag ${cls}">${label}</span>
+          ${a.attack_confidence != null ? `<span style="font-size:10px;color:var(--text-muted)">${a.attack_confidence}</span>` : ''}
+        </span>
+      </div>
+      <div class="analysis-card-body">
+        ${rows || '<div class="detail-item" style="color:var(--text-muted)">뚜렷한 공격 성공 신호 없음</div>'}
+      </div>
+    </div>`;
+}
 
-  container.innerHTML = `
-    <!-- 판정 카드 -->
+// 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
+function renderVerdictCard(a, confidenceColor) {
+  const ai = a.ai_verdict;
+  if (ai && !ai.error) {
+    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
+    const [label, cls] = OUT[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
+    const sev = String(ai.severity || 'info');
+    const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
+    const sevCls = (sev === 'critical' || sev === 'high') ? 'tag-red' : sev === 'medium' ? 'tag-yellow' : 'tag-blue';
+    return `
+      <div class="analysis-card" data-card-id="verdict" style="border-color:rgba(188,140,255,.35)">
+        <div class="analysis-card-header">판정 결과
+          <span style="margin-left:auto;font-size:9px;color:var(--purple);font-weight:400">AI · ${escapeHtml(ai.model || '')}</span>
+        </div>
+        <div class="analysis-card-body">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+            <span class="tag ${cls}">${label}</span>
+            <span class="tag ${sevCls}">위험도 ${escapeHtml(sevKo)}</span>
+            <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
+          </div>
+          ${ai.reasoning ? `<div class="detail-item">${escapeHtml(ai.reasoning)}</div>` : ''}
+          ${ai.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority)}</div>` : ''}
+          ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation)}</div>` : ''}
+        </div>
+      </div>`;
+  }
+  // 결정적 판정 (기본/폴백)
+  const aiErr = ai && ai.error ? `<div style="font-size:10px;color:var(--text-muted)">AI 판정 실패: ${escapeHtml(ai.error)}</div>` : '';
+  return `
     <div class="analysis-card" data-card-id="verdict">
       <div class="analysis-card-header">판정 결과</div>
       <div class="analysis-card-body">
@@ -927,8 +1446,24 @@ function renderAnalysis(a, result) {
           </div>
           ${riskBadge(a.risk_level)}
         </div>
+        ${aiErr}
       </div>
-    </div>
+    </div>`;
+}
+
+function renderAnalysis(a, result) {
+  if (!a) return;
+
+  // 헤더 verdict badge
+  document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
+
+  const container = document.getElementById('analysisContent');
+
+  const confidenceColor = a.confidence >= 70 ? 'var(--success)' : a.confidence >= 40 ? 'var(--warning)' : 'var(--danger)';
+
+  container.innerHTML = `
+    <!-- 판정 카드 (AI 종합 판정 있으면 대체, 없으면 결정적 판정) -->
+    ${renderVerdictCard(a, confidenceColor)}
 
     <!-- 응답 메타 -->
     <div class="analysis-card" data-card-id="res-info">
@@ -969,7 +1504,7 @@ function renderAnalysis(a, result) {
     <!-- 에러 누출 -->
     ${a.error_leaks?.length ? `
     <div class="analysis-card" style="border-color:rgba(248,81,73,.4)">
-      <div class="analysis-card-header" style="color:var(--danger)">⚠️ 에러 정보 누출</div>
+      <div class="analysis-card-header" style="color:var(--danger)">에러 정보 누출</div>
       <div class="analysis-card-body">
         <div class="tag-list">
           ${a.error_leaks.map(l => `<span class="tag tag-red">${escapeHtml(l)}</span>`).join('')}
@@ -980,7 +1515,7 @@ function renderAnalysis(a, result) {
     <!-- 민감 정보 -->
     ${a.sensitive_data?.length ? `
     <div class="analysis-card" style="border-color:rgba(255,107,107,.5)">
-      <div class="analysis-card-header" style="color:var(--critical)">🔴 민감 정보 노출</div>
+      <div class="analysis-card-header" style="color:var(--critical)">민감 정보 노출</div>
       <div class="analysis-card-body">
         <div class="tag-list">
           ${a.sensitive_data.map(s => `<span class="tag tag-red">${escapeHtml(s)}</span>`).join('')}
@@ -994,21 +1529,27 @@ function renderAnalysis(a, result) {
       <div class="analysis-card-header">이상 징후</div>
       <div class="analysis-card-body">
         <div class="detail-list">
-          ${a.response_anomalies.map(x => `<div class="detail-item">⚡ ${escapeHtml(x)}</div>`).join('')}
+          ${a.response_anomalies.map(x => `<div class="detail-item">${escapeHtml(x)}</div>`).join('')}
         </div>
       </div>
     </div>` : ''}
 
-    <!-- 상세 -->
+    <!-- 공격 결과 분석 (증거 기반) -->
+    ${renderAttackCard(a)}
+
+    <!-- 원시 로그(기존 상세) — 접힘 -->
     ${a.details?.length ? `
-    <div class="analysis-card" data-card-id="details">
-      <div class="analysis-card-header">상세 분석</div>
+    <div class="analysis-card collapsed" data-card-id="details">
+      <div class="analysis-card-header">원시 로그 <span class="analysis-card-chevron">▼</span></div>
       <div class="analysis-card-body">
         <div class="detail-list">
           ${a.details.map(d => `<div class="detail-item">${escapeHtml(d)}</div>`).join('')}
         </div>
       </div>
     </div>` : ''}
+
+    <!-- AI 상세 분석 (NVIDIA NIM) -->
+    ${a.ai ? renderAiCard(a.ai) : ''}
   `;
 
   // 카드 접기/펼치기 바인딩
@@ -1325,7 +1866,7 @@ function renderAlerts(alerts) {
 
   section.innerHTML = `
     <div class="analysis-card-header" style="color:var(--accent)">
-      🔔 보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건${customCount ? ` · 커스텀 ${customCount}` : ''})</span>
+      보안 Alert <span style="color:var(--text-muted);font-weight:400;margin-left:4px">(${alerts.length}건${customCount ? ` · 커스텀 ${customCount}` : ''})</span>
       <button onclick="event.stopPropagation();openAlertRuleModal()"
         style="margin-left:auto;background:transparent;border:1px solid rgba(88,166,255,.4);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:2px 7px;margin-right:6px">
         + 커스텀 룰
@@ -1340,7 +1881,7 @@ function renderAlerts(alerts) {
       <!-- Informational 더보기 버튼 -->
       <div id="alertInfoMore" style="display:none;text-align:center;padding:6px 0">
         <button class="alert-more-btn" onclick="toggleInfoAlerts()">
-          🔵 정보성 ${counts.informational}건 더보기 ▼
+          정보성 ${counts.informational}건 더보기 ▼
         </button>
       </div>
     </div>`;
@@ -1380,7 +1921,7 @@ function renderAlertList(section, alerts, filter) {
   if (filter === 'all' && counts.informational > 0 && !section._showInfo) {
     moreBtn.style.display = 'block';
     moreBtn.querySelector('.alert-more-btn').textContent =
-      `🔵 정보성 ${counts.informational}건 더보기 ▼`;
+      `정보성 ${counts.informational}건 더보기 ▼`;
   } else {
     moreBtn.style.display = 'none';
   }
@@ -1400,12 +1941,18 @@ function buildAlertCard(alert, confidenceLabel) {
       <div class="alert-title">${escapeHtml(alert.name)}</div>
       <div class="alert-badges">
         ${alert._custom ? '<span class="custom-alert-badge">커스텀</span>' : ''}
+        ${alert.evidence ? '<span class="alert-evidence-badge" title="응답에서 실제 탐지된 증거 있음">증거</span>' : ''}
         <span class="alert-risk-badge badge-${alert.risk}">${riskKo(alert.risk)}</span>
         <span class="alert-confidence-badge">${(confidenceLabel || {})[alert.confidence] ?? alert.confidence}</span>
       </div>
       <span class="alert-chevron">▶</span>
     </div>
     <div class="alert-body">
+      ${alert.evidence ? `
+      <div class="alert-section">
+        <div class="alert-section-label">탐지된 증거 <span class="evidence-hint">(응답에서 검색해 확인)</span></div>
+        <div class="attack-evidence">${escapeHtml(alert.evidence)}</div>
+      </div>` : ''}
       <div class="alert-section">
         <div class="alert-section-label">설명</div>
         <div class="alert-section-text">${escapeHtml(alert.description)}</div>
@@ -1473,7 +2020,7 @@ function openBulkModal() {
   if (!state.payloads) { toast('페이로드를 먼저 로드하세요', 'error'); return; }
 
   const opts = state.payloads.categories.map(c =>
-    `<option value="${c.id}">${c.icon} ${c.name}</option>`
+    `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
   ).join('');
   document.getElementById('bulkCategory').innerHTML  = opts;
   document.getElementById('multiCategory').innerHTML = opts;
@@ -1489,6 +2036,7 @@ function openBulkModal() {
 
   loadBulkPayloadList(document.getElementById('bulkCategory').value);
   loadMultiPayloadList(document.getElementById('multiCategory').value);
+  switchMultiPayloadMode('custom');   // 다중 타겟은 기본 '직접 입력'(공격 구문 자동 삽입 방지)
   switchModalTab('single');
   document.getElementById('bulkModal').classList.remove('hidden');
 }
@@ -1506,7 +2054,7 @@ function loadBulkPayloadList(catId) {
     <label class="payload-check-item">
       <input type="checkbox" value="${p.id}" checked>
       <span class="risk-dot ${p.risk}" style="flex-shrink:0"></span>
-      <span class="item-name">${p.name}</span>
+      <span class="item-name">${escapeHtml(p.name)}</span>
       <span class="item-payload">${escapeHtml(p.payload)}</span>
     </label>`).join('');
 }
@@ -1525,7 +2073,7 @@ function loadMultiPayloadList(catId) {
     <label class="payload-check-item">
       <input type="checkbox" value="${p.id}" checked>
       <span class="risk-dot ${p.risk}" style="flex-shrink:0"></span>
-      <span class="item-name">${p.name}</span>
+      <span class="item-name">${escapeHtml(p.name)}</span>
       <span class="item-payload">${escapeHtml(p.payload)}</span>
     </label>`).join('');
 }
@@ -1537,7 +2085,7 @@ function selectAllMultiPayloads(checked) {
 
 /* ── 다중 타겟 일괄 테스트 ── */
 /* ── 다중 타겟 페이로드 모드 전환 ── */
-let multiPayloadMode = 'list';
+let multiPayloadMode = 'custom';   // 기본값: 직접 입력(공격 페이로드 자동 삽입 방지)
 
 function switchMultiPayloadMode(mode) {
   multiPayloadMode = mode;
@@ -1567,6 +2115,7 @@ async function runMultiTargetTest() {
   const targetParam = document.getElementById('multiTargetParam').value.trim() || 'q';
   const injectIn    = document.getElementById('multiInjectIn').value;
   const method      = document.getElementById('multiMethod').value;
+  const concurrency = Math.max(1, Math.min(parseInt(document.getElementById('multiConcurrency')?.value, 10) || 12, 30));
 
   let requestBody;
 
@@ -1584,7 +2133,7 @@ async function runMultiTargetTest() {
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
       default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
       category: '_custom', payload_ids: [],
-      custom_payloads: customPayloads,
+      custom_payloads: customPayloads, concurrency,
     };
   } else {
     // 체크리스트 모드
@@ -1597,7 +2146,7 @@ async function runMultiTargetTest() {
       method, urls, target_param: targetParam,
       inject_in: injectIn, headers: kvToObj(state.kvHeaders),
       default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
-      category: catId, payload_ids: checkedIds,
+      category: catId, payload_ids: checkedIds, concurrency,
     };
   }
 
@@ -1641,12 +2190,8 @@ function renderMultiTargetResults(data) {
   const allResults   = data.targets?.flatMap(t => t.results) || [];
   const globalSummary = generateClientSummary(allResults);
 
-  // 글로벌 요약 업데이트
-  document.getElementById('summaryTotal').textContent   = globalSummary.total;
-  document.getElementById('summaryBlocked').textContent = globalSummary.blocked;
-  document.getElementById('summaryPassed').textContent  = globalSummary.passed;
-  document.getElementById('summaryBypass').textContent  = globalSummary.bypass;
-  document.getElementById('summaryRate').textContent    = globalSummary.detection_rate + '%';
+  // 글로벌 요약 업데이트 (응답 사실 기반)
+  setSummary(bulkSummaryCards(allResults));
 
   area.innerHTML = `
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
@@ -1658,10 +2203,16 @@ function renderMultiTargetResults(data) {
           <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">#${i+1}</span>
           <span class="target-url">${escapeHtml(t.url)}</span>
           <div class="multi-summary-chips">
-            <span class="alert-count-chip chip-high">차단 ${t.summary?.blocked||0}</span>
-            <span class="alert-count-chip chip-medium">통과 ${t.summary?.passed||0}</span>
-            ${t.summary?.bypass ? `<span class="alert-count-chip" style="background:rgba(255,107,107,.1);color:var(--critical);border-color:rgba(255,107,107,.3)">우회 ${t.summary.bypass}</span>` : ''}
-            <span class="alert-count-chip chip-informational">${t.summary?.detection_rate||0}%</span>
+            ${(() => {
+              const rs = t.results || [];
+              const resp = rs.filter(r => (r.status_code || 0) > 0).length;
+              const noResp = rs.length - resp;
+              const find = rs.filter(r => r.analysis?.verdict === 'bypass').length;
+              return `
+                <span class="alert-count-chip chip-informational">응답 ${resp}</span>
+                ${noResp ? `<span class="alert-count-chip chip-medium">무응답 ${noResp}</span>` : ''}
+                ${find ? `<span class="alert-count-chip" style="background:rgba(255,107,107,.1);color:var(--critical);border-color:rgba(255,107,107,.3)">취약 ${find}</span>` : ''}`;
+            })()}
           </div>
           <span class="target-chevron">▼</span>
         </div>
@@ -1700,6 +2251,43 @@ function generateClientSummary(results) {
   const bypass   = results.filter(r => r.analysis?.verdict === 'bypass').length;
   return { total, blocked, passed, bypass,
     detection_rate: total ? Math.round(blocked/total*100) : 0 };
+}
+
+// 상단 요약 카드(5개 공유)를 각 화면이 명시적으로 세팅.
+// cards: [{id, label, value, title?}] — 목록에 없는 카드는 숨김.
+function setSummary(cards) {
+  const ALL = ['summaryTotal', 'summaryBlocked', 'summaryPassed', 'summaryBypass', 'summaryRate'];
+  const shown = new Set(cards.map(c => c.id));
+  ALL.forEach(id => {
+    const num = document.getElementById(id);
+    const card = num && num.closest('.summary-card');
+    if (card) card.style.display = shown.has(id) ? '' : 'none';
+  });
+  cards.forEach((c, i) => {
+    const num = document.getElementById(c.id);
+    if (!num) return;
+    num.textContent = c.value;
+    const card = num.closest('.summary-card');
+    if (card) card.style.order = i;   // 배열 순서대로 표시(카드 DOM 순서 무시)
+    const lbl = num.nextElementSibling;
+    if (lbl && lbl.classList.contains('lbl')) {
+      lbl.textContent = c.label;
+      if (c.title) lbl.title = c.title; else lbl.removeAttribute('title');
+    }
+  });
+}
+
+// 일괄/다중 결과용 요약 카드 — 판정(WAF) 관점이 아니라 응답 사실 기반.
+function bulkSummaryCards(results) {
+  const total     = results.length;
+  const responded = results.filter(r => (r.status_code || 0) > 0).length;
+  const findings  = results.filter(r => r.analysis?.verdict === 'bypass').length;
+  return [
+    { id: 'summaryTotal',  label: '총 테스트', value: total },
+    { id: 'summaryRate',   label: '응답 받음', value: responded, title: 'HTTP 응답을 받은 요청 수' },
+    { id: 'summaryPassed', label: '응답 없음', value: total - responded, title: '타임아웃·연결 실패 등 응답을 못 받은 요청 수' },
+    { id: 'summaryBypass', label: '취약 의심', value: findings, title: '에러 정보 누출·민감정보 노출·공격 성공 신호가 확인된 응답 수' },
+  ];
 }
 
 /* ── 포트 스캔 ── */
@@ -1758,17 +2346,13 @@ function renderPortScanResults(data) {
 
   // 요약 카드 업데이트 (포트 스캔 용도)
   const totalScanned = hostList.reduce((s, h) => s + (h.total_scanned || 0), 0);
-  document.getElementById('summaryTotal').textContent   = data.host_count;
-  document.getElementById('summaryBlocked').textContent = data.total_open;
-  document.getElementById('summaryPassed').textContent  = data.total_risky;
-  document.getElementById('summaryBypass').textContent  = totalScanned;
-  document.getElementById('summaryRate').textContent    = data.total_open;
-
-  document.querySelector('.num-total   + .lbl').textContent = '대상 수';
-  document.querySelector('.num-blocked + .lbl').textContent = '열린 포트';
-  document.querySelector('.num-passed  + .lbl').textContent = '위험 포트';
-  document.querySelector('.num-bypass  + .lbl').textContent = '스캔 포트 수';
-  document.querySelector('.num-rate    + .lbl').textContent = '오픈 합계';
+  setSummary([
+    { id: 'summaryTotal',   label: '대상 수',      value: data.host_count },
+    { id: 'summaryBlocked', label: '열린 포트',    value: data.total_open },
+    { id: 'summaryPassed',  label: '위험 포트',    value: data.total_risky },
+    { id: 'summaryBypass',  label: '스캔 포트 수', value: totalScanned },
+    { id: 'summaryRate',    label: '오픈 합계',    value: data.total_open },
+  ]);
 
   const container = document.querySelector('.results-view');
   ['portScanArea', 'multiResultsArea'].forEach(id => document.getElementById(id)?.remove());
@@ -1903,11 +2487,7 @@ function hideLoadingOverlay() {
 function renderBulkResults(data) {
   const { results, summary } = data;
 
-  document.getElementById('summaryTotal').textContent = summary.total;
-  document.getElementById('summaryBlocked').textContent = summary.blocked;
-  document.getElementById('summaryPassed').textContent = summary.passed;
-  document.getElementById('summaryBypass').textContent = summary.bypass;
-  document.getElementById('summaryRate').textContent = summary.detection_rate + '%';
+  setSummary(bulkSummaryCards(results));
 
   const tbody = document.getElementById('resultsTableBody');
   tbody.innerHTML = results.map((r, i) => {
@@ -2064,46 +2644,37 @@ function initRowResizer() {
   const saved = localStorage.getItem('requestPanelHeight');
   if (saved) reqPanel.style.height = saved + 'px';
 
-  let dragging = false;
-  let startY   = 0;
-  let startH   = 0;
+  let dragging = false, startY = 0, startH = 0;
+  const clamp = h => Math.min(Math.max(h, 90), window.innerHeight * 0.75);
 
   divider.addEventListener('mousedown', e => {
     dragging = true;
-    startY   = e.clientY;
-    startH   = reqPanel.getBoundingClientRect().height;
+    startY = e.clientY;
+    startH = reqPanel.getBoundingClientRect().height;
     divider.classList.add('dragging');
-    document.body.style.cursor     = 'row-resize';
+    document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
     e.preventDefault();
   });
-
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
-    const delta = e.clientY - startY;
-    const newH  = Math.min(Math.max(startH + delta, 80), window.innerHeight * 0.6);
-    reqPanel.style.height = newH + 'px';
+    reqPanel.style.height = clamp(startH + (e.clientY - startY)) + 'px';
   });
-
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
     divider.classList.remove('dragging');
-    document.body.style.cursor     = '';
+    document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    localStorage.setItem('requestPanelHeight',
-      reqPanel.getBoundingClientRect().height);
+    localStorage.setItem('requestPanelHeight', Math.round(reqPanel.getBoundingClientRect().height));
   });
-
-  // Ctrl + 휠로도 조정
+  // Ctrl + 휠로도 높이 조정
   reqPanel.addEventListener('wheel', e => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    const curH = reqPanel.getBoundingClientRect().height;
-    const step = e.deltaY > 0 ? -20 : 20;
-    const newH = Math.min(Math.max(curH + step, 80), window.innerHeight * 0.6);
+    const newH = clamp(reqPanel.getBoundingClientRect().height + (e.deltaY > 0 ? -20 : 20));
     reqPanel.style.height = newH + 'px';
-    localStorage.setItem('requestPanelHeight', newH);
+    localStorage.setItem('requestPanelHeight', Math.round(newH));
   }, { passive: false });
 }
 
@@ -2462,11 +3033,12 @@ function deleteCustomPayload(payloadId) {
 }
 
 function switchSidebarTab(tab) {
+  const panelId = { payloads: 'sidebarPayloads', aitest: 'sidebarAitest', history: 'sidebarHistory' }[tab] || 'sidebarPayloads';
   document.querySelectorAll('.sidebar-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.stab === tab)
   );
   document.querySelectorAll('.sidebar-panel').forEach(p =>
-    p.classList.toggle('active', p.id === (tab === 'payloads' ? 'sidebarPayloads' : 'sidebarHistory'))
+    p.classList.toggle('active', p.id === panelId)
   );
   if (tab === 'history') renderHistoryList();
 }
@@ -2602,6 +3174,13 @@ document.addEventListener('DOMContentLoaded', () => {
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
 
+  // 서버 AI 설정 여부 확인 (AI 버튼 노출 판단)
+  API.aiStatus().then(s => {
+    state.aiEnabled = !!s.enabled;
+    const b = document.getElementById('aiSuggestBtn');
+    if (b) b.style.display = state.aiEnabled ? '' : 'none';
+  });
+
   // Enter key on URL
   document.getElementById('urlInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') sendRequest();
@@ -2651,7 +3230,13 @@ function looksLikeRequest(text) {
   const first = t.split(/\s+/)[0].toLowerCase().replace(/^\$/, '');
   if (first === 'curl' || first === 'wget') return true;
   const firstLine = t.split('\n')[0].trim();
+  // HTTP 버전이 있으면 확실한 요청. 버전이 없어도 대상이 /path 또는 http(s):// 로
+  // 시작하고 다음 줄에 헤더(:포함)가 있으면 요청으로 인정 (버전 없는 캡처 대응)
   if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP\/\d/i.test(firstLine)) return true;
+  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\/\S*|https?:\/\/\S+)$/i.test(firstLine)) {
+    const second = (t.split('\n')[1] || '').trim();
+    if (/^[\w-]+:\s*\S/.test(second)) return true;   // 둘째 줄이 헤더면 요청으로 확신
+  }
   return false;
 }
 
@@ -2826,62 +3411,132 @@ function parseCSV(text) {
   return rows.filter(r => r.length && !(r.length === 1 && r[0].trim() === ''));
 }
 
+// WAF/IDS syslog 한 줄에서 URL 조립 (Imperva key="value", IDS layer_7_data 중첩 모두 대응)
+function extractUrlFromLogLine(line) {
+  const kv = {};
+  // 따옴표 key="value" (Imperva WAF, IDS syslog)
+  const re = /(\w+)="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(line)) !== null) { kv[m[1]] = m[2]; }
+
+  // CEF (TippingPoint IPS 등): 확장부의 따옴표 없는 key=value (값에 공백 포함 가능 → 다음 key= 앞까지)
+  if (/\bCEF:/.test(line)) {
+    const parts = line.split('|');
+    const ext = parts.length >= 8 ? parts.slice(7).join('|') : line;
+    const re2 = /(\w+)=(.*?)(?=\s+\w+=|$)/g;
+    let m2;
+    while ((m2 = re2.exec(ext)) !== null) { const k = m2[1], v = m2[2].trim(); if (k && !(k in kv)) kv[k] = v; }
+  }
+
+  // IDS의 layer_7_data 내부(NAME == VALUE ;;;) 를 다시 파싱
+  const inner = {};
+  if (kv.layer_7_data) {
+    kv.layer_7_data.split(';;;').forEach(seg => {
+      const i = seg.indexOf('==');
+      if (i !== -1) { const k = seg.slice(0, i).trim(); const v = seg.slice(i + 2).trim(); if (k) inner[k] = v; }
+    });
+  }
+  const pick = (o, ks) => { for (const k of ks) { const v = o[k]; if (v != null && v !== '' && v !== 'N/A' && v !== '---') return v; } return ''; };
+
+  let host = pick(kv, ['httpHost', 'host', 'hostname', 'dest_host', 'dhost'])
+          || pick(inner, ['HTTP Host'])
+          || pick(kv, ['destination_ip', 'dst']);
+  let path = pick(kv, ['url', 'uri', 'url_path', 'request_uri', 'request'])
+          || pick(inner, ['HTTP URI']);
+  const query = pick(kv, ['webQuery', 'uri_query', 'query']);
+  const port = pick(kv, ['dport', 'destination_port', 'dpt']);
+
+  if (!host || !path) return null;
+  host = host.replace(/^https?:\/\//i, '').trim();
+  // request/url 필드가 이미 full URL 인 경우 그대로 사용
+  if (/^https?:\/\//i.test(path)) {
+    let u = path;
+    if (query && !u.includes('?')) u += '?' + query.replace(/^\?/, '');
+    return u;
+  }
+  if (!/^\//.test(path)) path = '/' + path;
+  const scheme = (port === '443') ? 'https' : (port === '80') ? 'http' : 'https';
+  let u = scheme + '://' + host + path;
+  if (query) u += (u.includes('?') ? '&' : '?') + query.replace(/^\?/, '');
+  return u;
+}
+
 function fillMultiFromLog(text, name) {
-  const firstLine = (text.split('\n', 1)[0] || '');
+  const firstLine = (text.split('\n', 1)[0] || '').replace(/^﻿/, '');
+  // 헤더 줄에 콤마가 있고 따옴표로 감싼 컬럼이 보이면 CSV(테이블) 로 우선 판정.
+  // (CEF/WAF 로그가 _raw 컬럼 안에 박혀 있어도 파일 자체는 CSV 이므로 라인 파싱 모드로 새면 안 됨)
   const looksCsv = firstLine.includes(',');
   let urls = [];
 
-  if (!looksCsv) {
-    // 단순 URL 목록(한 줄에 하나)
-    urls = text.split('\n').map(v => v.trim()).filter(v => /^https?:\/\//i.test(v));
-  } else {
+  if (looksCsv) {
     const rows = parseCSV(text);
     if (rows.length < 2) throw new Error('데이터 행이 없습니다');
-    const headers = rows[0].map(h => h.trim());
+    const headers = rows[0].map(h => h.trim().replace(/^﻿/, ''));
     const body = rows.slice(1);
     const lower = headers.map(h => h.toLowerCase());
     const idxOf = (cands) => { for (const c of cands) { const k = lower.indexOf(c); if (k !== -1) return k; } return -1; };
 
-    // 1) 값 기준으로 full-URL 컬럼 탐지 (가장 http(s):// 비율 높은 컬럼)
-    const N = Math.min(body.length, 50);
-    let bestCol = -1, bestScore = 0;
-    for (let ci = 0; ci < headers.length; ci++) {
-      let hit = 0, tot = 0;
-      for (let ri = 0; ri < N; ri++) {
-        const v = (body[ri][ci] || '').trim();
-        if (!v) continue; tot++;
-        if (/^https?:\/\//i.test(v)) hit++;
-      }
-      const score = tot ? hit / tot : 0;
-      if (score > bestScore) { bestScore = score; bestCol = ci; }
+    // 1) 로그 원문 컬럼(_raw/message 등)이 있으면 줄 파싱기로 URL 추출.
+    //    실제 SIEM(Splunk 등) export 는 구조화 컬럼이 비고 원문만 _raw 에 있는 경우가 많다.
+    const rawIdx = idxOf(['_raw', 'raw', 'message', 'msg', 'log', 'event', 'rawmsg']);
+    if (rawIdx !== -1) {
+      urls = body.map(r => extractUrlFromLogLine(r[rawIdx] || '')).filter(Boolean);
     }
 
-    if (bestScore >= 0.5) {
-      urls = body.map(r => (r[bestCol] || '').trim()).filter(v => /^https?:\/\//i.test(v));
-    } else {
-      // 2) host + path(+query) 조합
-      const hostIdx = idxOf(['dest', 'dest_host', 'dest_name', 'http_host', 'host', 'hostname', 'website', 'site', 'domain', 'url_domain', 'server', 'vip']);
-      const pathIdx = idxOf(['uri_path', 'url_path', 'path', 'cs-uri-stem', 'uri_stem', 'uri', 'request_uri', 'request', 'http_uri', 'url']);
-      const queryIdx = idxOf(['uri_query', 'url_query', 'query', 'cs-uri-query', 'query_string', 'querystring']);
-      if (pathIdx === -1) throw new Error('URL/경로 컬럼을 찾지 못했습니다 (헤더에 url, uri, host 등이 있는지 확인)');
-      urls = body.map(r => {
-        let path = (r[pathIdx] || '').trim();
-        if (!path) return null;
-        const q = queryIdx !== -1 ? (r[queryIdx] || '').trim().replace(/^\?/, '') : '';
-        if (/^https?:\/\//i.test(path)) {          // path 컬럼이 실은 full URL
-          let u = path;
-          if (q && !u.includes('?')) u += '?' + q;
-          return u;
+    // 2) _raw 로 못 뽑았으면 값 기준으로 full-URL 컬럼 탐지 (가장 http(s):// 비율 높은 컬럼)
+    if (!urls.length) {
+      const N = Math.min(body.length, 50);
+      let bestCol = -1, bestScore = 0;
+      for (let ci = 0; ci < headers.length; ci++) {
+        let hit = 0, tot = 0;
+        for (let ri = 0; ri < N; ri++) {
+          const v = (body[ri][ci] || '').trim();
+          if (!v) continue; tot++;
+          if (/^https?:\/\//i.test(v)) hit++;
         }
-        let host = hostIdx !== -1 ? (r[hostIdx] || '').trim() : '';
-        if (!host) return null;
-        let scheme = /:80$/.test(host) ? 'http' : 'https';
-        host = host.replace(/^https?:\/\//i, '');
-        if (!path.startsWith('/')) path = '/' + path;
-        let u = scheme + '://' + host + path;
-        if (q) u += (u.includes('?') ? '&' : '?') + q;
-        return u;
-      }).filter(Boolean);
+        const score = tot ? hit / tot : 0;
+        if (score > bestScore) { bestScore = score; bestCol = ci; }
+      }
+      if (bestScore >= 0.5) {
+        urls = body.map(r => (r[bestCol] || '').trim()).filter(v => /^https?:\/\//i.test(v));
+      }
+    }
+
+    // 3) 그래도 없으면 host + path(+query) 컬럼 조합
+    if (!urls.length) {
+      const hostIdx = idxOf(['dest', 'dest_host', 'dest_name', 'http_host', 'httphost', 'host', 'hostname', 'dhost', 'website', 'site', 'domain', 'url_domain', 'server', 'vip']);
+      const pathIdx = idxOf(['uri_path', 'url_path', 'path', 'cs-uri-stem', 'uri_stem', 'uri', 'request_uri', 'request', 'http_uri', 'url']);
+      const queryIdx = idxOf(['uri_query', 'url_query', 'query', 'cs-uri-query', 'query_string', 'querystring', 'webquery']);
+      if (pathIdx !== -1) {
+        urls = body.map(r => {
+          let path = (r[pathIdx] || '').trim();
+          if (!path) return null;
+          const q = queryIdx !== -1 ? (r[queryIdx] || '').trim().replace(/^\?/, '') : '';
+          if (/^https?:\/\//i.test(path)) {          // path 컬럼이 실은 full URL
+            let u = path;
+            if (q && !u.includes('?')) u += '?' + q;
+            return u;
+          }
+          let host = hostIdx !== -1 ? (r[hostIdx] || '').trim() : '';
+          if (!host) return null;
+          let scheme = /:80$/.test(host) ? 'http' : 'https';
+          host = host.replace(/^https?:\/\//i, '');
+          if (!path.startsWith('/')) path = '/' + path;
+          let u = scheme + '://' + host + path;
+          if (q) u += (u.includes('?') ? '&' : '?') + q;
+          return u;
+        }).filter(Boolean);
+      }
+    }
+  } else {
+    // 비-CSV: 원문 로그 dump(줄당 이벤트) 또는 단순 URL 목록
+    const kvHits = (text.match(/\w+="/g) || []).length;
+    const looksLog = /\bCEF:/.test(text)
+      || (kvHits >= 5 && /(httpHost=|layer_7_data=|webQuery=|attack_name=|ruleName=|destination_ip=)/i.test(text));
+    if (looksLog) {
+      urls = text.split('\n').map(l => extractUrlFromLogLine(l)).filter(Boolean);
+    } else {
+      urls = text.split('\n').map(v => v.trim()).filter(v => /^https?:\/\//i.test(v));
     }
   }
 

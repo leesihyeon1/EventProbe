@@ -11,7 +11,6 @@
 <!-- ══════════════════════════════════ TOPBAR ══════════════════════════════════ -->
 <div class="topbar">
   <div class="topbar-logo">
-    <div class="logo-icon">🛡️</div>
     <span>SecAPITester</span>
   </div>
 
@@ -22,7 +21,7 @@
   </div>
 
   <div class="topbar-actions">
-    <button class="btn btn-success" onclick="openBulkModal()">⚡ 일괄 테스트</button>
+    <button class="btn btn-success" onclick="openBulkModal()">일괄 테스트</button>
     <button class="btn btn-secondary" onclick="generateReport()">📄 리포트 생성</button>
   </div>
 </div>
@@ -35,7 +34,8 @@
 
     <!-- 사이드바 탭 전환 -->
     <div class="sidebar-tab-bar">
-      <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">⚔️ 페이로드</div>
+      <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">페이로드</div>
+      <div class="sidebar-tab" data-stab="aitest" onclick="switchSidebarTab('aitest')">AI 테스트</div>
       <div class="sidebar-tab" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</div>
       <button class="sidebar-edit-btn" onclick="event.stopPropagation();openCustomModal()" title="커스텀 페이로드 편집">✏️</button>
     </div>
@@ -50,6 +50,26 @@
           <div class="spinner"></div>
           <div class="msg">로드 중...</div>
         </div>
+      </div>
+    </div>
+
+    <!-- AI 테스트 패널 -->
+    <div class="sidebar-panel" id="sidebarAitest">
+      <div style="padding:10px;display:flex;flex-direction:column;gap:8px;height:100%">
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.5">
+          현재 요청을 AI가 인식해 관련 페이로드 후보를 만듭니다.
+          <b>호스트·인증·쿠키는 제외</b>하고 요청 정보만 전송합니다.
+        </div>
+        <button class="btn btn-primary" style="font-size:12px;padding:6px" onclick="generateAiCandidates()">AI 페이로드 생성</button>
+        <div id="aiSuggestMeta" style="font-size:11px;color:var(--accent)"></div>
+        <div class="sidebar-scroll" id="aiCandidateList" style="flex:1;min-height:0">
+          <div class="empty-state" style="padding:20px">
+            <div class="icon">🤖</div>
+            <div class="msg">현재 요청으로 후보를 생성하세요</div>
+          </div>
+        </div>
+        <button id="goTestBtn" class="btn btn-primary" style="font-size:12px;padding:7px;display:none"
+                onclick="goTest()">▶ GO TEST (선택 후보 실행)</button>
       </div>
     </div>
 
@@ -83,6 +103,14 @@
         <option>HEAD</option>
         <option>OPTIONS</option>
       </select>
+      <select id="httpVersionSelect" class="method-select" style="width:110px" title="요청라인 HTTP 버전 (HTTP/1.1 외 선택 시 raw 소켓으로 그대로 전송)" onchange="onHttpVersionChange()">
+        <option value="HTTP/1.1">HTTP/1.1</option>
+        <option value="HTTP/1.0">HTTP/1.0</option>
+        <option value="HTTP/2">HTTP/2</option>
+        <option value="HTTP/0.9">HTTP/0.9</option>
+        <option value="__custom__">직접 입력…</option>
+      </select>
+      <input id="httpVersionCustom" class="url-input" type="text" placeholder="예: HTTP/1.1 (변형)" style="display:none;max-width:150px;flex:0 0 auto" title="비정상/커스텀 버전 문자열 그대로 전송">
       <input id="urlInput" class="url-input" type="text" placeholder="https://target.example.com/api/endpoint">
       <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기" style="white-space:nowrap">📋 붙여넣기</button>
       <label class="defhdr-toggle" title="켜면 빠진 헤더를 브라우저 기본값으로 보충(사용자 지정 헤더는 유지). 붙여넣기 시 자동으로 꺼집니다.">
@@ -90,22 +118,35 @@
         <span>기본헤더</span>
       </label>
       <button class="btn btn-secondary" onclick="openHeaderProfileModal()" title="기본 헤더 프로파일 편집" style="white-space:nowrap">⚙️</button>
+      <button id="aiSuggestBtn" class="btn btn-secondary" onclick="generateAiCandidates()" title="현재 요청을 AI가 인식해 페이로드 후보 생성 (호스트·인증 제외)" style="white-space:nowrap;display:none">AI 테스트</button>
       <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
     </div>
 
     <!-- ── Inject Bar ── -->
     <div class="inject-bar" id="injectBar" style="display:none">
-      <span class="label">선택된 페이로드:</span>
+      <span class="label">페이로드:</span>
       <span id="injectPayloadName" style="font-size:12px;color:var(--accent);white-space:nowrap"></span>
       <span class="payload-preview" id="injectPayloadPreview"></span>
-      <span class="label">삽입 위치:</span>
-      <select id="injectTarget" class="form-select" style="width:100px;padding:3px 6px">
+      <span class="label">위치:</span>
+      <select id="injectTarget" class="form-select" style="width:96px;padding:3px 6px" onchange="onInjectTargetChange()">
         <option value="param">Query Param</option>
         <option value="body">Body</option>
         <option value="header">Header</option>
         <option value="url">URL</option>
       </select>
+      <!-- A: 대상 파라미터/헤더 이름 지정 (기존 값 자동완성) -->
+      <input id="injectKey" list="injectKeyList" class="form-input" placeholder="파라미터명"
+             style="width:120px;padding:3px 6px" title="넣을 파라미터/헤더 이름 — 기존 값에서 선택하거나 직접 입력">
+      <datalist id="injectKeyList"></datalist>
+      <!-- B: 값 교체 vs 새로 추가 -->
+      <select id="injectMode" class="form-select" style="width:92px;padding:3px 6px" title="교체=해당 값에 페이로드 대입 / 추가=새 항목 추가">
+        <option value="replace">값 교체</option>
+        <option value="append">새로 추가</option>
+      </select>
       <button class="btn btn-primary" style="padding:4px 10px;font-size:11px" onclick="injectPayload()">삽입</button>
+      <!-- E: AI 우회 변형 생성 (AI 활성 시에만 노출) -->
+      <button id="aiVariantBtn" class="btn btn-secondary" style="padding:4px 10px;font-size:11px;display:none"
+              onclick="generateBypassVariants()" title="차단 우회용 변형 페이로드를 AI로 생성">🤖 우회 변형</button>
     </div>
 
     <!-- ── View Area ── -->
@@ -122,11 +163,11 @@
             <div class="tab req-tab" data-tab="body" onclick="switchReqTab('body')">Body</div>
           </div>
 
-          <div class="tab-content req-tab-content active" data-tab="params" style="max-height:140px;overflow-y:auto">
+          <div class="tab-content req-tab-content active" data-tab="params">
             <div class="kv-editor" id="paramsKv"></div>
           </div>
 
-          <div class="tab-content req-tab-content" data-tab="headers" style="max-height:200px;overflow-y:auto">
+          <div class="tab-content req-tab-content" data-tab="headers">
             <!-- Headers 모드 전환 토글 -->
             <div class="headers-mode-bar">
               <button class="hdr-mode-btn active" id="hdrModeKv" onclick="switchHeaderMode('kv')">Key-Value</button>
@@ -146,7 +187,7 @@
           </div>
 
           <div class="tab-content req-tab-content" data-tab="body">
-            <textarea id="bodyEditor" class="code-editor" placeholder='{"key": "value"}' style="min-height:90px"></textarea>
+            <textarea id="bodyEditor" class="code-editor" placeholder='{"key": "value"}' style="min-height:220px"></textarea>
           </div>
         </div>
 
@@ -182,6 +223,16 @@
               <div class="tab res-tab" data-tab="diff" onclick="switchResTab('diff')" id="diffTab">
                 Diff <span id="diffBadge" style="display:none;font-size:9px;background:var(--accent-dark);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">●</span>
               </div>
+            </div>
+            <!-- 응답 검색 바 -->
+            <div class="res-search-bar" style="display:flex;gap:6px;align-items:center;padding:5px 8px;background:var(--bg-primary);border-bottom:1px solid var(--border)">
+              <span style="font-size:12px">🔎</span>
+              <input id="resSearchInput" class="form-input" placeholder="응답에서 검색 (Body/Headers)…" spellcheck="false"
+                     style="flex:1;padding:3px 8px;font-size:12px" oninput="resSearch(true)"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();resSearchNav(event.shiftKey?-1:1)}">
+              <span id="resSearchCount" style="font-size:11px;color:var(--text-muted);white-space:nowrap;min-width:34px;text-align:right">-</span>
+              <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px" onclick="resSearchNav(-1)" title="이전 (Shift+Enter)">▲</button>
+              <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px" onclick="resSearchNav(1)" title="다음 (Enter)">▼</button>
             </div>
             <pre class="response-body res-tab-content active" data-tab="body" id="responseBody"><span style="color:var(--text-muted)">응답이 여기에 표시됩니다</span></pre>
             <pre class="response-body res-tab-content" data-tab="res-headers" id="responseHeadersBody"></pre>
@@ -335,13 +386,13 @@
 <div class="modal-overlay hidden" id="bulkModal">
   <div class="modal" style="width:720px">
     <div class="modal-header">
-      <h2>⚡ 일괄 테스트</h2>
+      <h2>일괄 테스트</h2>
       <button class="btn btn-secondary" onclick="closeBulkModal()">✕ 닫기</button>
     </div>
 
     <!-- 모달 내부 탭 -->
     <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg-tertiary)">
-      <div class="modal-tab active" data-mtab="single" onclick="switchModalTab('single')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">⚡ 단일 타겟</div>
+      <div class="modal-tab active" data-mtab="single" onclick="switchModalTab('single')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">단일 타겟</div>
       <div class="modal-tab" data-mtab="multi" onclick="switchModalTab('multi')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">🎯 다중 타겟</div>
       <div class="modal-tab" data-mtab="portscan" onclick="switchModalTab('portscan')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">🔌 포트 스캔</div>
     </div>
@@ -390,7 +441,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
-        <button class="btn btn-danger" onclick="runBulkTest()">⚡ 테스트 시작</button>
+        <button class="btn btn-danger" onclick="runBulkTest()">테스트 시작</button>
       </div>
     </div>
 
@@ -424,25 +475,31 @@
             </select>
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">대상 파라미터 이름</label>
-          <input id="multiTargetParam" class="form-input" type="text" placeholder="q">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+          <div class="form-group">
+            <label class="form-label">대상 파라미터 이름</label>
+            <input id="multiTargetParam" class="form-input" type="text" placeholder="q">
+          </div>
+          <div class="form-group">
+            <label class="form-label" title="한 번에 병렬로 보낼 요청 수. 높이면 빠르지만 WAF/레이트리밋에 걸릴 수 있음(1~30)">동시 실행 수</label>
+            <input id="multiConcurrency" class="form-input" type="number" min="1" max="30" value="12">
+          </div>
         </div>
         <!-- 페이로드 입력 모드 선택 -->
         <div class="form-group">
           <div style="display:flex;gap:4px;margin-bottom:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px">
-            <button class="multi-payload-mode-btn active" id="multiModeList" onclick="switchMultiPayloadMode('list')"
+            <button class="multi-payload-mode-btn" id="multiModeList" onclick="switchMultiPayloadMode('list')"
               style="flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s">
               📋 체크리스트
             </button>
-            <button class="multi-payload-mode-btn" id="multiModeCustom" onclick="switchMultiPayloadMode('custom')"
+            <button class="multi-payload-mode-btn active" id="multiModeCustom" onclick="switchMultiPayloadMode('custom')"
               style="flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s">
               ✏️ 직접 입력
             </button>
           </div>
 
           <!-- 체크리스트 모드 -->
-          <div id="multiModeListPanel">
+          <div id="multiModeListPanel" style="display:none">
             <div class="form-group" style="margin-bottom:8px">
               <label class="form-label">공격 카테고리</label>
               <select id="multiCategory" class="form-select"></select>
@@ -458,7 +515,7 @@
           </div>
 
           <!-- 직접 입력 모드 -->
-          <div id="multiModeCustomPanel" style="display:none">
+          <div id="multiModeCustomPanel">
             <label class="form-label" style="margin-bottom:6px">페이로드 값 <span style="color:var(--text-muted);font-weight:400">(줄바꿈으로 여러 개 입력 가능)</span></label>
             <textarea id="multiCustomPayloads" class="code-editor" rows="6"
               placeholder="' OR 1=1--&#10;admin'--&#10;&lt;script&gt;alert(1)&lt;/script&gt;&#10;../../../etc/passwd"></textarea>

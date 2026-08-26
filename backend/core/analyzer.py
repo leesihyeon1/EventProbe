@@ -1,8 +1,21 @@
 """
 응답 분석 엔진 - WAF/IDS 차단 여부, 취약점 탐지, ZAP 스타일 Alert 생성
 """
+import ast
 import re
 from typing import Optional
+
+
+def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
+    """body 에서 pattern(캡처그룹1=버전)을 찾아 target 미만이면 True (취약 라이브러리 판정용)."""
+    m = re.search(pattern, body or "", re.I)
+    if not m:
+        return False
+    try:
+        parts = tuple(int(x) for x in re.findall(r"\d+", m.group(1))[:3])
+        return parts < target
+    except Exception:
+        return False
 
 
 # ── WAF 차단 시그니처 ────────────────────────────────────────────────────────
@@ -809,7 +822,704 @@ ALERT_RULES = [
         "reference": "",
         "check": lambda h, b, bl, s: bool(re.search(r'"__schema"|"__type"|graphql', bl)),
     },
+
+    # ══════════════════════════════════════════════════════════════════
+    # 확장 룰 (OWASP Secure Headers / Nuclei / ZAP / gitleaks 기준)
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── 추가 보안 헤더 ─────────────────────────────────────────────────
+    {
+        "id": "10063-referrer", "name": "Referrer-Policy 헤더 누락", "risk": "low", "confidence": "certain",
+        "description": "Referrer-Policy 헤더가 없어 외부 사이트로 Referer 를 통한 정보 유출 가능성이 있습니다.",
+        "solution": "Referrer-Policy: no-referrer 또는 strict-origin-when-cross-origin 을 설정하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "referrer-policy" not in h and s == 200,
+    },
+    {
+        "id": "90004-coop", "name": "Cross-Origin-Opener-Policy 누락", "risk": "low", "confidence": "firm",
+        "description": "COOP 헤더가 없어 교차 오리진 창 간 격리가 되지 않습니다(XS-Leaks/Spectre 노출).",
+        "solution": "Cross-Origin-Opener-Policy: same-origin 을 설정하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "cross-origin-opener-policy" not in h and s == 200,
+    },
+    {
+        "id": "90004-corp", "name": "Cross-Origin-Resource-Policy 누락", "risk": "informational", "confidence": "tentative",
+        "description": "CORP 헤더가 없어 리소스가 타 오리진에 임베드될 수 있습니다.",
+        "solution": "Cross-Origin-Resource-Policy: same-origin 을 검토하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "cross-origin-resource-policy" not in h and s == 200,
+    },
+    {
+        "id": "10063-xpcdp", "name": "X-Permitted-Cross-Domain-Policies 누락", "risk": "informational", "confidence": "tentative",
+        "description": "Adobe 크로스도메인 정책 제어 헤더가 없습니다.",
+        "solution": "X-Permitted-Cross-Domain-Policies: none 을 설정하세요.",
+        "reference": "https://owasp.org/www-project-secure-headers/",
+        "check": lambda h, b, bl, s: "x-permitted-cross-domain-policies" not in h and s == 200,
+    },
+    {
+        "id": "10098-cors-methods", "name": "CORS — Allow-Methods 와일드카드", "risk": "low", "confidence": "certain",
+        "description": "Access-Control-Allow-Methods 가 * 로 모든 메서드를 허용합니다.",
+        "solution": "필요한 메서드만 명시하세요.",
+        "reference": "https://portswigger.net/web-security/cors",
+        "check": lambda h, b, bl, s: h.get("access-control-allow-methods", "").strip() == "*",
+    },
+    {
+        "id": "10098-cors-headers", "name": "CORS — Allow-Headers 와일드카드", "risk": "low", "confidence": "certain",
+        "description": "Access-Control-Allow-Headers 가 * 로 모든 헤더를 허용합니다.",
+        "solution": "허용 헤더를 제한하세요.",
+        "reference": "https://portswigger.net/web-security/cors",
+        "check": lambda h, b, bl, s: h.get("access-control-allow-headers", "").strip() == "*",
+    },
+    {
+        "id": "10038-cspro", "name": "CSP 가 Report-Only 로만 설정", "risk": "medium", "confidence": "firm",
+        "description": "Content-Security-Policy-Report-Only 만 있고 실제 강제(CSP)가 없어 XSS 를 차단하지 못합니다.",
+        "solution": "테스트 후 Content-Security-Policy 로 강제 적용하세요.",
+        "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html",
+        "check": lambda h, b, bl, s: "content-security-policy-report-only" in h and "content-security-policy" not in h,
+    },
+    {
+        "id": "10054-samesite-none", "name": "쿠키 SameSite=None + Secure 누락", "risk": "medium", "confidence": "firm",
+        "description": "SameSite=None 쿠키에 Secure 가 없어 최신 브라우저에서 거부되거나 평문 전송됩니다.",
+        "solution": "SameSite=None 쿠키에는 반드시 Secure 를 함께 설정하세요.",
+        "reference": "https://owasp.org/www-community/SameSite",
+        "check": lambda h, b, bl, s: "samesite=none" in h.get("set-cookie", "").lower()
+                                      and "secure" not in h.get("set-cookie", "").lower(),
+    },
+    {
+        "id": "10037-via", "name": "Via 헤더 — 프록시 정보 노출", "risk": "informational", "confidence": "certain",
+        "description": lambda h, **_: f"Via 헤더로 프록시/캐시 정보가 노출됩니다: {h.get('via','')}",
+        "solution": "Via 헤더 노출을 최소화하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "via" in h,
+    },
+
+    # ── 시크릿/토큰 노출 (gitleaks 계열) ───────────────────────────────
+    {
+        "id": "secret-aws", "name": "AWS Access Key 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 AWS Access Key ID(AKIA…) 로 보이는 문자열이 있습니다.",
+        "solution": "키를 즉시 폐기·회전하고 응답에서 제거하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b", b or "")),
+    },
+    {
+        "id": "secret-gcp", "name": "Google API Key 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 Google API 키(AIza…) 로 보이는 문자열이 있습니다.",
+        "solution": "키를 폐기·제한하고 응답에서 제거하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\bAIza[0-9A-Za-z_\-]{35}\b", b or "")),
+    },
+    {
+        "id": "secret-github", "name": "GitHub 토큰 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 GitHub 토큰(ghp_/gho_/github_pat_) 이 노출됩니다.",
+        "solution": "토큰을 폐기하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\b(ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36}\b|github_pat_[0-9A-Za-z_]{22,}", b or "")),
+    },
+    {
+        "id": "secret-slack", "name": "Slack 토큰/웹훅 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 Slack 토큰(xox…) 또는 웹훅 URL 이 노출됩니다.",
+        "solution": "토큰/웹훅을 폐기하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"xox[baprs]-[0-9A-Za-z-]{10,}|hooks\.slack\.com/services/", b or "")),
+    },
+    {
+        "id": "secret-stripe", "name": "Stripe 라이브 키 노출", "risk": "high", "confidence": "firm",
+        "description": "응답에 Stripe 라이브 시크릿 키(sk_live_) 가 노출됩니다.",
+        "solution": "키를 즉시 폐기하세요.",
+        "reference": "https://github.com/gitleaks/gitleaks",
+        "check": lambda h, b, bl, s: bool(re.search(r"\bsk_live_[0-9A-Za-z]{24,}\b|\brk_live_[0-9A-Za-z]{24,}\b", b or "")),
+    },
+    {
+        "id": "secret-jwt", "name": "JWT 토큰 노출", "risk": "medium", "confidence": "firm",
+        "description": "응답 본문에 JWT 로 보이는 토큰이 노출됩니다(민감 클레임·세션 가능).",
+        "solution": "토큰이 본문에 노출되지 않도록 하세요.",
+        "reference": "https://portswigger.net/web-security/jwt",
+        "check": lambda h, b, bl, s: bool(re.search(r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", b or "")),
+    },
+    {
+        "id": "secret-pw-json", "name": "패스워드 필드 노출(JSON)", "risk": "high", "confidence": "tentative",
+        "description": "응답 JSON 에 password/passwd 값이 평문으로 포함되어 있을 수 있습니다.",
+        "solution": "비밀번호 등 민감 필드를 응답에서 제거하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r'"(password|passwd|pwd)"\s*:\s*"[^"]{3,}"', b or "", re.I)),
+    },
+
+    # ── 프레임워크 디버그/에러 페이지 ──────────────────────────────────
+    {
+        "id": "debug-django", "name": "Django DEBUG 페이지 노출", "risk": "high", "confidence": "certain",
+        "description": "Django 디버그 페이지가 노출되어 소스·설정·환경변수가 유출됩니다.",
+        "solution": "프로덕션에서 DEBUG=False 로 설정하세요.",
+        "reference": "https://docs.djangoproject.com/en/stable/ref/settings/#debug",
+        "check": lambda h, b, bl, s: "you're seeing this error because you have" in bl or "django.core.exceptions" in bl,
+    },
+    {
+        "id": "debug-flask", "name": "Werkzeug/Flask 디버거 노출", "risk": "high", "confidence": "certain",
+        "description": "Werkzeug 대화형 디버거가 노출됩니다. PIN 우회 시 원격 코드 실행이 가능합니다.",
+        "solution": "프로덕션에서 디버그 모드를 끄세요.",
+        "reference": "https://werkzeug.palletsprojects.com/",
+        "check": lambda h, b, bl, s: "werkzeug debugger" in bl or "the console has been disabled" in bl,
+    },
+    {
+        "id": "debug-rails", "name": "Rails 예외 페이지 노출", "risk": "high", "confidence": "certain",
+        "description": "Rails 상세 예외 페이지가 노출되어 소스/스택이 유출됩니다.",
+        "solution": "config.consider_all_requests_local = false 로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "action controller: exception caught" in bl or "actionview::template::error" in bl,
+    },
+    {
+        "id": "debug-laravel", "name": "Laravel 디버그(Ignition) 노출", "risk": "high", "confidence": "certain",
+        "description": "Laravel Whoops/Ignition 디버그 페이지가 노출됩니다(CVE-2021-3129 이력).",
+        "solution": "APP_DEBUG=false 로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: ("whoops" in bl and "laravel" in bl) or "illuminate\\" in bl or "ignition" in bl and "laravel" in bl,
+    },
+    {
+        "id": "debug-spring", "name": "Spring Whitelabel 에러 노출", "risk": "medium", "confidence": "firm",
+        "description": "Spring Boot Whitelabel 에러 페이지가 노출됩니다(스택/버전 유출 가능).",
+        "solution": "server.error.whitelabel.enabled=false 및 상세 에러 숨김.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "whitelabel error page" in bl,
+    },
+    {
+        "id": "debug-aspnet", "name": "ASP.NET 상세 오류(YSOD) 노출", "risk": "high", "confidence": "certain",
+        "description": "ASP.NET 노란 오류 화면이 노출되어 스택/소스가 유출됩니다.",
+        "solution": "customErrors mode=On, <deployment retail=true> 설정.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "server error in '/' application" in bl and "stack trace" in bl,
+    },
+    {
+        "id": "debug-symfony", "name": "Symfony 프로파일러/예외 노출", "risk": "medium", "confidence": "firm",
+        "description": "Symfony 디버그 툴바/예외 페이지가 노출됩니다.",
+        "solution": "APP_ENV=prod, APP_DEBUG=0 으로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "symfony\\component" in bl or "sf-toolbar" in bl or "x-debug-token" in h,
+    },
+    {
+        "id": "debug-php", "name": "PHP 오류/경고 노출", "risk": "medium", "confidence": "firm",
+        "description": "PHP Fatal/Warning/Notice 등 오류가 노출되어 경로·코드가 유출됩니다.",
+        "solution": "display_errors=Off 로 설정하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r"<b>(fatal error|warning|notice|parse error)</b>|on line <b>\d+</b>", bl)),
+    },
+    {
+        "id": "debug-phpinfo", "name": "phpinfo() 노출", "risk": "high", "confidence": "certain",
+        "description": "phpinfo() 출력이 노출되어 서버 구성 전체가 유출됩니다.",
+        "solution": "phpinfo 페이지를 제거하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "phpinfo()" in bl or (">php version<" in bl and "configuration" in bl and "php credits" in bl),
+    },
+
+    # ── 노출 파일/디렉토리 ─────────────────────────────────────────────
+    {
+        "id": "expose-dirlist", "name": "디렉토리 리스팅 노출", "risk": "medium", "confidence": "firm",
+        "description": "디렉토리 인덱스가 노출되어 파일 구조가 공개됩니다.",
+        "solution": "Options -Indexes 등으로 디렉토리 리스팅을 비활성화하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: ("<title>index of /" in bl or "directory listing for" in bl) and "parent directory" in bl or "<title>index of /" in bl,
+    },
+    {
+        "id": "expose-git", "name": ".git 저장소 노출", "risk": "high", "confidence": "certain",
+        "description": ".git 설정/객체가 노출되어 전체 소스 복원이 가능합니다.",
+        "solution": ".git 디렉토리 외부 접근을 차단하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "[core]" in bl and "repositoryformatversion" in bl,
+    },
+    {
+        "id": "expose-env", "name": ".env 환경파일 노출", "risk": "critical", "confidence": "certain",
+        "description": ".env 파일이 노출되어 DB/API 키 등 시크릿이 유출됩니다.",
+        "solution": ".env 접근을 차단하고 노출된 시크릿을 폐기하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r"(app_key|db_password|db_username|aws_secret|secret_key)\s*=", bl)),
+    },
+    {
+        "id": "expose-swagger", "name": "API 문서(Swagger/OpenAPI) 노출", "risk": "informational", "confidence": "firm",
+        "description": "Swagger/OpenAPI 문서가 노출되어 전체 API 표면이 공개됩니다.",
+        "solution": "프로덕션에서 API 문서 접근을 제한하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r'"swagger"\s*:|"openapi"\s*:|swagger-ui', bl)),
+    },
+    {
+        "id": "expose-actuator", "name": "Spring Actuator 노출", "risk": "high", "confidence": "firm",
+        "description": "Spring Boot Actuator 엔드포인트(env/heapdump 등)가 노출됩니다.",
+        "solution": "management.endpoints 노출을 제한하고 인증을 적용하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: bool(re.search(r'"_links"\s*:.*"(env|health|heapdump|beans|mappings)"|activeprofiles', bl)),
+    },
+    {
+        "id": "expose-ds-store", "name": ".DS_Store / 백업 흔적 노출", "risk": "low", "confidence": "tentative",
+        "description": "OS/에디터 임시·백업 파일 흔적이 노출됩니다.",
+        "solution": "불필요한 파일을 제거하고 접근을 차단하세요.",
+        "reference": "",
+        "check": lambda h, b, bl, s: "bud1" in bl and ".ds_store" in bl,
+    },
+
+    # ══════════════════════════════════════════════════════════════════
+    # 2차 확장 — 시크릿 패턴 대량 / 기술 지문 / 노출 서비스 / 정보 유출
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── 시크릿/토큰 (gitleaks 계열 다수) ───────────────────────────────
+    {"id": "sec-openai", "name": "OpenAI API 키 노출", "risk": "high", "confidence": "firm",
+     "description": "OpenAI 키(sk-…) 로 보이는 문자열 노출.", "solution": "키 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}\b|\bsk-proj-[A-Za-z0-9_-]{20,}\b", b or ""))},
+    {"id": "sec-anthropic", "name": "Anthropic API 키 노출", "risk": "high", "confidence": "firm",
+     "description": "Anthropic 키(sk-ant-…) 노출.", "solution": "키 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b", b or ""))},
+    {"id": "sec-gitlab", "name": "GitLab PAT 노출", "risk": "high", "confidence": "firm",
+     "description": "GitLab Personal Access Token(glpat-…) 노출.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bglpat-[A-Za-z0-9_-]{20}\b", b or ""))},
+    {"id": "sec-twilio", "name": "Twilio 자격증명 노출", "risk": "high", "confidence": "firm",
+     "description": "Twilio Account SID/Auth Token 노출.", "solution": "자격증명 회전.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bAC[a-z0-9]{32}\b|\bSK[a-z0-9]{32}\b", b or "", re.I)) and "twilio" in bl},
+    {"id": "sec-sendgrid", "name": "SendGrid API 키 노출", "risk": "high", "confidence": "firm",
+     "description": "SendGrid 키(SG.…) 노출.", "solution": "키 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b", b or ""))},
+    {"id": "sec-mailgun", "name": "Mailgun API 키 노출", "risk": "high", "confidence": "firm",
+     "description": "Mailgun 키(key-…) 노출.", "solution": "키 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bkey-[0-9a-f]{32}\b", b or "")) and "mailgun" in bl},
+    {"id": "sec-square", "name": "Square 액세스 토큰 노출", "risk": "high", "confidence": "firm",
+     "description": "Square 토큰(sq0atp/EAAA…) 노출.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bsq0(atp|csp)-[A-Za-z0-9_-]{22,}\b|\bEAAA[A-Za-z0-9]{60}\b", b or ""))},
+    {"id": "sec-paypal", "name": "PayPal Braintree 토큰 노출", "risk": "high", "confidence": "firm",
+     "description": "Braintree 액세스 토큰 노출.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"access_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}", b or ""))},
+    {"id": "sec-npm", "name": "npm 토큰 노출", "risk": "high", "confidence": "firm",
+     "description": "npm 토큰(npm_…) 노출.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bnpm_[A-Za-z0-9]{36}\b", b or ""))},
+    {"id": "sec-heroku", "name": "Heroku API 키 노출", "risk": "high", "confidence": "tentative",
+     "description": "Heroku API 키(UUID) 노출 의심.", "solution": "키 회전.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: "heroku" in bl and bool(re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", b or ""))},
+    {"id": "sec-cloudflare", "name": "Cloudflare API 토큰 노출", "risk": "high", "confidence": "tentative",
+     "description": "Cloudflare API 토큰 노출 의심.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: "cloudflare" in bl and bool(re.search(r"\b[A-Za-z0-9_-]{40}\b", b or "")) and "api_token" in bl},
+    {"id": "sec-discord", "name": "Discord 토큰/웹훅 노출", "risk": "medium", "confidence": "firm",
+     "description": "Discord 봇 토큰 또는 웹훅 URL 노출.", "solution": "폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"discord(app)?\.com/api/webhooks/\d+/", b or "")) or bool(re.search(r"\b[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}\b", b or ""))},
+    {"id": "sec-telegram", "name": "Telegram 봇 토큰 노출", "risk": "medium", "confidence": "firm",
+     "description": "Telegram 봇 토큰 노출.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b", b or ""))},
+    {"id": "sec-facebook", "name": "Facebook 액세스 토큰 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Facebook 토큰(EAACEdEose…) 노출.", "solution": "토큰 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"\bEAACEdEose0cBA[0-9A-Za-z]+\b", b or ""))},
+    {"id": "sec-gcp-sa", "name": "GCP 서비스계정 키(JSON) 노출", "risk": "critical", "confidence": "certain",
+     "description": "GCP 서비스계정 키 JSON(private_key 포함) 노출.", "solution": "즉시 키 폐기.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: '"type": "service_account"' in bl or ('"private_key_id"' in bl and '"client_email"' in bl)},
+    {"id": "sec-azure-storage", "name": "Azure Storage 키/연결문자열 노출", "risk": "high", "confidence": "firm",
+     "description": "Azure Storage 연결문자열/AccountKey 노출.", "solution": "키 회전.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: "accountkey=" in bl and "core.windows.net" in bl},
+    {"id": "sec-s3url", "name": "S3 버킷 URL/리스팅 노출", "risk": "medium", "confidence": "firm",
+     "description": "S3 버킷 리스팅(XML) 또는 버킷 URL 노출.", "solution": "버킷 권한을 검토하세요.", "reference": "",
+     "check": lambda h, b, bl, s: "<listbucketresult" in bl or bool(re.search(r"[a-z0-9.-]+\.s3\.amazonaws\.com", bl))},
+    {"id": "sec-basicurl", "name": "URL 내 자격증명 노출", "risk": "high", "confidence": "firm",
+     "description": "응답에 user:pass@host 형태의 자격증명 포함 URL 이 있습니다.", "solution": "자격증명 제거.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"[a-z]+://[^/\s:@]+:[^/\s:@]+@[a-z0-9.-]+", b or "", re.I))},
+    {"id": "sec-generic-key", "name": "일반 API/시크릿 키 할당 노출", "risk": "medium", "confidence": "tentative",
+     "description": "api_key/secret/token 등에 값이 하드코딩된 형태가 노출됩니다.", "solution": "시크릿을 응답/코드에서 제거.", "reference": "https://github.com/gitleaks/gitleaks",
+     "check": lambda h, b, bl, s: bool(re.search(r"(api[_-]?key|secret[_-]?key|access[_-]?token|client[_-]?secret)['\"]?\s*[:=]\s*['\"][A-Za-z0-9_\-]{16,}['\"]", b or "", re.I))},
+    {"id": "sec-authbearer", "name": "응답 내 Authorization Bearer 노출", "risk": "medium", "confidence": "tentative",
+     "description": "응답 본문에 Authorization: Bearer 토큰이 노출됩니다.", "solution": "토큰 노출 제거.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"authorization['\"]?\s*[:=]\s*['\"]?bearer\s+[A-Za-z0-9._-]{16,}", b or "", re.I))},
+
+    # ── 노출 서비스/패널 ───────────────────────────────────────────────
+    {"id": "svc-phpmyadmin", "name": "phpMyAdmin 노출", "risk": "medium", "confidence": "firm",
+     "description": "phpMyAdmin 로그인/패널 노출.", "solution": "접근을 제한하세요.", "reference": "",
+     "check": lambda h, b, bl, s: "phpmyadmin" in bl and ("pma_username" in bl or "phpmyadmin" in bl and "login" in bl)},
+    {"id": "svc-adminer", "name": "Adminer 노출", "risk": "medium", "confidence": "firm",
+     "description": "Adminer DB 관리 도구 노출.", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "adminer" in bl and "login" in bl},
+    {"id": "svc-jenkins", "name": "Jenkins 노출", "risk": "medium", "confidence": "firm",
+     "description": "Jenkins 대시보드 노출.", "solution": "인증/접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "x-jenkins" in h or "jenkins" in bl and "dashboard" in bl},
+    {"id": "svc-grafana", "name": "Grafana 노출", "risk": "low", "confidence": "firm",
+     "description": "Grafana 인스턴스 노출.", "solution": "인증/접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "grafana" in bl and ("grafanabootdata" in bl or "grafana" in h.get("set-cookie",""))},
+    {"id": "svc-kibana", "name": "Kibana/Elasticsearch 노출", "risk": "medium", "confidence": "firm",
+     "description": "Kibana 또는 Elasticsearch 정보가 노출됩니다.", "solution": "인증/접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "kbn-name" in h or '"cluster_name"' in bl or "kibana" in bl and "bootstrap" in bl},
+    {"id": "svc-prometheus", "name": "Prometheus/메트릭 노출", "risk": "low", "confidence": "firm",
+     "description": "Prometheus 메트릭 엔드포인트 노출.", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"# help \w+|# type \w+ (counter|gauge|histogram)", bl))},
+    {"id": "svc-apachestatus", "name": "Apache server-status 노출", "risk": "medium", "confidence": "firm",
+     "description": "mod_status(server-status) 가 노출되어 요청/워커 정보가 유출됩니다.", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "apache server status" in bl or ("server uptime" in bl and "requests currently being processed" in bl)},
+    {"id": "svc-nginxstatus", "name": "Nginx stub_status 노출", "risk": "low", "confidence": "firm",
+     "description": "Nginx stub_status 노출.", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "active connections:" in bl and "server accepts handled requests" in bl},
+    {"id": "svc-wp-users", "name": "WordPress 사용자 열거(wp-json)", "risk": "medium", "confidence": "firm",
+     "description": "wp-json/wp/v2/users 로 사용자 목록이 노출됩니다.", "solution": "REST users 엔드포인트를 제한하세요.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'"slug"\s*:.*"wp:author"|/wp-json/wp/v2/users', bl))},
+    {"id": "svc-securitytxt", "name": "security.txt 존재", "risk": "informational", "confidence": "certain",
+     "description": "security.txt 가 존재합니다(정보).", "solution": "정상적인 보안 연락처 공개입니다.", "reference": "https://securitytxt.org/",
+     "check": lambda h, b, bl, s: "contact:" in bl and ("expires:" in bl or "encryption:" in bl) and len(bl) < 4000},
+
+    # ── 추가 기술 지문 (Wappalyzer 계열) ──────────────────────────────
+    {"id": "fp-jquery", "name": "라이브러리 식별 — jQuery", "risk": "informational", "confidence": "firm",
+     "description": lambda h, **_: "jQuery 사용 감지.", "solution": "구버전 시 알려진 XSS 취약점 확인.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"jquery[.-]?\d|jquery\.min\.js|jquery\.js", bl))},
+    {"id": "fp-react", "name": "프레임워크 식별 — React", "risk": "informational", "confidence": "firm",
+     "description": "React 사용 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "data-reactroot" in bl or "react-dom" in bl or "__react" in bl},
+    {"id": "fp-vue", "name": "프레임워크 식별 — Vue.js", "risk": "informational", "confidence": "firm",
+     "description": "Vue.js 사용 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "data-v-" in bl or "vue.js" in bl or "__vue__" in bl},
+    {"id": "fp-angular", "name": "프레임워크 식별 — Angular", "risk": "informational", "confidence": "firm",
+     "description": "Angular 사용 감지.", "solution": "AngularJS 구버전은 CSTI 위험.", "reference": "",
+     "check": lambda h, b, bl, s: "ng-version" in bl or "ng-app" in bl or "angular.js" in bl},
+    {"id": "fp-bootstrap", "name": "라이브러리 식별 — Bootstrap", "risk": "informational", "confidence": "tentative",
+     "description": "Bootstrap 사용 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "bootstrap.min.css" in bl or "bootstrap.min.js" in bl},
+    {"id": "fp-ga", "name": "분석도구 — Google Analytics/GTM", "risk": "informational", "confidence": "firm",
+     "description": "Google Analytics/Tag Manager 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "googletagmanager.com/gtm" in bl or "google-analytics.com/analytics" in bl or "gtag(" in bl},
+    {"id": "fp-sentry", "name": "모니터링 — Sentry", "risk": "informational", "confidence": "firm",
+     "description": "Sentry DSN/SDK 감지(DSN 노출 시 이벤트 위조 가능).", "solution": "공개 DSN 노출 검토.", "reference": "",
+     "check": lambda h, b, bl, s: "sentry-cdn" in bl or "@sentry" in bl or bool(re.search(r"https://[0-9a-f]+@[a-z0-9.]*sentry", bl))},
+    {"id": "fp-cloudfront-h", "name": "CDN 식별 — CloudFront(헤더)", "risk": "informational", "confidence": "firm",
+     "description": "AWS CloudFront 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "x-amz-cf-id" in h or "cloudfront" in h.get("via","")},
+    {"id": "fp-openresty", "name": "서버 식별 — OpenResty", "risk": "informational", "confidence": "certain",
+     "description": "OpenResty(Nginx+Lua) 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "openresty" in h.get("server","")},
+    {"id": "fp-kestrel", "name": "서버 식별 — Kestrel(.NET)", "risk": "informational", "confidence": "certain",
+     "description": "Kestrel(.NET Core) 감지.", "solution": "리버스 프록시 뒤 배치 권장.", "reference": "",
+     "check": lambda h, b, bl, s: "kestrel" in h.get("server","")},
+    {"id": "fp-ghost", "name": "CMS 식별 — Ghost", "risk": "informational", "confidence": "firm",
+     "description": "Ghost CMS 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "ghost" in h.get("x-powered-by","") or "content=\"ghost" in bl},
+    {"id": "fp-mediawiki", "name": "플랫폼 식별 — MediaWiki", "risk": "informational", "confidence": "firm",
+     "description": "MediaWiki 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "mediawiki" in bl or "x-powered-by" in h and "mediawiki" in h.get("x-powered-by","")},
+    {"id": "fp-atlassian", "name": "플랫폼 식별 — Atlassian(Jira/Confluence)", "risk": "informational", "confidence": "firm",
+     "description": "Jira/Confluence 감지.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "atl-traceid" in h or "x-confluence-request-time" in h or "jira.webresources" in bl},
+
+    # ── 추가 정보 유출/설정 ────────────────────────────────────────────
+    {"id": "info-xruntime", "name": "X-Runtime — 응답시간 노출(Rails)", "risk": "informational", "confidence": "certain",
+     "description": "X-Runtime 헤더로 처리시간이 노출됩니다(타이밍 공격 보조).", "solution": "헤더 제거.", "reference": "",
+     "check": lambda h, b, bl, s: "x-runtime" in h},
+    {"id": "info-xgenerator", "name": "X-Generator/Generator — 제품·버전 노출", "risk": "low", "confidence": "certain",
+     "description": lambda h, **_: f"Generator 정보 노출: {h.get('x-generator','')}", "solution": "제거.", "reference": "",
+     "check": lambda h, b, bl, s: "x-generator" in h or bool(re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'][^"\']+', bl))},
+    {"id": "info-xdrupal", "name": "Drupal 캐시/동적 헤더 노출", "risk": "informational", "confidence": "firm",
+     "description": "X-Drupal-* 헤더 노출.", "solution": "-", "reference": "",
+     "check": lambda h, b, bl, s: "x-drupal-cache" in h or "x-drupal-dynamic-cache" in h},
+    {"id": "info-xpingback", "name": "WordPress XML-RPC(Pingback) 노출", "risk": "low", "confidence": "certain",
+     "description": "X-Pingback 헤더로 xmlrpc.php 노출(무차별/증폭 악용).", "solution": "xmlrpc 비활성화 검토.", "reference": "",
+     "check": lambda h, b, bl, s: "x-pingback" in h or "xmlrpc.php" in bl},
+    {"id": "info-etag-inode", "name": "ETag inode 노출(Apache)", "risk": "informational", "confidence": "tentative",
+     "description": "ETag 에 inode 정보가 포함되어 있을 수 있습니다.", "solution": "FileETag MTime Size 로 변경.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'^"?[0-9a-f]+-[0-9a-f]+-[0-9a-f]+"?$', h.get("etag","")))},
+    {"id": "info-xssprotection-off", "name": "X-XSS-Protection 비활성(0)", "risk": "low", "confidence": "firm",
+     "description": "X-XSS-Protection: 0 으로 브라우저 XSS 필터를 끕니다(레거시).", "solution": "CSP 로 대체 권장.", "reference": "",
+     "check": lambda h, b, bl, s: h.get("x-xss-protection","").strip().startswith("0")},
+    {"id": "info-allow-dangerous", "name": "위험 HTTP 메서드 허용(Allow)", "risk": "medium", "confidence": "firm",
+     "description": lambda h, **_: f"Allow 헤더에 위험 메서드 노출: {h.get('allow','')}", "solution": "PUT/DELETE/TRACE 등 불필요 메서드 비활성화.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"\b(put|delete|trace|connect|patch)\b", h.get("allow","")))},
+    {"id": "info-session-url", "name": "세션 ID URL 노출", "risk": "medium", "confidence": "firm",
+     "description": "URL 에 세션 ID(jsessionid/phpsessid 등)가 노출됩니다.", "solution": "세션을 쿠키로만 전달하세요.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"(jsessionid|phpsessid|sid|sessionid)=[A-Za-z0-9]{8,}", bl))},
+    {"id": "info-insecure-form", "name": "폼 action 이 평문(http) 전송", "risk": "medium", "confidence": "firm",
+     "description": "form action 이 http:// 로 민감정보가 평문 전송될 수 있습니다.", "solution": "https 로 변경하세요.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'<form[^>]+action=["\']http://', bl))},
+    {"id": "info-pw-autocomplete", "name": "패스워드 필드 autocomplete 미차단", "risk": "low", "confidence": "tentative",
+     "description": "password 입력에 autocomplete=off 가 없어 브라우저 저장 위험.", "solution": "민감 필드에 autocomplete=off.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'<input[^>]+type=["\']?password["\']?(?![^>]*autocomplete)', bl))},
+    {"id": "info-private-ip-body", "name": "내부 IP 노출(본문)", "risk": "low", "confidence": "tentative",
+     "description": "응답 본문에 사설 IP 대역이 노출됩니다.", "solution": "내부 IP 노출을 제거하세요.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"\b(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)\b", b or ""))},
+
+    # ── 추가 DB/스택트레이스 ───────────────────────────────────────────
+    {"id": "err-db2", "name": "DB2 에러 노출", "risk": "medium", "confidence": "firm",
+     "description": "IBM DB2 오류 메시지 노출.", "solution": "상세 오류 숨김.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"sql\d{4}n|db2 sql error", bl))},
+    {"id": "err-sybase", "name": "Sybase/ASE 에러 노출", "risk": "medium", "confidence": "firm",
+     "description": "Sybase 오류 메시지 노출.", "solution": "상세 오류 숨김.", "reference": "",
+     "check": lambda h, b, bl, s: "sybase message" in bl or "com.sybase.jdbc" in bl},
+    {"id": "err-go-panic", "name": "Go 패닉/스택 노출", "risk": "medium", "confidence": "firm",
+     "description": "Go 런타임 패닉 스택이 노출됩니다.", "solution": "recover 로 처리하고 상세 노출 제거.", "reference": "",
+     "check": lambda h, b, bl, s: "goroutine " in bl and "runtime.gopanic" in bl or "panic: runtime error" in bl},
+    {"id": "err-dotnet-stack", "name": ".NET 스택트레이스 노출", "risk": "medium", "confidence": "firm",
+     "description": ".NET 예외/스택이 노출됩니다.", "solution": "customErrors 로 상세 숨김.", "reference": "",
+     "check": lambda h, b, bl, s: "system.web." in bl and "at system." in bl or "microsoft.aspnetcore" in bl and "stack trace" in bl},
+
+    # ══════════════════════════════════════════════════════════════════
+    # 3차 확장 — 취약 라이브러리(Retire.js) / 제품 CVE 지문 / 노출 파일 추가
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── 취약/구버전 라이브러리 (Retire.js 계열, tentative) ─────────────
+    {"id": "lib-jquery-old", "name": "취약 jQuery(<3.5.0)", "risk": "medium", "confidence": "tentative",
+     "description": "jQuery 3.5.0 미만은 XSS(CVE-2020-11022/11023) 취약.", "solution": "jQuery 3.5+ 로 업그레이드.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"jquery[/-]?(\d+\.\d+\.\d+)", (3, 5, 0))},
+    {"id": "lib-angularjs", "name": "AngularJS(1.x) — EOL/CSTI 위험", "risk": "medium", "confidence": "tentative",
+     "description": "AngularJS 1.x 는 지원 종료·클라이언트 템플릿 인젝션 위험.", "solution": "최신 Angular 로 마이그레이션.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"angular[.-]?(1\.\d+\.\d+)", (2, 0, 0))},
+    {"id": "lib-bootstrap-old", "name": "취약 Bootstrap(<3.4/<4.3.1)", "risk": "low", "confidence": "tentative",
+     "description": "구버전 Bootstrap XSS(CVE-2019-8331 등).", "solution": "최신 Bootstrap 사용.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"bootstrap[/-]?(\d+\.\d+\.\d+)", (4, 3, 1))},
+    {"id": "lib-lodash-old", "name": "취약 Lodash(<4.17.21)", "risk": "medium", "confidence": "tentative",
+     "description": "구버전 Lodash 프로토타입 오염(CVE-2020-8203 등).", "solution": "lodash 4.17.21+.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"lodash[/-]?(\d+\.\d+\.\d+)", (4, 17, 21))},
+    {"id": "lib-moment-old", "name": "취약 Moment.js(<2.29.4)", "risk": "low", "confidence": "tentative",
+     "description": "구버전 moment.js ReDoS/경로 취약.", "solution": "moment 2.29.4+ 또는 대체.", "reference": "https://retirejs.github.io/retire.js/",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"moment[/-]?(\d+\.\d+\.\d+)", (2, 29, 4))},
+    {"id": "lib-vue2-eol", "name": "Vue 2 — EOL", "risk": "low", "confidence": "tentative",
+     "description": "Vue 2.x 는 지원 종료.", "solution": "Vue 3 마이그레이션.", "reference": "",
+     "check": lambda h, b, bl, s: _ver_lt(bl, r"vue[/-]?(2\.\d+\.\d+)", (3, 0, 0))},
+
+    # ── 제품/CVE 지문 ─────────────────────────────────────────────────
+    {"id": "cve-struts", "name": "Apache Struts 흔적", "risk": "medium", "confidence": "tentative",
+     "description": "Struts(.action/.do) 흔적 — CVE-2017-5638(RCE) 등 이력.", "solution": "최신 패치 적용.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r"\.action(\?|\"|')|struts\.token|org\.apache\.struts", bl))},
+    {"id": "cve-weblogic", "name": "Oracle WebLogic 콘솔 노출", "risk": "high", "confidence": "tentative",
+     "description": "WebLogic 콘솔/uddiexplorer 노출 — 다수 RCE(CVE-2020-14882 등).", "solution": "콘솔 접근 제한·패치.", "reference": "",
+     "check": lambda h, b, bl, s: "weblogic" in bl and ("console" in bl or "uddiexplorer" in bl)},
+    {"id": "cve-exchange", "name": "MS Exchange OWA/ECP 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Exchange OWA/ECP/Autodiscover 노출 — ProxyLogon 등 이력.", "solution": "패치·접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: "x-owa-version" in h or "/owa/auth" in bl or "outlook web app" in bl},
+    {"id": "cve-citrix", "name": "Citrix ADC/Gateway 흔적", "risk": "medium", "confidence": "tentative",
+     "description": "Citrix Netscaler/Gateway 흔적 — CVE-2019-19781/CVE-2023-4966 이력.", "solution": "패치.", "reference": "",
+     "check": lambda h, b, bl, s: "ns_af" in h.get("set-cookie","") or "citrix" in bl and "gateway" in bl or "/vpn/index.html" in bl},
+    {"id": "cve-confluence", "name": "Atlassian Confluence 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Confluence 노출 — OGNL RCE(CVE-2021-26084/CVE-2022-26134) 이력.", "solution": "패치.", "reference": "",
+     "check": lambda h, b, bl, s: "confluence" in bl and ("x-confluence-request-time" in h or "com.atlassian.confluence" in bl)},
+    {"id": "cve-gitlab", "name": "GitLab 노출", "risk": "low", "confidence": "tentative",
+     "description": "GitLab 노출 — 다수 취약점 이력.", "solution": "최신 버전 유지.", "reference": "",
+     "check": lambda h, b, bl, s: "gitlab" in bl and ("gitlab_session" in h.get("set-cookie","") or "gon.gitlab" in bl)},
+    {"id": "cve-spring4shell", "name": "Spring 프레임워크(Spring4Shell 표면)", "risk": "low", "confidence": "tentative",
+     "description": "Spring MVC/WebFlux 흔적 — CVE-2022-22965(Spring4Shell) 대상 가능.", "solution": "Spring 패치 확인.", "reference": "",
+     "check": lambda h, b, bl, s: "org.springframework" in bl and ("bindingresult" in bl or "class.module" in bl)},
+    {"id": "cve-log4shell-refl", "name": "Log4Shell 페이로드 반사", "risk": "medium", "confidence": "tentative",
+     "description": "응답에 ${jndi:...} 페이로드가 반사됩니다(로그 인젝션 표면).", "solution": "Log4j 패치.", "reference": "",
+     "check": lambda h, b, bl, s: "${jndi:" in bl or "jndi:ldap" in bl},
+    {"id": "svc-solr", "name": "Apache Solr 노출", "risk": "medium", "confidence": "firm",
+     "description": "Solr 관리/쿼리 노출 — RCE 이력.", "solution": "접근 제한·패치.", "reference": "",
+     "check": lambda h, b, bl, s: '"responseheader"' in bl and ("solr" in bl or '"qtime"' in bl)},
+    {"id": "svc-couchdb", "name": "CouchDB/Redis 등 DB 응답 노출", "risk": "medium", "confidence": "tentative",
+     "description": "CouchDB/Redis/Mongo 등의 응답 흔적이 노출됩니다.", "solution": "인증·접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: '"couchdb":"welcome"' in bl or "redis_version:" in bl or '"ismaster"' in bl},
+
+    # ── 노출 파일/설정 추가 ────────────────────────────────────────────
+    {"id": "expose-webconfig", "name": "web.config 노출", "risk": "high", "confidence": "firm",
+     "description": "IIS web.config 노출 — 연결문자열/설정 유출.", "solution": "접근 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "<configuration>" in bl and ("<connectionstrings" in bl or "<system.web" in bl)},
+    {"id": "expose-htaccess", "name": ".htaccess/.htpasswd 노출", "risk": "high", "confidence": "firm",
+     "description": ".htaccess/.htpasswd 노출.", "solution": "접근 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "rewriteengine" in bl or bool(re.search(r"^[a-z0-9_-]+:\$apr1\$", b or "", re.I | re.M))},
+    {"id": "expose-composer", "name": "composer.json/lock 노출", "risk": "low", "confidence": "firm",
+     "description": "PHP composer 의존성 파일 노출(구성/버전 유출).", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: '"require"' in bl and ("composer" in bl or '"packages"' in bl and '"dist"' in bl)},
+    {"id": "expose-packagejson", "name": "package.json 노출", "risk": "low", "confidence": "firm",
+     "description": "Node package.json 노출(의존성/스크립트 유출).", "solution": "접근 제한.", "reference": "",
+     "check": lambda h, b, bl, s: '"dependencies"' in bl and '"scripts"' in bl and '"name"' in bl},
+    {"id": "expose-npmrc", "name": ".npmrc/.pypirc 노출", "risk": "high", "confidence": "firm",
+     "description": ".npmrc/.pypirc 노출(레지스트리 토큰 유출 가능).", "solution": "접근 차단·토큰 폐기.", "reference": "",
+     "check": lambda h, b, bl, s: "_authtoken" in bl or "//registry.npmjs.org/:_authToken".lower() in bl or "[pypi]" in bl and "password" in bl},
+    {"id": "expose-wpconfig", "name": "wp-config 백업 노출", "risk": "critical", "confidence": "firm",
+     "description": "wp-config 백업 노출 — DB 자격증명/솔트 유출.", "solution": "즉시 제거·자격증명 변경.", "reference": "",
+     "check": lambda h, b, bl, s: "db_password" in bl and "wp_" in bl and "define(" in bl},
+    {"id": "expose-sourcemap", "name": "JS 소스맵 파일 노출", "risk": "low", "confidence": "firm",
+     "description": ".map 소스맵이 노출되어 원본 소스가 복원될 수 있습니다.", "solution": "프로덕션 소스맵 제거.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'\{"version"\s*:\s*3\s*,\s*"(file|sources|mappings)"', bl)) or "x-sourcemap" in h},
+    {"id": "expose-idea", "name": "IDE 설정(.idea/.vscode) 노출", "risk": "low", "confidence": "tentative",
+     "description": "IDE 프로젝트 설정 노출.", "solution": "접근 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "<project version" in bl and "component name" in bl or "workspace.xml" in bl},
+    {"id": "expose-backup-archive", "name": "백업 아카이브 노출(.sql/.zip/.tar.gz)", "risk": "medium", "confidence": "tentative",
+     "description": "본문/링크에 백업 아카이브 참조가 있습니다.", "solution": "백업 파일을 웹 루트 밖으로 이동.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'href=["\'][^"\']+\.(sql|zip|tar\.gz|tgz|bak|7z|rar)\b', bl))},
+    {"id": "expose-crossdomain", "name": "crossdomain.xml 과대 허용", "risk": "medium", "confidence": "firm",
+     "description": "crossdomain.xml 이 * 로 모든 도메인을 허용합니다.", "solution": "허용 도메인을 제한하세요.", "reference": "",
+     "check": lambda h, b, bl, s: "cross-domain-policy" in bl and 'domain="*"' in bl},
+
+    # ── 디버그/에러 추가 ───────────────────────────────────────────────
+    {"id": "debug-nextjs", "name": "Next.js 에러/디버그 노출", "risk": "low", "confidence": "tentative",
+     "description": "Next.js 상세 에러 오버레이/스택 노출.", "solution": "프로덕션 빌드로 배포.", "reference": "",
+     "check": lambda h, b, bl, s: "__next_error__" in bl or ("nextjs" in bl and "call stack" in bl)},
+    {"id": "debug-nuxt", "name": "Nuxt 에러 노출", "risk": "low", "confidence": "tentative",
+     "description": "Nuxt 에러 페이지/스택 노출.", "solution": "프로덕션 설정.", "reference": "",
+     "check": lambda h, b, bl, s: "nuxt" in bl and "stack" in bl and "statuscode" in bl},
+    {"id": "debug-phoenix", "name": "Elixir/Phoenix 디버그 노출", "risk": "medium", "confidence": "tentative",
+     "description": "Phoenix 상세 예외 페이지 노출.", "solution": "prod 설정으로 상세 숨김.", "reference": "",
+     "check": lambda h, b, bl, s: "phoenix" in bl and ("plug.conn" in bl or "stacktrace" in bl)},
+    {"id": "debug-graphql-verbose", "name": "GraphQL 상세 에러 노출", "risk": "low", "confidence": "tentative",
+     "description": "GraphQL 응답에 상세 스택/디버그 에러가 포함됩니다.", "solution": "프로덕션에서 에러 마스킹.", "reference": "",
+     "check": lambda h, b, bl, s: '"errors"' in bl and ("stacktrace" in bl or '"exception"' in bl)},
+    {"id": "debug-node-stack", "name": "Node.js 스택트레이스 노출", "risk": "medium", "confidence": "firm",
+     "description": "Node.js 예외 스택이 노출됩니다.", "solution": "상세 에러를 사용자에게 노출하지 마세요.", "reference": "",
+     "check": lambda h, b, bl, s: "at object.<anonymous>" in bl or bool(re.search(r"at [\w.]+ \([^)]+:\d+:\d+\)", bl))},
+
+    # ── 헤더/직렬화 추가 ───────────────────────────────────────────────
+    {"id": "hdr-server-timing", "name": "Server-Timing 헤더 노출", "risk": "informational", "confidence": "certain",
+     "description": "Server-Timing 으로 내부 처리시간/구성이 노출됩니다.", "solution": "프로덕션에서 상세 제거.", "reference": "",
+     "check": lambda h, b, bl, s: "server-timing" in h},
+    {"id": "hdr-deprecated-sec", "name": "폐기된 보안 헤더 사용", "risk": "informational", "confidence": "firm",
+     "description": "Public-Key-Pins/Expect-CT/Feature-Policy 등 폐기된 헤더 사용.", "solution": "최신 대체 헤더(CSP/Permissions-Policy)로 전환.", "reference": "",
+     "check": lambda h, b, bl, s: "public-key-pins" in h or "expect-ct" in h or "feature-policy" in h},
+    {"id": "ser-java", "name": "Java 직렬화 객체 노출", "risk": "medium", "confidence": "firm",
+     "description": "응답에 Java 직렬화 데이터(rO0AB / aced0005)가 노출됩니다.", "solution": "직렬화 데이터 노출 제거·역직렬화 보안 검토.", "reference": "",
+     "check": lambda h, b, bl, s: "ro0ab" in bl or "\xac\xed\x00\x05" in (b or "")},
+    {"id": "ser-php", "name": "PHP 직렬화 객체 노출", "risk": "low", "confidence": "tentative",
+     "description": "응답에 PHP 직렬화 객체(O:n:) 흔적이 있습니다.", "solution": "역직렬화 입력 검증.", "reference": "",
+     "check": lambda h, b, bl, s: bool(re.search(r'O:\d+:"[a-z_][\w]*":\d+:\{', b or "", re.I))},
+    {"id": "leak-viewstate", "name": "ASP.NET ViewState 노출", "risk": "informational", "confidence": "firm",
+     "description": "__VIEWSTATE 가 노출됩니다(MAC 미적용 시 역직렬화 위험).", "solution": "ViewState MAC/암호화 적용.", "reference": "",
+     "check": lambda h, b, bl, s: "__viewstate" in bl and "value=" in bl},
+
+    # ── 클라우드 메타데이터 응답(SSRF 성공 흔적) ───────────────────────
+    {"id": "cloud-aws-meta", "name": "AWS 메타데이터 응답 노출", "risk": "critical", "confidence": "firm",
+     "description": "응답에 AWS 메타데이터/IAM 자격증명 흔적이 있습니다(SSRF 성공 가능).", "solution": "SSRF 차단·IMDSv2 강제.", "reference": "",
+     "check": lambda h, b, bl, s: "iam/security-credentials" in bl or "instance-identity" in bl or ('"accesskeyid"' in bl and '"secretaccesskey"' in bl)},
+    {"id": "cloud-gcp-meta", "name": "GCP 메타데이터 응답 노출", "risk": "critical", "confidence": "firm",
+     "description": "GCP 메타데이터 흔적이 있습니다(SSRF 성공 가능).", "solution": "SSRF 차단.", "reference": "",
+     "check": lambda h, b, bl, s: "computemetadata" in bl or "metadata.google.internal" in bl},
 ]
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ALERT 증거 추출 — 각 룰의 check 람다에서 정규식/문자열/헤더 키를 정적 분석으로 뽑아,
+# 매칭 시 "응답에서 실제로 탐지된 문자열"을 evidence 로 함께 반환한다(사용자가 검색·검증용).
+# 룰 196개를 수정하지 않고, 이 파일 소스를 AST 로 한 번만 파싱해 인덱스를 만든다.
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _eval_re_flags(node) -> int:
+    try:
+        return int(eval(compile(ast.Expression(node), "<flags>", "eval"), {"re": re}))
+    except Exception:
+        return 0
+
+
+def _build_evidence_index() -> dict:
+    """자기 자신(analyzer.py) 소스를 AST 로 파싱해 rule id → 증거 추출 스펙 맵을 만든다."""
+    index = {}
+    try:
+        with open(__file__, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+    except Exception:
+        return index
+
+    # ALERT_RULES 대입문의 값(리스트)만 대상으로 한다
+    rules_node = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "ALERT_RULES":
+                    rules_node = node.value
+    if rules_node is None:
+        return index
+
+    def _lit(n):
+        return n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else None
+
+    for elt in getattr(rules_node, "elts", []):
+        if not isinstance(elt, ast.Dict):
+            continue
+        rid = None
+        check = None
+        for k, v in zip(elt.keys, elt.values):
+            key = _lit(k)
+            if key == "id":
+                rid = _lit(v)
+            elif key == "check":
+                check = v
+        if not rid or not isinstance(check, ast.Lambda):
+            continue
+
+        spec = {"regex": [], "lit_b": [], "lit_bl": [], "hdr": []}
+        for sub in ast.walk(check):
+            # re.search / re.match / re.findall(pattern, target[, flags])
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
+                    and isinstance(sub.func.value, ast.Name) and sub.func.value.id == "re" \
+                    and sub.func.attr in ("search", "match", "findall") and len(sub.args) >= 2:
+                pat = _lit(sub.args[0])
+                if pat is None:
+                    continue
+                tgt = sub.args[1]
+                tgt_name = None
+                if isinstance(tgt, ast.Name):
+                    tgt_name = tgt.id
+                elif isinstance(tgt, ast.BoolOp) and tgt.values and isinstance(tgt.values[0], ast.Name):
+                    tgt_name = tgt.values[0].id  # `b or ""`
+                is_bl = tgt_name in ("bl", "body_lower")
+                flags = _eval_re_flags(sub.args[2]) if len(sub.args) >= 3 else 0
+                spec["regex"].append((pat, flags, is_bl))
+            # `"literal" in bl` / `in b` / `in h` / `in h.get("key",...)`
+            elif isinstance(sub, ast.Compare) and len(sub.ops) == 1 and isinstance(sub.ops[0], ast.In):
+                left = _lit(sub.left)
+                right = sub.comparators[0]
+                if left is None:
+                    continue
+                if isinstance(right, ast.Name) and right.id in ("bl", "body_lower"):
+                    spec["lit_bl"].append(left)
+                elif isinstance(right, ast.Name) and right.id in ("b", "body"):
+                    spec["lit_b"].append(left)
+                elif isinstance(right, ast.Name) and right.id == "h":
+                    spec["hdr"].append(left)  # `"x-powered-by" in h`
+                elif isinstance(right, ast.Call) and isinstance(right.func, ast.Attribute) \
+                        and right.func.attr == "get" and isinstance(right.func.value, ast.Name) \
+                        and right.func.value.id == "h" and right.args:
+                    key = _lit(right.args[0])
+                    if key:
+                        spec["hdr"].append(key)  # `"unsafe-inline" in h.get("csp","")`
+            # `h.get("key", ...)` 단독 사용(== "*", startswith 등)
+            elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
+                    and sub.func.attr == "get" and isinstance(sub.func.value, ast.Name) \
+                    and sub.func.value.id == "h" and sub.args:
+                key = _lit(sub.args[0])
+                if key:
+                    spec["hdr"].append(key)
+
+        # 중복 제거(순서 유지)
+        for kk in ("lit_b", "lit_bl", "hdr"):
+            spec[kk] = list(dict.fromkeys(spec[kk]))
+        index[rid] = spec
+    return index
+
+
+_EVIDENCE_INDEX = _build_evidence_index()
+
+
+def _clip_evidence(text: str, limit: int = 180) -> str:
+    """증거 스니펫을 검색 가능한 형태로 정리(제어문자 정돈·길이 제한)."""
+    if not text:
+        return ""
+    text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ").strip()
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    return text
+
+
+def _extract_alert_evidence(rule_id: str, headers_lower: dict, body: str, body_lower: str) -> str:
+    """매칭된 룰에 대해 응답에서 실제 탐지된 증거 문자열을 뽑는다(없으면 "")."""
+    spec = _EVIDENCE_INDEX.get(rule_id)
+    if not spec:
+        return ""
+    body = body or ""
+    body_lower = body_lower or ""
+
+    # 1) 정규식 매칭(원본 body 로 실제 대소문자 보존; bl 대상이었으면 대소문자 무시)
+    for pat, flags, is_bl in spec["regex"]:
+        try:
+            m = re.search(pat, body, flags | (re.I if is_bl else 0))
+        except Exception:
+            m = None
+        if m:
+            return _clip_evidence(m.group(0))
+
+    # 2) body 리터럴(대소문자 유지 원본 슬라이스)
+    for lit in spec["lit_b"]:
+        idx = body.find(lit)
+        if idx >= 0:
+            return _clip_evidence(body[idx:idx + len(lit)])
+    for lit in spec["lit_bl"]:
+        idx = body_lower.find(lit)
+        if idx >= 0:
+            return _clip_evidence(body[idx:idx + len(lit)])
+
+    # 3) 헤더 값(존재하는 헤더만; 누락 기반 룰은 여기서 자연히 빈 값)
+    for key in spec["hdr"]:
+        val = headers_lower.get(key)
+        if val:
+            return _clip_evidence(f"{key}: {val}")
+
+    return ""
 
 
 def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code: int) -> list:
@@ -831,6 +1541,7 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
                     "description": desc,
                     "solution":    rule["solution"],
                     "reference":   rule["reference"],
+                    "evidence":    _extract_alert_evidence(rule["id"], headers_lower, body, body_lower),
                 })
         except Exception:
             pass
@@ -838,6 +1549,175 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
     risk_order = {"high": 0, "medium": 1, "low": 2, "informational": 3}
     alerts.sort(key=lambda a: risk_order.get(a["risk"], 9))
     return alerts
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 공격 결과 분석 — "이 공격이 실제로 통했는가"를 증거 기반으로 판정 (결정적)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 파일 읽기 성공 마커 (LFI/XXE)
+_FILE_READ_MARKERS = [
+    (r"root:.*?:0:0:",                         "리눅스 /etc/passwd 내용"),
+    (r"\[extensions\]|\[fonts\]|16-bit app support", "Windows win.ini 내용"),
+    (r"<\?php[\s\S]{0,40}",                     "PHP 소스코드 노출"),
+    (r"DB_PASSWORD|DB_USERNAME|APP_KEY=",       ".env 설정 노출"),
+    (r"BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY",  "개인키 노출"),
+]
+# 명령 실행 출력 마커 (Command Injection)
+_CMD_OUTPUT_MARKERS = [
+    (r"uid=\d+\([^)]+\)\s+gid=\d+",            "id 출력(uid/gid)"),
+    (r"Microsoft Windows \[Version",            "Windows ver 출력"),
+    (r"Volume in drive [A-Z] |Directory of ",   "Windows dir 출력"),
+]
+# 클라우드 메타데이터 마커 (SSRF)
+_SSRF_MARKERS = [
+    (r"ami-id|instance-id|iam/security-credentials|InstanceProfileArn", "AWS 메타데이터"),
+    (r"computeMetadata|metadata\.google\.internal",                     "GCP 메타데이터"),
+    (r"\"compute\"\s*:|\"network\"\s*:.*macAddress",                    "Azure 메타데이터"),
+]
+
+
+def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
+    """payload가 응답에 반사됐는지 + 미인코딩 여부 + 컨텍스트 추정."""
+    if not payload or len(payload) < 3 or payload not in body:
+        return None
+    idx = body.find(payload)
+    seg = body[:idx]
+    # 컨텍스트 추정
+    open_s = seg.rfind("<script")
+    close_s = seg.rfind("</script")
+    if open_s > close_s:
+        ctx = "JavaScript(script 내부)"
+    elif re.search(r'=\s*"[^"]*$', seg) or re.search(r"=\s*'[^']*$", seg):
+        ctx = "HTML 속성값"
+    else:
+        ctx = "HTML 본문"
+    # 미인코딩: payload에 특수문자가 있고 원문 그대로 존재하면 미인코딩(실행 위험)
+    has_special = any(c in payload for c in "<>\"'")
+    start = max(0, idx - 40)
+    end = min(len(body), idx + len(payload) + 40)
+    return {
+        "reflected": True,
+        "unescaped": bool(has_special),   # 특수문자 원문 반사 = 실행 가능성
+        "context": ctx,
+        "snippet": body[start:end],
+        "payload": payload,
+    }
+
+
+def _extract_sleep_seconds(payload: str) -> Optional[int]:
+    if not payload:
+        return None
+    for pat in (r"sleep\(\s*(\d+)", r"pg_sleep\(\s*(\d+)", r"WAITFOR\s+DELAY\s+'0:0:(\d+)",
+                r"RECEIVE_MESSAGE\([^,]+,\s*(\d+)", r"\bsleep\s+(\d+)"):
+        m = re.search(pat, payload, re.I)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline):
+    """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환."""
+    findings = []
+    body_lower = (body or "").lower()
+
+    # ① payload 반사
+    refl = _detect_reflection(body or "", payload)
+    if refl:
+        if refl["unescaped"]:
+            findings.append({"name": "payload 미인코딩 반사", "verdict": "성공", "confidence": 88,
+                             "why": f"payload가 {refl['context']}에 인코딩 없이 반영됨 → XSS 등 실행 가능",
+                             "evidence": refl["snippet"]})
+        else:
+            findings.append({"name": "payload 반사", "verdict": "미확정", "confidence": 40,
+                             "why": f"{refl['context']}에 반영되나 특수문자 없음/인코딩 가능",
+                             "evidence": refl["snippet"]})
+
+    # ② 카테고리별 성공 신호
+    def _hit(markers):
+        for pat, label in markers:
+            m = re.search(pat, body or "", re.I)
+            if m:
+                s = max(0, m.start() - 20)
+                return label, (body or "")[s:m.end() + 40]
+        return None
+
+    if category in ("lfi", "xxe"):
+        h = _hit(_FILE_READ_MARKERS)
+        if h:
+            findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,
+                             "why": h[0], "evidence": h[1]})
+    if category == "cmdi":
+        h = _hit(_CMD_OUTPUT_MARKERS)
+        if h:
+            findings.append({"name": "명령 실행 출력", "verdict": "성공", "confidence": 93,
+                             "why": h[0], "evidence": h[1]})
+    if category == "ssrf":
+        h = _hit(_SSRF_MARKERS)
+        if h:
+            findings.append({"name": "내부/메타데이터 응답", "verdict": "성공", "confidence": 85,
+                             "why": h[0], "evidence": h[1]})
+    if category == "ssti" and payload and re.search(r"7\s*\*\s*7|7\*'7'", payload):
+        # 49 가 payload 자체가 아니라 결과로 나왔는지
+        if "49" in (body or "") and "7*7" not in (body or ""):
+            findings.append({"name": "템플릿 평가됨(7*7=49)", "verdict": "성공", "confidence": 90,
+                             "why": "표현식이 서버에서 계산됨 → SSTI", "evidence": "응답에 '49' 포함"})
+    if category == "sqli":
+        for pat, desc in ERROR_LEAK_PATTERNS:
+            if re.search(pat, body or "", re.I):
+                findings.append({"name": "SQL 에러 노출", "verdict": "성공", "confidence": 85,
+                                 "why": f"{desc} — error-based 성공 가능", "evidence": desc})
+                break
+    if category == "redirect":
+        loc = headers_lower.get("location", "")
+        if status_code in (301, 302, 303, 307, 308) and re.search(r"^https?://|^//", loc):
+            findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
+                             "why": f"Location 헤더가 외부로 이동: {loc[:80]}", "evidence": loc[:120]})
+
+    # ③ 타이밍 (time-based)
+    n = _extract_sleep_seconds(payload)
+    if n:
+        if response_time >= n * 1000 * 0.8:
+            findings.append({"name": "시간 지연 일치", "verdict": "성공", "confidence": 90,
+                             "why": f"지연 {n}s 요청 → 실제 {response_time/1000:.1f}s 지연 (Blind time-based)",
+                             "evidence": f"{response_time:.0f}ms ≈ {n}s"})
+        else:
+            findings.append({"name": "시간 지연 없음", "verdict": "미확정", "confidence": 30,
+                             "why": f"{n}s 지연 payload지만 응답 {response_time:.0f}ms — 미영향/필터",
+                             "evidence": f"{response_time:.0f}ms"})
+
+    # ④ 베이스라인 Diff
+    if baseline:
+        b_status = baseline.get("status_code")
+        b_body = baseline.get("body") or ""
+        dl = len(body or "") - len(b_body)
+        changed = []
+        if b_status is not None and b_status != status_code:
+            changed.append(f"상태 {b_status}→{status_code}")
+        if abs(dl) >= 32:
+            changed.append(f"본문 {'+' if dl > 0 else ''}{dl}B")
+        if changed:
+            findings.append({"name": "베이스라인 대비 변화", "verdict": "미확정", "confidence": 55,
+                             "why": "정상 대비 응답이 달라짐 — boolean/인증우회 판단 근거: " + ", ".join(changed),
+                             "evidence": ", ".join(changed)})
+
+    # ⑤ 차단 신호
+    blocked = status_code in (403, 406, 429, 503) or any(k in body_lower for k in BLOCK_KEYWORDS)
+
+    # 종합 판정
+    success = [f for f in findings if f["verdict"] == "성공"]
+    if success:
+        outcome = "success"
+        conf = max(f["confidence"] for f in success)
+    elif blocked:
+        outcome = "blocked"
+        conf = 70
+        findings.append({"name": "차단됨", "verdict": "차단", "confidence": 70,
+                         "why": f"상태 {status_code} 또는 차단 응답 — WAF/필터가 막음", "evidence": f"HTTP {status_code}"})
+    else:
+        outcome = "inconclusive"
+        conf = 30
+    return findings, outcome, conf
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -851,6 +1731,7 @@ def analyze_response(
     response_time: float,
     payload: Optional[str] = None,
     category: Optional[str] = None,
+    baseline: Optional[dict] = None,
 ) -> dict:
     """HTTP 응답을 분석하여 보안 판정 결과 반환"""
 
@@ -866,6 +1747,9 @@ def analyze_response(
         "details": [],
         "score": 0,
         "alerts": [],          # ZAP 스타일 Alert 목록
+        "findings": [],        # 공격 결과 신호(증거 기반)
+        "attack_outcome": None,  # success | blocked | inconclusive
+        "reflection": None,
     }
 
     body = body or ""
@@ -906,20 +1790,24 @@ def analyze_response(
             result["verdict"] = "blocked"
             result["confidence"] = min(result["confidence"] + 15, 95)
 
-    # 4. 에러 누출 탐지
+    # 4. 에러 누출 탐지 (실제 탐지된 증거 문자열을 함께 표기 → 응답에서 검색·검증 가능)
     for pattern, desc in ERROR_LEAK_PATTERNS:
-        if re.search(pattern, body, re.IGNORECASE):
-            result["error_leaks"].append(desc)
-            result["details"].append(f"⚠️ 에러 정보 누출: {desc}")
+        m = re.search(pattern, body, re.IGNORECASE)
+        if m:
+            ev = _clip_evidence(m.group(0), 120)
+            result["error_leaks"].append(f"{desc}: {ev}" if ev else desc)
+            result["details"].append(f"⚠️ 에러 정보 누출: {desc}" + (f" — {ev}" if ev else ""))
             if result["verdict"] == "passed":
                 result["verdict"] = "bypass"
             result["risk_level"] = "high"
 
-    # 5. 민감 정보 탐지
+    # 5. 민감 정보 탐지 (실제 탐지된 증거 문자열을 함께 표기)
     for pattern, desc in SENSITIVE_PATTERNS:
-        if re.search(pattern, body, re.IGNORECASE):
-            result["sensitive_data"].append(desc)
-            result["details"].append(f"🔴 민감 정보 노출: {desc}")
+        m = re.search(pattern, body, re.IGNORECASE)
+        if m:
+            ev = _clip_evidence(m.group(0), 120)
+            result["sensitive_data"].append(f"{desc}: {ev}" if ev else desc)
+            result["details"].append(f"🔴 민감 정보 노출: {desc}" + (f" — {ev}" if ev else ""))
             result["verdict"] = "bypass"
             result["risk_level"] = "critical"
 
@@ -958,6 +1846,21 @@ def analyze_response(
     else:
         result["risk_level"] = "medium"
         result["score"] = 40
+
+    # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반
+    findings, outcome, aconf = attack_findings(
+        status_code, headers_lower, body, response_time, payload, category, baseline
+    )
+    result["reflection"] = _detect_reflection(body, payload)
+    result["findings"] = findings
+    result["attack_outcome"] = outcome
+    result["attack_confidence"] = aconf
+    # 공격 성공이 확인되면 종합 판정/위험도 격상(상태코드 relabel보다 신뢰도 높음)
+    if outcome == "success":
+        result["verdict"] = "bypass"
+        if result["risk_level"] not in ("critical",):
+            result["risk_level"] = "high"
+        result["score"] = max(result["score"], aconf)
 
     return result
 
