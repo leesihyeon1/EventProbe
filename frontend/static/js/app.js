@@ -787,6 +787,34 @@ async function generateFollowups() {
 
 const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'💻', ssti:'🔧', redirect:'↪️', idor:'🏢', nosql:'🍃', other:'🔎' };
 
+// 후보 카드 1개 렌더 (idx=state.aiCandidates 내 원본 인덱스, num=그룹 내 표시번호)
+function aiCandCard(c, idx, num) {
+  const isCve = c.source === 'cve' || c.cve;
+  const isFollow = c.source === 'followup';
+  const tag = isCve
+    ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>`
+    : (isFollow ? `<span class="followup-badge">승격</span>` : '');
+  const methodTag = (c.method && String(c.method).toUpperCase() !== 'GET')
+    ? `<span class="method-badge">${escapeHtml(String(c.method).toUpperCase())}</span>` : '';
+  const head = isCve && c.name
+    ? escapeHtml(c.name)
+    : `${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param || '-')}`;
+  const ref = isCve && c.reference
+    ? `<a href="${escapeHtml(c.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:10px;color:var(--accent)">참조 ↗</a>`
+    : '';
+  return `
+    <div class="payload-item ai-cand-item${isCve ? ' ai-cand-cve' : ''}" data-idx="${idx}" onclick="applyAiCandidate(${idx})"
+         style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          ${tag}${methodTag}<b>${num}.</b> <span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
+        </div>
+        <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
+        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
+      </div>
+    </div>`;
+}
+
 function renderAiCandidates(res) {
   const listEl = document.getElementById('aiCandidateList');
   const metaEl = document.getElementById('aiSuggestMeta');
@@ -794,32 +822,25 @@ function renderAiCandidates(res) {
   metaEl.innerHTML = `🧠 <b>${escapeHtml(res.test_type || '분석 완료')}</b> — ${escapeHtml(res.summary || '')} <span style="color:var(--text-muted)">(${escapeHtml(res.model||'')})</span>`;
   if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
 
-  listEl.innerHTML = cands.map((c, i) => {
-    const isCve = c.source === 'cve' || c.cve;
-    const isFollow = c.source === 'followup';
-    const tag = isCve
-      ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>`
-      : (isFollow ? `<span class="followup-badge">승격</span>` : '');
-    const methodTag = (c.method && String(c.method).toUpperCase() !== 'GET')
-      ? `<span class="method-badge">${escapeHtml(String(c.method).toUpperCase())}</span>` : '';
-    const head = isCve && c.name
-      ? escapeHtml(c.name)
-      : `${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param || '-')}`;
-    const ref = isCve && c.reference
-      ? `<a href="${escapeHtml(c.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:10px;color:var(--accent)">참조 ↗</a>`
-      : '';
-    return `
-    <div class="payload-item ai-cand-item${isCve ? ' ai-cand-cve' : ''}" data-idx="${i}" onclick="applyAiCandidate(${i})"
-         style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-          ${tag}${methodTag}<b>${i + 1}.</b> <span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
-        </div>
-        <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
-        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
+  // 원본 인덱스 보존하며 소스별 3그룹으로 분류 (페이로드 탭과 동일한 접기 카드 패턴)
+  const wi = cands.map((c, i) => ({ c, i }));
+  const groups = [
+    { label: '승격 (결과 기반)', items: wi.filter(x => x.c.source === 'followup') },
+    { label: '알려진 취약점 (CVE)', items: wi.filter(x => x.c.source === 'cve' || x.c.cve) },
+    { label: 'AI 생성', items: wi.filter(x => x.c.source !== 'followup' && !(x.c.source === 'cve' || x.c.cve)) },
+  ].filter(g => g.items.length);
+
+  listEl.innerHTML = groups.map(g => `
+    <div class="sidebar-group open">
+      <div class="sidebar-group-header" onclick="toggleSidebarGroup(this)">
+        <span class="group-chevron">▾</span>
+        <span class="group-name">${escapeHtml(g.label)}</span>
+        <span class="group-count">${g.items.length}</span>
       </div>
-    </div>`;
-  }).join('');
+      <div class="sidebar-group-body">
+        ${g.items.map((x, j) => aiCandCard(x.c, x.i, j + 1)).join('')}
+      </div>
+    </div>`).join('');
   // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
   const gt = document.getElementById('goTestBtn'); if (gt) gt.style.display = 'none';
 }
