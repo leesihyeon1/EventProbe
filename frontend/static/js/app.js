@@ -447,7 +447,20 @@ async function loadSidebar() {
     { id: 'http',   name: 'HTTP · 헤더 · 인프라' },
   ];
 
-  const catHtml = (cat) => {
+  const payloadItems = (cat) => cat.payloads.map(p => `
+    <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
+      <span class="risk-dot ${p.risk || 'medium'}"></span>
+      <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
+      ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
+    </div>`).join('');
+
+  // flat=true 면 내부 카테고리 헤더를 생략하고 바로 목록(단일 카테고리 그룹의 이중 접힘 방지)
+  const catHtml = (cat, flat) => {
+    if (flat) {
+      return `<div class="category-group open" data-cat-id="${escapeHtml(cat.id)}">
+        <div class="payload-list">${payloadItems(cat)}</div>
+      </div>`;
+    }
     const customBadge = cat._custom
       ? `<span style="font-size:9px;color:var(--accent);background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.3);border-radius:4px;padding:1px 5px;margin-right:2px">커스텀</span>`
       : '';
@@ -459,14 +472,7 @@ async function loadSidebar() {
           <span class="category-badge">${cat.payloads.length}</span>
           <span class="category-chevron">▶</span>
         </div>
-        <div class="payload-list">
-          ${cat.payloads.map(p => `
-            <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
-              <span class="risk-dot ${p.risk || 'medium'}"></span>
-              <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
-              ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
-            </div>`).join('')}
-        </div>
+        <div class="payload-list">${payloadItems(cat)}</div>
       </div>`;
   };
 
@@ -486,7 +492,7 @@ async function loadSidebar() {
         <span class="group-name">${escapeHtml(g.name)}</span>
         <span class="group-count">${cats.length}종 · ${plCount}</span>
       </div>
-      <div class="sidebar-group-body">${cats.map(catHtml).join('')}</div>`;
+      <div class="sidebar-group-body">${cats.map(c => catHtml(c, cats.length === 1)).join('')}</div>`;
     container.appendChild(section);
   });
 }
