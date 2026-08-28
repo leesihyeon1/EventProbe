@@ -6,7 +6,7 @@ AI 상세 분석 - NVIDIA NIM (OpenAI 호환 API)로 요청/응답을 LLM 분석
 
 설정(환경변수):
   NVIDIA_API_KEY   필수. 없으면 기능 자동 비활성(도구는 그대로 동작).
-  NVIDIA_MODEL     선택. 기본 meta/llama-3.1-70b-instruct
+  NVIDIA_MODEL     선택. 기본 meta/llama-3.2-11b-vision-instruct
   NVIDIA_BASE_URL  선택. 기본 https://integrate.api.nvidia.com/v1
 
 ⚠️ 클라우드 API 사용 시 분석 대상 응답이 NVIDIA로 전송된다.
@@ -19,7 +19,7 @@ import httpx
 
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
 def _api_key():  return os.getenv("NVIDIA_API_KEY", "").strip()
-def _model():    return os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct").strip()
+def _model():    return os.getenv("NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct").strip()
 def _base_url(): return os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 def _timeout():
     try: return max(10.0, float(os.getenv("AI_TIMEOUT", "120")))
