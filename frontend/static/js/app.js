@@ -790,10 +790,8 @@ const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'�
 // 후보 카드 1개 렌더 (idx=state.aiCandidates 내 원본 인덱스, num=그룹 내 표시번호)
 function aiCandCard(c, idx, num) {
   const isCve = c.source === 'cve' || c.cve;
-  const isFollow = c.source === 'followup';
-  const tag = isCve
-    ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>`
-    : (isFollow ? `<span class="followup-badge">승격</span>` : '');
+  // 소스 배지: CVE 만 표기(번호 정보). 결과기반/AI 는 섹션 헤더가 라벨 역할
+  const tag = isCve ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>` : '';
   const methodTag = (c.method && String(c.method).toUpperCase() !== 'GET')
     ? `<span class="method-badge">${escapeHtml(String(c.method).toUpperCase())}</span>` : '';
   const head = isCve && c.name
@@ -825,8 +823,8 @@ function renderAiCandidates(res) {
   // 원본 인덱스 보존하며 소스별 3그룹으로 분류 (페이로드 탭과 동일한 접기 카드 패턴)
   const wi = cands.map((c, i) => ({ c, i }));
   const groups = [
-    { label: '승격 (결과 기반)', items: wi.filter(x => x.c.source === 'followup') },
-    { label: '알려진 취약점 (CVE)', items: wi.filter(x => x.c.source === 'cve' || x.c.cve) },
+    { label: '결과 기반', items: wi.filter(x => x.c.source === 'followup') },
+    { label: 'CVE 익스플로잇', items: wi.filter(x => x.c.source === 'cve' || x.c.cve) },
     { label: 'AI 생성', items: wi.filter(x => x.c.source !== 'followup' && !(x.c.source === 'cve' || x.c.cve)) },
   ].filter(g => g.items.length);
 
