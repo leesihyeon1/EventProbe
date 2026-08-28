@@ -440,7 +440,7 @@ async function loadSidebar() {
   // 상위 그룹 정의(펼침 순서)
   const GROUP_DEFS = [
     { id: 'custom', name: '커스텀 / AI' },
-    { id: 'cve',    name: '🎯 알려진 취약점 (CVE)' },
+    { id: 'cve',    name: '알려진 취약점 (CVE)' },
     { id: 'server', name: '서버사이드 인젝션 · 실행' },
     { id: 'client', name: '클라이언트사이드' },
     { id: 'auth',   name: '인증 · 세션 · 권한' },
