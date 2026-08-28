@@ -802,12 +802,11 @@ function aiCandCard(c, idx) {
     : '';
   return `
     <div class="payload-item ai-cand-item${isCve ? ' ai-cand-cve' : ''}" data-idx="${idx}" onclick="applyAiCandidate(${idx})"
-         style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
+         style="align-items:flex-start;gap:6px;cursor:pointer" title="${escapeHtml(c.payload)}&#10;— 클릭하면 요청 폼에 세팅">
       <div style="flex:1;min-width:0">
         <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
           ${tag}${methodTag}<span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
         </div>
-        <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
         ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
       </div>
     </div>`;
