@@ -787,8 +787,8 @@ async function generateFollowups() {
 
 const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'💻', ssti:'🔧', redirect:'↪️', idor:'🏢', nosql:'🍃', other:'🔎' };
 
-// 후보 카드 1개 렌더 (idx=state.aiCandidates 내 원본 인덱스, num=그룹 내 표시번호)
-function aiCandCard(c, idx, num) {
+// 후보 카드 1개 렌더 (idx=state.aiCandidates 내 원본 인덱스)
+function aiCandCard(c, idx) {
   const isCve = c.source === 'cve' || c.cve;
   // 소스 배지: CVE 만 표기(번호 정보). 결과기반/AI 는 섹션 헤더가 라벨 역할
   const tag = isCve ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>` : '';
@@ -805,7 +805,7 @@ function aiCandCard(c, idx, num) {
          style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
       <div style="flex:1;min-width:0">
         <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-          ${tag}${methodTag}<b>${num}.</b> <span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
+          ${tag}${methodTag}<span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
         </div>
         <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
         ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
@@ -836,7 +836,7 @@ function renderAiCandidates(res) {
         <span class="group-count">${g.items.length}</span>
       </div>
       <div class="sidebar-group-body">
-        ${g.items.map((x, j) => aiCandCard(x.c, x.i, j + 1)).join('')}
+        ${g.items.map(x => aiCandCard(x.c, x.i)).join('')}
       </div>
     </div>`).join('');
   // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
