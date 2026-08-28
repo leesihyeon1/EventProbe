@@ -794,6 +794,8 @@ function renderAiCandidates(res) {
     const tag = isCve
       ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>`
       : (isFollow ? `<span class="followup-badge">승격</span>` : '');
+    const methodTag = (c.method && String(c.method).toUpperCase() !== 'GET')
+      ? `<span class="method-badge">${escapeHtml(String(c.method).toUpperCase())}</span>` : '';
     const head = isCve && c.name
       ? escapeHtml(c.name)
       : `${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param || '-')}`;
@@ -805,7 +807,7 @@ function renderAiCandidates(res) {
          style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
       <div style="flex:1;min-width:0">
         <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-          ${tag}<b>${i + 1}.</b> <span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
+          ${tag}${methodTag}<b>${i + 1}.</b> <span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
         </div>
         <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
         ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
@@ -858,6 +860,20 @@ function applyAiCandidate(idx) {
       renderKvEditor('paramsKv', state.kvParams);
       switchReqTab('params');
     }
+  }
+  // 단일 POST/raw CVE: method·추가 헤더·body 까지 폼에 세팅
+  if (c.method) {
+    const ms = document.getElementById('methodSelect');
+    if (ms) { ms.value = String(c.method).toUpperCase(); ms.dispatchEvent(new Event('change')); }
+  }
+  if (c.headers && typeof c.headers === 'object') {
+    Object.entries(c.headers).forEach(([k, v]) => _setKv(state.kvHeaders, k, String(v), 'replace'));
+    renderKvEditor('headersKv', state.kvHeaders);
+  }
+  if (c.body != null && String(c.body) !== '') {
+    const bodyEl = document.getElementById('bodyEditor');
+    if (bodyEl) bodyEl.value = String(c.body);
+    switchReqTab('body');
   }
   // 분석 시 payload/category 가 전달되도록 선택 상태 기록
   state.selectedPayload = { payload: c.payload, name: c.category };

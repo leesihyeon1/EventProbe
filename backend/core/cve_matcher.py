@@ -75,6 +75,13 @@ def match_cve_payloads(payloads_data: dict, path: str, params: Optional[dict] = 
             "source": "cve",
             "_score": score,
         }
+        # 단일 POST/raw CVE: method·body·헤더까지 전달(폼에 그대로 세팅)
+        if p.get("method"):
+            cand["method"] = p["method"]
+        if p.get("body"):
+            cand["body"] = p["body"]
+        if p.get("headers"):
+            cand["headers"] = p["headers"]
         if not cand["payload"]:
             continue
         (strong if matched else weak).append(cand)

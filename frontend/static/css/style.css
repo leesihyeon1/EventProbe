@@ -1033,6 +1033,12 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border-radius:4px; padding:1px 5px; flex-shrink:0;
 }
 
+.method-badge {
+  font-size:9px; font-weight:700; color:#d29922;
+  background:rgba(210,153,34,.12); border:1px solid rgba(210,153,34,.4);
+  border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+
 .evidence-hint {
   font-weight:400; text-transform:none; letter-spacing:0;
   color:var(--text-muted); font-size:9px;
