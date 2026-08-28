@@ -4739,7 +4739,7 @@
       "name": "알려진 취약점 (CVE)",
       "icon": "🎯",
       "color": "#e84393",
-      "group": "server",
+      "group": "cve",
       "payloads": [
         {
           "id": "cve_proxylogon",

@@ -440,6 +440,7 @@ async function loadSidebar() {
   // 상위 그룹 정의(펼침 순서)
   const GROUP_DEFS = [
     { id: 'custom', name: '커스텀 / AI' },
+    { id: 'cve',    name: '🎯 알려진 취약점 (CVE)' },
     { id: 'server', name: '서버사이드 인젝션 · 실행' },
     { id: 'client', name: '클라이언트사이드' },
     { id: 'auth',   name: '인증 · 세션 · 권한' },
@@ -472,11 +473,8 @@ async function loadSidebar() {
   const container = document.getElementById('sidebarList');
   container.innerHTML = '';
 
-  // CVE 카테고리는 페이로드 트리에서 제외하고 전용 'CVE' 탭으로 분리 렌더
-  renderCveTab(allCategories.find(c => c.id === 'cve'));
-
   GROUP_DEFS.forEach(g => {
-    const cats = allCategories.filter(c => (c.group || 'server') === g.id && c.id !== 'cve');
+    const cats = allCategories.filter(c => (c.group || 'server') === g.id);
     if (!cats.length) return;
     const plCount = cats.reduce((n, c) => n + c.payloads.length, 0);
     const section = document.createElement('div');
@@ -490,42 +488,6 @@ async function loadSidebar() {
       </div>
       <div class="sidebar-group-body">${cats.map(catHtml).join('')}</div>`;
     container.appendChild(section);
-  });
-}
-
-// CVE 전용 탭 렌더 — 알려진 취약점 페이로드를 평면 목록으로(배지·참조 링크)
-function renderCveTab(cveCat) {
-  const el = document.getElementById('cveList');
-  if (!el) return;
-  const items = (cveCat && cveCat.payloads) || [];
-  if (!items.length) {
-    el.innerHTML = '<div class="empty-state" style="padding:20px"><div class="msg">CVE 페이로드가 없습니다</div></div>';
-    return;
-  }
-  el.innerHTML = items.map(p => {
-    const tag = p.cve ? `<span class="cve-badge">${escapeHtml(p.cve)}</span>` : '';
-    const ap = p.applies_to || {};
-    const hints = [].concat(ap.path_contains || [], ap.server || [], ap.powered_by || []).slice(0, 3);
-    const hintTxt = hints.length ? `<span style="font-size:9px;color:var(--text-muted)">대상: ${escapeHtml(hints.join(', '))}</span>` : '';
-    return `
-      <div class="payload-item cve-item" data-pid="${p.id}" data-search="${escapeHtml((p.name + ' ' + (p.cve||'') + ' ' + p.payload).toLowerCase())}"
-           onclick="selectPayload('cve','${p.id}')" style="flex-direction:column;align-items:flex-start;gap:3px">
-        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;width:100%">
-          <span class="risk-dot ${p.risk || 'high'}"></span>
-          ${tag}
-          <span class="payload-name" style="flex:1" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
-          ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처">↗</a>` : ''}
-        </div>
-        <div style="font-family:monospace;font-size:10px;color:var(--text-secondary);word-break:break-all;width:100%">${escapeHtml(p.payload)}</div>
-        ${hintTxt}
-      </div>`;
-  }).join('');
-}
-
-function filterCveList(query) {
-  const q = (query || '').toLowerCase().trim();
-  document.querySelectorAll('#cveList .cve-item').forEach(it => {
-    it.style.display = (!q || (it.dataset.search || '').includes(q)) ? '' : 'none';
   });
 }
 
@@ -3157,7 +3119,7 @@ function deleteCustomPayload(payloadId) {
 }
 
 function switchSidebarTab(tab) {
-  const panelId = { payloads: 'sidebarPayloads', cve: 'sidebarCve', aitest: 'sidebarAitest', history: 'sidebarHistory' }[tab] || 'sidebarPayloads';
+  const panelId = { payloads: 'sidebarPayloads', aitest: 'sidebarAitest', history: 'sidebarHistory' }[tab] || 'sidebarPayloads';
   document.querySelectorAll('.sidebar-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.stab === tab)
   );

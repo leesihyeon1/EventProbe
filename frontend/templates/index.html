@@ -35,7 +35,6 @@
     <!-- 사이드바 탭 전환 -->
     <div class="sidebar-tab-bar">
       <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">페이로드</div>
-      <div class="sidebar-tab" data-stab="cve" onclick="switchSidebarTab('cve')">🎯 CVE</div>
       <div class="sidebar-tab" data-stab="aitest" onclick="switchSidebarTab('aitest')">AI 테스트</div>
       <div class="sidebar-tab" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</div>
       <button class="sidebar-edit-btn" onclick="event.stopPropagation();openCustomModal()" title="커스텀 페이로드 편집">✏️</button>
@@ -51,20 +50,6 @@
           <div class="spinner"></div>
           <div class="msg">로드 중...</div>
         </div>
-      </div>
-    </div>
-
-    <!-- CVE 패널 -->
-    <div class="sidebar-panel" id="sidebarCve">
-      <div class="sidebar-search">
-        <input id="cveSearchInput" type="text" placeholder="CVE 검색 (번호·제품·경로)..." oninput="filterCveList(this.value)">
-      </div>
-      <div style="padding:6px 10px;font-size:10px;color:var(--text-muted);line-height:1.5">
-        알려진 취약점(CVE) 익스플로잇. 클릭하면 요청 폼에 세팅됩니다.
-        <b>AI 페이로드 생성 시</b> 대상 경로·기술스택에 맞는 항목이 자동 병합됩니다.
-      </div>
-      <div class="sidebar-scroll" id="cveList">
-        <div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">로드 중...</div></div>
       </div>
     </div>
 
