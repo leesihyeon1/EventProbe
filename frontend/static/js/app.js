@@ -685,8 +685,19 @@ function _currentRequestForm() {
   };
 }
 
+// 직전 응답에서 기술스택 지문 추출(로컬 CVE 매칭용 — 우리 백엔드에서만 사용, AI로는 미전송)
+function buildFingerprint() {
+  const r = state.lastResult;
+  if (!r || !r.headers) return {};
+  const h = {};
+  Object.entries(r.headers).forEach(([k, v]) => { h[String(k).toLowerCase()] = String(v); });
+  return {
+    server: h['server'] || '',
+    powered_by: h['x-powered-by'] || h['x-aspnet-version'] || h['x-generator'] || h['x-runtime'] || '',
+  };
+}
+
 async function generateAiCandidates() {
-  if (!state.aiEnabled) { toast('AI 미설정 — .env 에 NVIDIA_API_KEY 를 넣으세요', 'error'); return; }
   const req = _currentRequestForm();
   if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
 
@@ -694,12 +705,14 @@ async function generateAiCandidates() {
   const listEl = document.getElementById('aiCandidateList');
   const metaEl = document.getElementById('aiSuggestMeta');
   metaEl.textContent = '';
-  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">AI 페이로드 생성 중…</div></div>';
+  const genMsg = state.aiEnabled ? 'AI 페이로드 생성 중…' : 'CVE 페이로드 매칭 중…';
+  listEl.innerHTML = `<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">${genMsg}</div></div>`;
 
   try {
     const res = await API.aiSuggest({
       method: req.method, url: req.url, params: req.params,
       body: req.body, header_names: req.headerNames, count: 10,
+      fingerprint: buildFingerprint(),
     });
     if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
     state.aiCandidates = res.candidates || [];
@@ -720,15 +733,29 @@ function renderAiCandidates(res) {
   metaEl.innerHTML = `🧠 <b>${escapeHtml(res.test_type || '분석 완료')}</b> — ${escapeHtml(res.summary || '')} <span style="color:var(--text-muted)">(${escapeHtml(res.model||'')})</span>`;
   if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
 
-  listEl.innerHTML = cands.map((c, i) => `
-    <div class="payload-item ai-cand-item" data-idx="${i}" onclick="applyAiCandidate(${i})"
+  listEl.innerHTML = cands.map((c, i) => {
+    const isCve = c.source === 'cve' || c.cve;
+    const tag = isCve
+      ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>`
+      : '';
+    const head = isCve && c.name
+      ? escapeHtml(c.name)
+      : `${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param || '-')}`;
+    const ref = isCve && c.reference
+      ? `<a href="${escapeHtml(c.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:10px;color:var(--accent)">참조 ↗</a>`
+      : '';
+    return `
+    <div class="payload-item ai-cand-item${isCve ? ' ai-cand-cve' : ''}" data-idx="${i}" onclick="applyAiCandidate(${i})"
          style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
       <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--accent)"><b>${i + 1}.</b> ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
+        <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          ${tag}<b>${i + 1}.</b> <span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
+        </div>
         <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
-        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)}</div>` : ''}
+        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
   const gt = document.getElementById('goTestBtn'); if (gt) gt.style.display = 'none';
 }

@@ -1016,6 +1016,17 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border-radius:4px; padding:1px 5px; flex-shrink:0;
 }
 
+.cve-badge {
+  font-size:9px; font-weight:700; color:#e84393;
+  background:rgba(232,67,147,.12); border:1px solid rgba(232,67,147,.45);
+  border-radius:4px; padding:1px 5px; flex-shrink:0; white-space:nowrap;
+}
+
+.ai-cand-cve {
+  border-left:3px solid rgba(232,67,147,.55);
+  background:rgba(232,67,147,.05);
+}
+
 .evidence-hint {
   font-weight:400; text-transform:none; letter-spacing:0;
   color:var(--text-muted); font-size:9px;

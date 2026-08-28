@@ -27,6 +27,7 @@ def _url_with_params(url: str, params: dict) -> str:
     return url + ("&" if "?" in url else "?") + q
 from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
 from core.raw_http import raw_send
+from core.cve_matcher import match_cve_payloads
 
 router = APIRouter(prefix="/api")
 
@@ -331,19 +332,57 @@ class AiSuggestRequest(BaseModel):
     body: Optional[str] = None
     header_names: list[str] = []
     count: int = 8
+    fingerprint: dict = {}   # {server, powered_by, body} — 직전 응답 지문(선택, 로컬 CVE 매칭용)
 
 @router.post("/ai-suggest")
 async def ai_suggest(req: AiSuggestRequest):
-    if not ai_enabled():
-        raise HTTPException(status_code=400, detail="AI 미설정 (.env 의 NVIDIA_API_KEY 없음)")
-    # 유출 방지: URL 에서 host 제거하고 path(+query) 만 AI 로 전달
+    # 유출 방지: URL 에서 host 제거하고 path(+query) 만 사용
     parts = urlsplit(req.url or "")
     path = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
-    # 민감 헤더 이름은 제외
-    safe_header_names = [h for h in (req.header_names or [])
-                         if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
     count = max(1, min(req.count, 15))
-    return await ai_suggest_payloads(req.method, path, req.params, req.body or "", safe_header_names, count)
+
+    # 1) 로컬 CVE/알려진취약점 매칭 (무유출) — 저장소에서 지문에 맞는 알려진 익스플로잇
+    cve_cands = match_cve_payloads(load_payloads(), path, req.params, req.body or "",
+                                   req.fingerprint or {}, limit=8)
+
+    # 2) AI 후보 (키 있을 때만). path/param/body/헤더 '이름'만 전송(host·인증 제외)
+    ai_res = None
+    if ai_enabled():
+        safe_header_names = [h for h in (req.header_names or [])
+                             if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
+        ai_res = await ai_suggest_payloads(req.method, path, req.params, req.body or "", safe_header_names, count)
+    ai_res = ai_res if isinstance(ai_res, dict) else {}
+    ai_cands = ai_res.get("candidates") or []
+    ai_err = ai_res.get("error")
+
+    # 3) 병합 — CVE(알려진취약점) 먼저, 그다음 AI. (location, param, payload) 기준 중복 제거
+    seen, merged = set(), []
+    for c in cve_cands + ai_cands:
+        key = (c.get("location"), (c.get("param") or "").lower(), c.get("payload"))
+        if not c.get("payload") or key in seen:
+            continue
+        seen.add(key)
+        merged.append(c)
+
+    if not merged:
+        if not ai_enabled():
+            return {"error": "AI 미설정이고 매칭된 CVE도 없음 (.env 의 NVIDIA_API_KEY 설정 또는 경로/지문 확인)"}
+        return ai_res or {"error": "후보 없음"}
+
+    summary = ai_res.get("summary") or ""
+    if cve_cands:
+        summary = (f"로컬 CVE/알려진취약점 {len(cve_cands)}건" + (" · " + summary if summary else "")).strip()
+    if ai_err and cve_cands:
+        summary += f" (AI 보강 실패: {ai_err})"
+    test_type = ai_res.get("test_type") or (f"CVE 매칭 {len(cve_cands)}건" if cve_cands else "분석")
+
+    return {
+        "test_type": test_type,
+        "summary": summary,
+        "candidates": merged[: len(cve_cands) + count],
+        "model": ai_res.get("model", ""),
+        "cve_count": len(cve_cands),
+    }
 
 
 # ── 다중 페이로드 일괄 테스트 ───────────────────────────────
