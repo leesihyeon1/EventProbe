@@ -1027,6 +1027,12 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   background:rgba(232,67,147,.05);
 }
 
+.followup-badge {
+  font-size:9px; font-weight:700; color:#3fb950;
+  background:rgba(63,185,80,.12); border:1px solid rgba(63,185,80,.4);
+  border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+
 .evidence-hint {
   font-weight:400; text-transform:none; letter-spacing:0;
   color:var(--text-muted); font-size:9px;

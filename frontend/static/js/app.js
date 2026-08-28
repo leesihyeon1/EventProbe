@@ -24,6 +24,10 @@ const API = {
     const r = await fetch('/api/ai-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async followupSuggest(data) {
+    const r = await fetch('/api/followup-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
 };
 
 /* ── State ── */
@@ -724,6 +728,56 @@ async function generateAiCandidates() {
   }
 }
 
+// 결과 기반 후속 페이로드 — 보안분석 신호(라벨만) 근거로 승격/우회 페이로드 생성
+async function generateFollowups() {
+  if (!state.lastResult || !state.lastResult.analysis) { toast('먼저 요청을 전송해 결과를 만드세요', 'error'); return; }
+  const a = state.lastResult.analysis;
+  const rq = state.lastResult._req || {};
+
+  // 라벨만 추출(증거·응답본문 미포함) — 유출 방지
+  const findingNames = (a.findings || []).map(f => f.name).filter(Boolean);
+  const alertNames   = (a.alerts   || []).map(x => x.name).filter(Boolean);
+  // error_leaks/sensitive_data 는 증거 문자열을 포함하므로 원문 대신 '유형 라벨'만 추가
+  if ((a.error_leaks || []).length) {
+    findingNames.push('에러 정보 누출');
+    if ((a.error_leaks || []).some(s => /sql|mysql|mssql|ora-|postgre|sqlite/i.test(String(s)))) findingNames.push('SQL 에러 노출');
+  }
+  if ((a.sensitive_data || []).length) findingNames.push('민감정보 노출');
+
+  // 취약 위치 추정(단건 요청은 자유형 → best-effort)
+  let location = 'param', param = 'q';
+  if (rq.body && String(rq.body).trim()) location = 'body';
+  const pk = Object.keys(rq.params || {})[0]; if (pk) param = pk;
+
+  const req = _currentRequestForm();
+  switchSidebarTab('aitest');
+  const listEl = document.getElementById('aiCandidateList');
+  const metaEl = document.getElementById('aiSuggestMeta');
+  metaEl.textContent = '';
+  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">결과 기반 후속 페이로드 생성 중…</div></div>';
+
+  try {
+    const res = await API.followupSuggest({
+      method: req.method, url: req.url, params: req.params, body: req.body,
+      header_names: req.headerNames,
+      location, param,
+      fingerprint: buildFingerprint(),
+      category: rq.category || (state.selectedCategory && state.selectedCategory.id) || '',
+      attack_outcome: a.attack_outcome || '',
+      finding_names: findingNames,
+      alert_names: alertNames,
+      tried_payload: rq.payload || (state.selectedPayload && state.selectedPayload.payload) || '',
+      count: 10,
+    });
+    if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
+    state.aiCandidates = res.candidates || [];
+    state.aiBaseSnapshot = captureRequestForm();
+    renderAiCandidates(res);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
 const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'💻', ssti:'🔧', redirect:'↪️', idor:'🏢', nosql:'🍃', other:'🔎' };
 
 function renderAiCandidates(res) {
@@ -735,9 +789,10 @@ function renderAiCandidates(res) {
 
   listEl.innerHTML = cands.map((c, i) => {
     const isCve = c.source === 'cve' || c.cve;
+    const isFollow = c.source === 'followup';
     const tag = isCve
       ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>`
-      : '';
+      : (isFollow ? `<span class="followup-badge">승격</span>` : '');
     const head = isCve && c.name
       ? escapeHtml(c.name)
       : `${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param || '-')}`;
@@ -1483,6 +1538,9 @@ function renderAnalysis(a, result) {
 
   // 헤더 verdict badge
   document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
+  // 결과가 있으면 '결과 기반 후속 페이로드' 버튼 노출
+  const fb = document.getElementById('followupBtn');
+  if (fb) fb.style.display = '';
 
   const container = document.getElementById('analysisContent');
 

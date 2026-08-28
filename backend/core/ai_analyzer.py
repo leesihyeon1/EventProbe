@@ -300,18 +300,23 @@ def _norm_category(cat: str, payload: str) -> str:
 
 
 async def ai_suggest_payloads(method: str, path: str, params: dict,
-                              body: str = "", header_names=None, count: int = 8) -> dict:
-    """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음."""
+                              body: str = "", header_names=None, count: int = 8,
+                              hint: str = "") -> dict:
+    """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음.
+    hint: 결과 기반 후속 생성용 라벨-only 힌트(취약 계열·판정·탐지 기술 이름만)."""
     key = _api_key()
     if not key:
         return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
     model, base_url = _model(), _base_url()
+    hint_line = (f"이전 검증에서 확인된 신호(라벨): {hint}. 이 계열을 승격/우회하는 페이로드 위주로.\n"
+                 if hint else "")
     user = (
         f"method: {method}\n"
         f"path (host removed): {path}\n"
         f"query params: {json.dumps(params or {}, ensure_ascii=False)[:800]}\n"
         f"body: {(body or '(none)')[:800]}\n"
         f"header names: {json.dumps(header_names or [], ensure_ascii=False)[:400]}\n"
+        f"{hint_line}"
         f"Propose up to {count} payload candidates."
     )
     payload = {

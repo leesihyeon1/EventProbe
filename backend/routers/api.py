@@ -28,6 +28,7 @@ def _url_with_params(url: str, params: dict) -> str:
 from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
 from core.raw_http import raw_send
 from core.cve_matcher import match_cve_payloads
+from core.followup import hot_families, escalation_candidates
 
 router = APIRouter(prefix="/api")
 
@@ -382,6 +383,92 @@ async def ai_suggest(req: AiSuggestRequest):
         "candidates": merged[: len(cve_cands) + count],
         "model": ai_res.get("model", ""),
         "cve_count": len(cve_cands),
+    }
+
+
+# ── 결과 기반 후속(승격) 페이로드 (기능2) ──────────────────────
+class FollowupRequest(BaseModel):
+    method: str = "GET"
+    url: str = ""
+    params: dict = {}
+    body: Optional[str] = None
+    header_names: list[str] = []
+    location: str = "param"        # 취약이 확인된 위치(param/body/path/header)
+    param: str = ""                # 취약 파라미터 이름
+    fingerprint: dict = {}         # {server, powered_by} — 직전 응답 지문(로컬 매칭용)
+    category: str = ""             # 시도한 공격 카테고리
+    attack_outcome: str = ""       # success|blocked|inconclusive
+    finding_names: list[str] = []  # 보안분석 신호 이름(라벨만)
+    alert_names: list[str] = []    # ALERT 이름(라벨만)
+    tried_payload: str = ""        # 이미 시도한 payload(중복 제외)
+    count: int = 8
+    use_ai: bool = True
+
+@router.post("/followup-suggest")
+async def followup_suggest(req: FollowupRequest):
+    """검증 결과(보안분석 신호 라벨)를 근거로 승격/우회 페이로드를 제안. 무유출(라벨만 사용)."""
+    parts = urlsplit(req.url or "")
+    path = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
+    data = load_payloads()
+
+    families = hot_families({
+        "category": req.category,
+        "finding_names": req.finding_names,
+        "alert_names": req.alert_names,
+    })
+
+    # 1) 로컬 승격 페이로드 (신호 → 카테고리, 고급 변형 우선)
+    esc = escalation_candidates(data, families, req.location, req.param,
+                                per_family=5, exclude_payload=(req.tried_payload or None))
+    # 2) 기술스택 지문 기반 CVE 매칭 (기능1 재사용)
+    cve = match_cve_payloads(data, path, req.params, req.body or "", req.fingerprint or {}, limit=6)
+
+    # 3) AI 라벨-only 보강 (선택) — 계열/판정/탐지기술 이름만 전송(응답 데이터 미전송)
+    ai_res = {}
+    if req.use_ai and ai_enabled():
+        fp = req.fingerprint or {}
+        tech = ", ".join(x for x in [fp.get("server"), fp.get("powered_by")] if x)
+        hint = "; ".join(filter(None, [
+            ("계열=" + "/".join(families)) if families else "",
+            ("판정=" + req.attack_outcome) if req.attack_outcome else "",
+            ("기술=" + tech) if tech else "",
+        ]))
+        safe_headers = [h for h in (req.header_names or [])
+                        if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
+        r = await ai_suggest_payloads(req.method, path, req.params, req.body or "",
+                                      safe_headers, req.count, hint=hint)
+        ai_res = r if isinstance(r, dict) else {}
+    ai_cands = ai_res.get("candidates") or []
+
+    # 병합: 승격(신호기반) → CVE → AI, 중복 제거
+    seen, merged = set(), []
+    for c in esc + cve + ai_cands:
+        key = (c.get("location"), (c.get("param") or "").lower(), c.get("payload"))
+        if not c.get("payload") or key in seen:
+            continue
+        seen.add(key)
+        merged.append(c)
+
+    if not merged:
+        return {"error": "후속 후보를 만들지 못했습니다 — 취약 신호가 약하거나 저장소에 매칭이 없습니다."}
+
+    seg = []
+    if families:
+        seg.append("계열 " + "/".join(families))
+    if esc:
+        seg.append(f"승격 {len(esc)}")
+    if cve:
+        seg.append(f"CVE {len(cve)}")
+    summary = " · ".join(seg)
+    if ai_res.get("error"):
+        summary += " (AI 보강 실패)"
+
+    return {
+        "test_type": "결과 기반 후속 — " + (", ".join(families) if families else "일반"),
+        "summary": summary,
+        "candidates": merged[: max(req.count, len(esc) + len(cve))],
+        "model": ai_res.get("model", ""),
+        "families": families,
     }
 
 
