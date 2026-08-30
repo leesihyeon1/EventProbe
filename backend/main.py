@@ -4,8 +4,9 @@ from fastapi.responses import FileResponse
 import os
 
 # 프로젝트 루트의 .env 로드 (NVIDIA_API_KEY 등). 공용 PC에서 키를 파일로만 관리.
+# override=True: reload 감시 프로세스가 상속시킨 옛 값을 덮어써 .env 수정이 즉시 반영되게 함.
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
 app = FastAPI(title="SecAPITester", version="1.0.0")
 

@@ -1576,6 +1576,82 @@ _SSRF_MARKERS = [
     (r"\"compute\"\s*:|\"network\"\s*:.*macAddress",                    "Azure 메타데이터"),
 ]
 
+# ── 클라이언트측(client-side) 취약점 탐지용 ──────────────────────────
+# DOM XSS 소스: 공격자가 제어 가능한 클라이언트 입력
+_DOM_SOURCES = [
+    r"location\.hash", r"location\.search", r"location\.href", r"location\.pathname",
+    r"document\.URL", r"document\.documentURI", r"document\.referrer",
+    r"window\.name", r"URLSearchParams", r"\.searchParams",
+    r"postMessage", r"event\.data",
+]
+# DOM XSS 싱크: 문자열을 코드/마크업으로 실행하는 위험 API
+_DOM_SINKS = [
+    (r"\.innerHTML\s*=",                 "innerHTML"),
+    (r"\.outerHTML\s*=",                 "outerHTML"),
+    (r"document\.write(?:ln)?\s*\(",     "document.write"),
+    (r"\.insertAdjacentHTML\s*\(",       "insertAdjacentHTML"),
+    (r"\beval\s*\(",                     "eval"),
+    (r"\bnew\s+Function\s*\(",           "Function()"),
+    (r"setTimeout\s*\(\s*[\"'`]",        "setTimeout(문자열)"),
+    (r"setInterval\s*\(\s*[\"'`]",       "setInterval(문자열)"),
+    (r"\.(?:html|append|prepend|before|after|replaceWith)\s*\(", "jQuery html/append"),
+    (r"\$\(\s*(?:location|document\.URL|window\.name)", "jQuery $(source)"),
+]
+# 클라이언트 템플릿 프레임워크 마커 (CSTI 가능성)
+_CLIENT_TPL_MARKERS = (
+    "ng-app", "ng-version", "ng-controller", "ng-bind", "angular.js", "angular.min.js",
+    "v-app", "data-v-", "__vue__", "vue.js", "vue.min.js", "x-data=", "alpinejs",
+)
+
+
+def _detect_dom_xss(body: str):
+    """응답 <script> 안에서 클라이언트 입력 소스가 위험 싱크로 흐르는지 정적 탐지(휴리스틱).
+    소스·싱크가 동시에 존재할 때만 보고하여 오탐을 줄인다."""
+    if not body:
+        return None
+    scripts = re.findall(r"<script\b[^>]*>([\s\S]*?)</script>", body, re.I)
+    js = "\n".join(scripts)
+    if not js:
+        return None
+    src = next((re.search(s, js) for s in _DOM_SOURCES if re.search(s, js)), None)
+    if not src:
+        return None
+    for pat, lbl in _DOM_SINKS:
+        m = re.search(pat, js)
+        if m:
+            s = max(0, m.start() - 30)
+            return {"source": src.group(0), "sink": lbl, "evidence": js[s:m.end() + 40]}
+    return None
+
+
+def _detect_csti(body: str, payload: str):
+    """{{7*7}}·${..} 등 템플릿 표현식이 '미평가 원문'으로 반사 + 클라이언트 프레임워크 존재
+    → 브라우저 렌더링 시 평가될 수 있음(CSTI). 서버가 평가했다면(49 등) SSTI 로 별도 처리."""
+    if not body or not payload:
+        return None
+    if not any(t in payload for t in ("{{", "${", "#{")):
+        return None
+    if payload not in body:            # 원문 그대로(미평가) 반사됐는지
+        return None
+    if not any(m in body.lower() for m in _CLIENT_TPL_MARKERS):
+        return None
+    idx = body.find(payload)
+    s = max(0, idx - 20)
+    return {"evidence": body[s: idx + len(payload) + 20]}
+
+
+def _detect_client_redirect(body: str):
+    """서버 3xx 없이 meta refresh / JS location 대입으로 이동하는 클라이언트측 리다이렉트."""
+    if not body:
+        return None
+    m = re.search(r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]*url=([^"\'>\s]+)', body, re.I)
+    if m and re.match(r'(?:https?:)?//|javascript:', m.group(1).strip(), re.I):
+        return {"how": "meta refresh", "target": m.group(1)[:100], "evidence": m.group(0)[:160]}
+    m = re.search(r'(?:location\.(?:href|replace|assign)\s*=?\s*\(?|window\.location\s*=)\s*["\']((?:https?:)?//[^"\']+)', body, re.I)
+    if m:
+        return {"how": "JS location", "target": m.group(1)[:100], "evidence": m.group(0)[:160]}
+    return None
+
 
 def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
     """payload가 응답에 반사됐는지 + 미인코딩 여부 + 컨텍스트 추정."""
@@ -1596,9 +1672,24 @@ def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
     has_special = any(c in payload for c in "<>\"'")
     start = max(0, idx - 40)
     end = min(len(body), idx + len(payload) + 40)
+
+    # 클라이언트측 XSS 실행 컨텍스트 정밀 판정 (반사 위치·payload 형태 기반)
+    exec_ctx = None
+    if re.search(r"\bon[a-z]+\s*=\s*[\"']?[^\"'>]*$", seg, re.I):
+        exec_ctx = "이벤트 핸들러 속성"                       # ... onerror=" [여기]
+    elif re.search(r"(?:href|src|action|formaction)\s*=\s*[\"']?\s*javascript:[^\"'>]*$", seg, re.I) \
+            or payload.strip().lower().startswith("javascript:"):
+        exec_ctx = "javascript: URI"
+    elif ctx.startswith("JavaScript") and any(c in payload for c in "\"'`</"):
+        exec_ctx = "script 내부(문자열 이탈)"                  # <script> 내부에서 문자열/블록 이탈 가능
+    elif re.search(r"<\s*(?:script|img|svg|iframe|body|details|input|video|audio|object|embed|marquee)\b"
+                   r"|on[a-z]+\s*=|javascript:", payload, re.I):
+        exec_ctx = "HTML 본문(태그/핸들러 삽입)"               # 실행형 태그가 원문 삽입
+
     return {
         "reflected": True,
         "unescaped": bool(has_special),   # 특수문자 원문 반사 = 실행 가능성
+        "exec_ctx": exec_ctx,             # 실행 가능 컨텍스트(없으면 None) — 클라이언트측 XSS 판정
         "context": ctx,
         "snippet": body[start:end],
         "payload": payload,
@@ -1621,10 +1712,14 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     findings = []
     body_lower = (body or "").lower()
 
-    # ① payload 반사
+    # ① payload 반사 (클라이언트측 XSS 실행 컨텍스트 정밀 판정 포함)
     refl = _detect_reflection(body or "", payload)
     if refl:
-        if refl["unescaped"]:
+        if refl.get("exec_ctx"):
+            findings.append({"name": "반사형 XSS(실행 컨텍스트)", "verdict": "성공", "confidence": 92,
+                             "why": f"payload가 {refl['exec_ctx']}에 실행 가능한 형태로 반영됨 → 브라우저에서 스크립트 실행 가능(반사형 XSS)",
+                             "evidence": refl["snippet"]})
+        elif refl["unescaped"]:
             findings.append({"name": "payload 미인코딩 반사", "verdict": "성공", "confidence": 88,
                              "why": f"payload가 {refl['context']}에 인코딩 없이 반영됨 → XSS 등 실행 가능",
                              "evidence": refl["snippet"]})
@@ -1673,6 +1768,29 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         if status_code in (301, 302, 303, 307, 308) and re.search(r"^https?://|^//", loc):
             findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
                              "why": f"Location 헤더가 외부로 이동: {loc[:80]}", "evidence": loc[:120]})
+
+    # ②-b 클라이언트측(client-side) 취약점 신호
+    # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
+    if category == "xss":
+        dom = _detect_dom_xss(body or "")
+        if dom:
+            findings.append({"name": "DOM 기반 XSS 싱크", "verdict": "미확정", "confidence": 55,
+                             "why": f"클라이언트 입력({dom['source']})이 위험 싱크({dom['sink']})로 흐름 → DOM XSS 가능(브라우저 실행 확인 필요)",
+                             "evidence": dom["evidence"]})
+    # 클라이언트 템플릿 인젝션(CSTI) — 템플릿 표현식 미평가 반사 + 프레임워크 존재
+    if category in ("xss", "ssti") or (payload and any(t in payload for t in ("{{", "${", "#{"))):
+        csti = _detect_csti(body or "", payload or "")
+        if csti:
+            findings.append({"name": "클라이언트 템플릿 인젝션(CSTI) 가능", "verdict": "미확정", "confidence": 60,
+                             "why": "템플릿 표현식이 미평가 원문으로 반사 + 클라이언트 프레임워크 존재 → 브라우저 렌더링 시 평가 가능",
+                             "evidence": csti["evidence"]})
+    # 클라이언트측 오픈 리다이렉트 — meta refresh / JS location (서버 3xx 아님)
+    if category == "redirect":
+        cr = _detect_client_redirect(body or "")
+        if cr:
+            findings.append({"name": "클라이언트측 오픈 리다이렉트", "verdict": "성공", "confidence": 78,
+                             "why": f"{cr['how']}로 외부 이동: {cr['target']} → 클라이언트에서 리다이렉트 실행",
+                             "evidence": cr["evidence"]})
 
     # ③ 타이밍 (time-based)
     n = _extract_sleep_seconds(payload)

@@ -1016,6 +1016,29 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
   border-radius:4px; padding:1px 5px; flex-shrink:0;
 }
 
+.cve-badge {
+  font-size:9px; font-weight:700; color:#e84393;
+  background:rgba(232,67,147,.12); border:1px solid rgba(232,67,147,.45);
+  border-radius:4px; padding:1px 5px; flex-shrink:0; white-space:nowrap;
+}
+
+.ai-cand-cve {
+  border-left:3px solid rgba(232,67,147,.55);
+  background:rgba(232,67,147,.05);
+}
+
+.followup-badge {
+  font-size:9px; font-weight:700; color:#3fb950;
+  background:rgba(63,185,80,.12); border:1px solid rgba(63,185,80,.4);
+  border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+
+.method-badge {
+  font-size:9px; font-weight:700; color:#d29922;
+  background:rgba(210,153,34,.12); border:1px solid rgba(210,153,34,.4);
+  border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+
 .evidence-hint {
   font-weight:400; text-transform:none; letter-spacing:0;
   color:var(--text-muted); font-size:9px;
@@ -1308,7 +1331,13 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 }
 
 .target-result-header:hover { background: var(--bg-hover); }
-.target-result-header .target-url { font-size:12px; font-weight:600; flex:1; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.target-result-header .target-url { font-size:12px; font-weight:600; flex:1; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select: text; cursor: text; }
+.target-result-header .btn-copy-url {
+  flex-shrink:0; font-size:10px; padding:2px 8px; border-radius:4px; cursor:pointer;
+  background:var(--bg-secondary); color:var(--text-secondary);
+  border:1px solid var(--border); user-select:none;
+}
+.target-result-header .btn-copy-url:hover { background:var(--bg-hover); color:var(--accent); border-color:var(--accent); }
 .target-result-header .target-chevron { font-size:9px; color:var(--text-muted); transition: transform .2s; }
 .target-result-block.collapsed .target-result-header .target-chevron { transform: rotate(-90deg); }
 .target-result-block.collapsed .target-result-body { display: none; }

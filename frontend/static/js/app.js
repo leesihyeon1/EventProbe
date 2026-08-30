@@ -24,6 +24,10 @@ const API = {
     const r = await fetch('/api/ai-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async followupSuggest(data) {
+    const r = await fetch('/api/followup-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
 };
 
 /* ── State ── */
@@ -31,6 +35,9 @@ const state = {
   payloads: null,
   selectedPayload: null,
   selectedCategory: null,
+  injectUrlBase: null,   // URL 삽입 누적 방지용 기준(원본) URL
+  injectUrlPos: null,    // 기준 URL 내 삽입 위치
+  injectUrlLast: null,   // 직전 URL 삽입 결과(수동 편집 감지용)
   lastResult: null,
   bulkResults: null,
   kvHeaders: [],
@@ -366,6 +373,58 @@ function fillFromParsed(n) {
   }
 }
 
+// 전체 초기화 — 요청 패킷(메서드/URL/헤더/파라미터/바디) + 응답 + 분석을 빈 상태로 되돌림
+function clearRequest() {
+  // 메서드/URL/HTTP버전
+  const ms = document.getElementById('methodSelect'); if (ms) ms.value = 'GET';
+  const urlInput = document.getElementById('urlInput'); if (urlInput) urlInput.value = '';
+  const ver = document.getElementById('httpVersionSelect');
+  if (ver) { ver.value = 'HTTP/1.1'; }
+  const verCustom = document.getElementById('httpVersionCustom');
+  if (verCustom) { verCustom.value = ''; verCustom.style.display = 'none'; }
+
+  // 파라미터/헤더
+  state.kvParams = [];
+  state.kvHeaders = [];
+  renderKvEditor('paramsKv', state.kvParams);
+  // 헤더는 KV 모드로 되돌림
+  headerMode = 'kv';
+  const hkv = document.getElementById('headersKvWrap');   if (hkv) hkv.style.display = 'block';
+  const hraw = document.getElementById('headersRawWrap'); if (hraw) hraw.style.display = 'none';
+  document.getElementById('hdrModeKv')?.classList.add('active');
+  document.getElementById('hdrModeRaw')?.classList.remove('active');
+  const hrawTa = document.getElementById('headersRawEditor'); if (hrawTa) hrawTa.value = '';
+  renderKvEditor('headersKv', state.kvHeaders);
+
+  // 바디 / 기본헤더 옵션
+  const body = document.getElementById('bodyEditor'); if (body) body.value = '';
+  const chk = document.getElementById('useDefaultsChk'); if (chk) chk.checked = true;
+
+  // 삽입 바 / 선택 페이로드 / URL 삽입 스냅샷
+  document.getElementById('injectBar').style.display = 'none';
+  state.selectedPayload = null;
+  state.selectedCategory = null;
+  state.injectUrlBase = state.injectUrlPos = state.injectUrlLast = null;
+
+  // 응답 패널 비우기
+  const rb = document.getElementById('responseBody');
+  if (rb) rb.innerHTML = '<span style="color:var(--text-muted)">응답이 여기에 표시됩니다</span>';
+  const rh = document.getElementById('responseHeadersBody'); if (rh) rh.textContent = '';
+  const rs = document.getElementById('reqSummaryBody');      if (rs) rs.innerHTML = '';
+  const dv = document.getElementById('diffView');            if (dv) dv.innerHTML = '';
+
+  // 분석 패널 비우기
+  const av = document.getElementById('analysisVerdict'); if (av) av.innerHTML = '';
+  const ac = document.getElementById('analysisContent');
+  if (ac) ac.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><div class="msg">요청을 전송하면 분석 결과가 표시됩니다</div></div>';
+
+  state.lastResult = null;
+
+  switchReqTab('params');
+  if (typeof onHttpVersionChange === 'function') onHttpVersionChange();
+  toast('전체 초기화됨', 'success');
+}
+
 const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP' };
 
 function openImportModal() {
@@ -421,7 +480,7 @@ async function loadSidebar() {
   // 커스텀 페이로드 병합
   loadCustomPayloads();
   const aiCat = state.aiVariants.length
-    ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, payloads: state.aiVariants }]
+    ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, group: 'custom', payloads: state.aiVariants }]
     : [];
   const allCategories = [
     ...aiCat,
@@ -436,13 +495,27 @@ async function loadSidebar() {
   // 상위 그룹 정의(펼침 순서)
   const GROUP_DEFS = [
     { id: 'custom', name: '커스텀 / AI' },
+    { id: 'cve',    name: '알려진 취약점 (CVE)' },
     { id: 'server', name: '서버사이드 인젝션 · 실행' },
     { id: 'client', name: '클라이언트사이드' },
     { id: 'auth',   name: '인증 · 세션 · 권한' },
     { id: 'http',   name: 'HTTP · 헤더 · 인프라' },
   ];
 
-  const catHtml = (cat) => {
+  const payloadItems = (cat) => cat.payloads.map(p => `
+    <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
+      <span class="risk-dot ${p.risk || 'medium'}"></span>
+      <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
+      ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
+    </div>`).join('');
+
+  // flat=true 면 내부 카테고리 헤더를 생략하고 바로 목록(단일 카테고리 그룹의 이중 접힘 방지)
+  const catHtml = (cat, flat) => {
+    if (flat) {
+      return `<div class="category-group open" data-cat-id="${escapeHtml(cat.id)}">
+        <div class="payload-list">${payloadItems(cat)}</div>
+      </div>`;
+    }
     const customBadge = cat._custom
       ? `<span style="font-size:9px;color:var(--accent);background:rgba(88,166,255,.12);border:1px solid rgba(88,166,255,.3);border-radius:4px;padding:1px 5px;margin-right:2px">커스텀</span>`
       : '';
@@ -454,14 +527,7 @@ async function loadSidebar() {
           <span class="category-badge">${cat.payloads.length}</span>
           <span class="category-chevron">▶</span>
         </div>
-        <div class="payload-list">
-          ${cat.payloads.map(p => `
-            <div class="payload-item" data-pid="${p.id}" data-catid="${cat.id}" onclick="selectPayload('${cat.id}','${p.id}')">
-              <span class="risk-dot ${p.risk || 'medium'}"></span>
-              <span class="payload-name" title="${escapeHtml(p.payload)}">${escapeHtml(p.name)}</span>
-              ${p.reference ? `<a class="payload-ref" href="${escapeHtml(p.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="출처: ${escapeHtml(p.reference)}">↗</a>` : ''}
-            </div>`).join('')}
-        </div>
+        <div class="payload-list">${payloadItems(cat)}</div>
       </div>`;
   };
 
@@ -481,7 +547,7 @@ async function loadSidebar() {
         <span class="group-name">${escapeHtml(g.name)}</span>
         <span class="group-count">${cats.length}종 · ${plCount}</span>
       </div>
-      <div class="sidebar-group-body">${cats.map(catHtml).join('')}</div>`;
+      <div class="sidebar-group-body">${cats.map(c => catHtml(c, cats.length === 1)).join('')}</div>`;
     container.appendChild(section);
   });
 }
@@ -602,10 +668,17 @@ function injectPayload() {
 
   if (target === 'url') {
     const urlInput = document.getElementById('urlInput');
-    const pos = urlInput.selectionStart ?? urlInput.value.length;
-    const val = urlInput.value;
-    urlInput.value = val.slice(0, pos) + payload + val.slice(pos);
-    toast('URL 커서 위치에 삽입됨', 'success');
+    // 누적 방지: 페이로드 없는 '원본 URL'을 기준으로 매번 재적용.
+    // 현재 값이 직전에 우리가 만든 값과 다르면(=사용자가 수동 편집) 그 값을 새 기준으로 캡처.
+    if (state.injectUrlBase == null || urlInput.value !== state.injectUrlLast) {
+      state.injectUrlBase = urlInput.value;
+      state.injectUrlPos  = urlInput.selectionStart ?? urlInput.value.length;
+    }
+    const base = state.injectUrlBase;
+    const pos  = Math.min(state.injectUrlPos ?? base.length, base.length);
+    urlInput.value = base.slice(0, pos) + payload + base.slice(pos);
+    state.injectUrlLast = urlInput.value;   // 다음 삽입 때 '우리가 만든 값인지' 판별용
+    toast('URL 기준값에 삽입됨 (누적 방지)', 'success');
 
   } else if (target === 'body') {
     const bodyEl = document.getElementById('bodyEditor');
@@ -685,8 +758,55 @@ function _currentRequestForm() {
   };
 }
 
+// 직전 응답에서 기술스택 지문 추출(로컬 CVE 매칭용 — 우리 백엔드에서만 사용, AI로는 미전송)
+function buildFingerprint() {
+  const r = state.lastResult;
+  if (!r || !r.headers) return {};
+  const h = {};
+  Object.entries(r.headers).forEach(([k, v]) => { h[String(k).toLowerCase()] = String(v); });
+  return {
+    server: h['server'] || '',
+    powered_by: h['x-powered-by'] || h['x-aspnet-version'] || h['x-generator'] || h['x-runtime'] || '',
+  };
+}
+
+// 직전 요청 결과가 있으면 '결과 기반 후속 페이로드' API 요청 본문을 구성(없으면 null).
+// 신호는 '라벨만' 전송(증거·응답본문 미포함) — 유출 방지.
+function _followupRequestBody(req) {
+  if (!state.lastResult || !state.lastResult.analysis) return null;
+  const a = state.lastResult.analysis;
+  const rq = state.lastResult._req || {};
+
+  const findingNames = (a.findings || []).map(f => f.name).filter(Boolean);
+  const alertNames   = (a.alerts   || []).map(x => x.name).filter(Boolean);
+  // error_leaks/sensitive_data 는 증거 문자열을 포함하므로 원문 대신 '유형 라벨'만 추가
+  if ((a.error_leaks || []).length) {
+    findingNames.push('에러 정보 누출');
+    if ((a.error_leaks || []).some(s => /sql|mysql|mssql|ora-|postgre|sqlite/i.test(String(s)))) findingNames.push('SQL 에러 노출');
+  }
+  if ((a.sensitive_data || []).length) findingNames.push('민감정보 노출');
+
+  // 취약 위치 추정(단건 요청은 자유형 → best-effort)
+  let location = 'param', param = 'q';
+  if (rq.body && String(rq.body).trim()) location = 'body';
+  const pk = Object.keys(rq.params || {})[0]; if (pk) param = pk;
+
+  return {
+    method: req.method, url: req.url, params: req.params, body: req.body,
+    header_names: req.headerNames,
+    location, param,
+    fingerprint: buildFingerprint(),
+    category: rq.category || (state.selectedCategory && state.selectedCategory.id) || '',
+    attack_outcome: a.attack_outcome || '',
+    finding_names: findingNames,
+    alert_names: alertNames,
+    tried_payload: rq.payload || (state.selectedPayload && state.selectedPayload.payload) || '',
+    count: 10,
+  };
+}
+
+// AI 페이로드 생성 — 현재 요청으로 후보 생성 + (직전 결과가 있으면) 결과 기반 후속 페이로드까지 함께 생성.
 async function generateAiCandidates() {
-  if (!state.aiEnabled) { toast('AI 미설정 — .env 에 NVIDIA_API_KEY 를 넣으세요', 'error'); return; }
   const req = _currentRequestForm();
   if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
 
@@ -694,24 +814,75 @@ async function generateAiCandidates() {
   const listEl = document.getElementById('aiCandidateList');
   const metaEl = document.getElementById('aiSuggestMeta');
   metaEl.textContent = '';
-  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">AI 페이로드 생성 중…</div></div>';
+  const fuBody = _followupRequestBody(req);   // 결과 없으면 null → 후속 생성 생략
+  const genMsg = fuBody
+    ? '페이로드 + 결과 기반 후속 생성 중…'
+    : (state.aiEnabled ? 'AI 페이로드 생성 중…' : 'CVE 페이로드 매칭 중…');
+  listEl.innerHTML = `<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">${genMsg}</div></div>`;
 
   try {
-    const res = await API.aiSuggest({
-      method: req.method, url: req.url, params: req.params,
-      body: req.body, header_names: req.headerNames, count: 10,
-    });
-    if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
-    state.aiCandidates = res.candidates || [];
+    // 두 요청 병렬 — 각 실패는 개별적으로 흡수(하나가 죽어도 나머지는 렌더)
+    const [aiRes, fuRes] = await Promise.all([
+      API.aiSuggest({
+        method: req.method, url: req.url, params: req.params,
+        body: req.body, header_names: req.headerNames, count: 10,
+        fingerprint: buildFingerprint(),
+      }).catch(e => ({ error: e.message })),
+      fuBody ? API.followupSuggest(fuBody).catch(e => ({ error: e.message })) : Promise.resolve(null),
+    ]);
+
+    // 후보 병합: 결과 기반(followup) 을 앞에, AI/CVE 를 뒤에 (renderAiCandidates 가 source 로 그룹핑)
+    const fuCands = (fuRes && !fuRes.error && fuRes.candidates) ? fuRes.candidates : [];
+    const aiCands = (aiRes && !aiRes.error && aiRes.candidates) ? aiRes.candidates : [];
+    const cands = [...fuCands, ...aiCands];
+
+    if (!cands.length) {
+      const err = (aiRes && aiRes.error) || (fuRes && fuRes.error) || '후보를 생성하지 못했습니다';
+      listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(err)}</div></div>`;
+      return;
+    }
+
+    // 렌더 메타: AI 응답을 기본으로, 없으면 후속 응답 사용. 후속 포함 시 요약에 표기.
+    const baseRes = (aiRes && !aiRes.error) ? aiRes : (fuRes || {});
+    const summary = fuCands.length
+      ? `${baseRes.summary || ''}${baseRes.summary ? ' · ' : ''}결과 기반 후속 ${fuCands.length}개 포함`.trim()
+      : (baseRes.summary || '');
+
+    state.aiCandidates = cands;
     // 후보 클릭 시 매번 이 원본 요청 기준으로 적용하도록 스냅샷 저장(누적 방지)
     state.aiBaseSnapshot = captureRequestForm();
-    renderAiCandidates(res);
+    renderAiCandidates({ ...baseRes, candidates: cands, summary });
   } catch (e) {
     listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
   }
 }
 
 const _CAT_ICON = { sqli:'🗄️', xss:'📜', lfi:'📁', ssrf:'🔀', cmdi:'💻', ssti:'🔧', redirect:'↪️', idor:'🏢', nosql:'🍃', other:'🔎' };
+
+// 후보 카드 1개 렌더 (idx=state.aiCandidates 내 원본 인덱스)
+function aiCandCard(c, idx) {
+  const isCve = c.source === 'cve' || c.cve;
+  // 소스 배지: CVE 만 표기(번호 정보). 결과기반/AI 는 섹션 헤더가 라벨 역할
+  const tag = isCve ? `<span class="cve-badge">${escapeHtml(c.cve || '알려진취약점')}</span>` : '';
+  const methodTag = (c.method && String(c.method).toUpperCase() !== 'GET')
+    ? `<span class="method-badge">${escapeHtml(String(c.method).toUpperCase())}</span>` : '';
+  const head = isCve && c.name
+    ? escapeHtml(c.name)
+    : `${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param || '-')}`;
+  const ref = isCve && c.reference
+    ? `<a href="${escapeHtml(c.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:10px;color:var(--accent)">참조 ↗</a>`
+    : '';
+  return `
+    <div class="payload-item ai-cand-item${isCve ? ' ai-cand-cve' : ''}" data-idx="${idx}" onclick="applyAiCandidate(${idx})"
+         style="align-items:flex-start;gap:6px;cursor:pointer" title="${escapeHtml(c.payload)}&#10;— 클릭하면 요청 폼에 세팅">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          ${tag}${methodTag}<span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
+        </div>
+        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
+      </div>
+    </div>`;
+}
 
 function renderAiCandidates(res) {
   const listEl = document.getElementById('aiCandidateList');
@@ -720,13 +891,23 @@ function renderAiCandidates(res) {
   metaEl.innerHTML = `🧠 <b>${escapeHtml(res.test_type || '분석 완료')}</b> — ${escapeHtml(res.summary || '')} <span style="color:var(--text-muted)">(${escapeHtml(res.model||'')})</span>`;
   if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
 
-  listEl.innerHTML = cands.map((c, i) => `
-    <div class="payload-item ai-cand-item" data-idx="${i}" onclick="applyAiCandidate(${i})"
-         style="align-items:flex-start;gap:6px;cursor:pointer" title="클릭하면 요청 폼에 세팅됩니다">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--accent)"><b>${i + 1}.</b> ${escapeHtml(c.category)} · ${escapeHtml(c.location)}:${escapeHtml(c.param||'-')}</div>
-        <div class="payload-name" style="font-family:monospace;white-space:normal;word-break:break-all">${escapeHtml(c.payload)}</div>
-        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)}</div>` : ''}
+  // 원본 인덱스 보존하며 소스별 3그룹으로 분류 (페이로드 탭과 동일한 접기 카드 패턴)
+  const wi = cands.map((c, i) => ({ c, i }));
+  const groups = [
+    { label: '결과 기반', items: wi.filter(x => x.c.source === 'followup') },
+    { label: 'CVE 익스플로잇', items: wi.filter(x => x.c.source === 'cve' || x.c.cve) },
+    { label: 'AI 생성', items: wi.filter(x => x.c.source !== 'followup' && !(x.c.source === 'cve' || x.c.cve)) },
+  ].filter(g => g.items.length);
+
+  listEl.innerHTML = groups.map(g => `
+    <div class="sidebar-group open">
+      <div class="sidebar-group-header" onclick="toggleSidebarGroup(this)">
+        <span class="group-chevron">▾</span>
+        <span class="group-name">${escapeHtml(g.label)}</span>
+        <span class="group-count">${g.items.length}</span>
+      </div>
+      <div class="sidebar-group-body">
+        ${g.items.map(x => aiCandCard(x.c, x.i)).join('')}
       </div>
     </div>`).join('');
   // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
@@ -775,6 +956,20 @@ function applyAiCandidate(idx) {
       renderKvEditor('paramsKv', state.kvParams);
       switchReqTab('params');
     }
+  }
+  // 단일 POST/raw CVE: method·추가 헤더·body 까지 폼에 세팅
+  if (c.method) {
+    const ms = document.getElementById('methodSelect');
+    if (ms) { ms.value = String(c.method).toUpperCase(); ms.dispatchEvent(new Event('change')); }
+  }
+  if (c.headers && typeof c.headers === 'object') {
+    Object.entries(c.headers).forEach(([k, v]) => _setKv(state.kvHeaders, k, String(v), 'replace'));
+    renderKvEditor('headersKv', state.kvHeaders);
+  }
+  if (c.body != null && String(c.body) !== '') {
+    const bodyEl = document.getElementById('bodyEditor');
+    if (bodyEl) bodyEl.value = String(c.body);
+    switchReqTab('body');
   }
   // 분석 시 payload/category 가 전달되도록 선택 상태 기록
   state.selectedPayload = { payload: c.payload, name: c.category };
@@ -1244,6 +1439,19 @@ function copyRawRequest(btn) {
   const pre = document.getElementById('rawReqPre');
   const text = pre ? (pre.dataset.raw || pre.textContent) : '';
   const done = () => { const o = btn.textContent; btn.textContent = '✓ 복사됨'; setTimeout(() => btn.textContent = o, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => { fallbackCopy(text); done(); });
+  } else { fallbackCopy(text); done(); }
+}
+
+// 임의 텍스트 클립보드 복사 (버튼 피드백 포함). ev 로 부모 onclick 전파 차단.
+function copyText(text, btn, ev) {
+  if (ev) ev.stopPropagation();
+  const done = () => {
+    if (!btn) return;
+    const o = btn.textContent; btn.textContent = '복사됨';
+    setTimeout(() => { btn.textContent = o; }, 1200);
+  };
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(done).catch(() => { fallbackCopy(text); done(); });
   } else { fallbackCopy(text); done(); }
@@ -2199,9 +2407,11 @@ function renderMultiTargetResults(data) {
     </div>
     ${(data.targets || []).map((t, i) => `
       <div class="target-result-block" id="trb-${i}">
-        <div class="target-result-header" onclick="toggleTargetBlock(${i})">
+        <div class="target-result-header" onclick="toggleTargetBlock('trb-${i}')">
           <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">#${i+1}</span>
-          <span class="target-url">${escapeHtml(t.url)}</span>
+          <span class="target-url" onclick="event.stopPropagation()" title="${escapeHtml(t.url)}">${escapeHtml(t.url)}</span>
+          <button class="btn-copy-url" title="URL 복사" data-url="${escapeHtml(t.url)}"
+                  onclick="copyText(this.dataset.url, this, event)">복사</button>
           <div class="multi-summary-chips">
             ${(() => {
               const rs = t.results || [];
@@ -2240,10 +2450,6 @@ function renderMultiTargetResults(data) {
   container.appendChild(area);
 }
 
-function toggleTargetBlock(i) {
-  document.getElementById(`trb-${i}`)?.classList.toggle('collapsed');
-}
-
 function generateClientSummary(results) {
   const total    = results.length;
   const blocked  = results.filter(r => r.analysis?.verdict === 'blocked').length;
@@ -2256,6 +2462,9 @@ function generateClientSummary(results) {
 // 상단 요약 카드(5개 공유)를 각 화면이 명시적으로 세팅.
 // cards: [{id, label, value, title?}] — 목록에 없는 카드는 숨김.
 function setSummary(cards) {
+  // 결과가 생겼으므로 요약 바 노출(시작 전에는 숨김 상태)
+  const sumBar = document.querySelector('.results-summary');
+  if (sumBar) sumBar.style.display = '';
   const ALL = ['summaryTotal', 'summaryBlocked', 'summaryPassed', 'summaryBypass', 'summaryRate'];
   const shown = new Set(cards.map(c => c.id));
   ALL.forEach(id => {
@@ -3174,11 +3383,9 @@ document.addEventListener('DOMContentLoaded', () => {
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
 
-  // 서버 AI 설정 여부 확인 (AI 버튼 노출 판단)
+  // 서버 AI 설정 여부 확인 (좌측 'AI 페이로드 생성' 동작 판단용)
   API.aiStatus().then(s => {
     state.aiEnabled = !!s.enabled;
-    const b = document.getElementById('aiSuggestBtn');
-    if (b) b.style.display = state.aiEnabled ? '' : 'none';
   });
 
   // Enter key on URL

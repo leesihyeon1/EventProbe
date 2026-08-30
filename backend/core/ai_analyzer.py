@@ -6,7 +6,7 @@ AI 상세 분석 - NVIDIA NIM (OpenAI 호환 API)로 요청/응답을 LLM 분석
 
 설정(환경변수):
   NVIDIA_API_KEY   필수. 없으면 기능 자동 비활성(도구는 그대로 동작).
-  NVIDIA_MODEL     선택. 기본 nvidia/nemotron-3-super-120b-a12b
+  NVIDIA_MODEL     선택. 기본 meta/llama-3.2-11b-vision-instruct
   NVIDIA_BASE_URL  선택. 기본 https://integrate.api.nvidia.com/v1
 
 ⚠️ 클라우드 API 사용 시 분석 대상 응답이 NVIDIA로 전송된다.
@@ -19,7 +19,7 @@ import httpx
 
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
 def _api_key():  return os.getenv("NVIDIA_API_KEY", "").strip()
-def _model():    return os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b").strip()
+def _model():    return os.getenv("NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct").strip()
 def _base_url(): return os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 def _timeout():
     try: return max(10.0, float(os.getenv("AI_TIMEOUT", "120")))
@@ -183,7 +183,15 @@ _SUGGEST_SYSTEM = '''You are a web app pentest planner (authorized testing). Giv
 - location MUST be "param" (existing query/body param), "path" (append to URL path), or "body". Use "header" ONLY for Host / X-Forwarded-For / X-Forwarded-Host / X-Original-URL / Referer.
 - NEVER use User-Agent, Content-Type, Accept, or Accept-* as an injection target.
 - Identify the app from the path and pick fitting tests: /manager* = Tomcat Manager; /autodiscover* = MS Exchange (ProxyLogon path); /.env /.git = secret file read; /actuator* = Spring Boot; /wp-* = WordPress. If a query/body param exists, inject the payload INTO that param.
-- 6-8 DISTINCT candidates, no duplicates. Prefer categories that fit the endpoint/param.
+- PRIORITIZE by param name / endpoint and put the BEST-FIT category FIRST. Map:
+    numeric value OR name in {id,uid,pid,user,userid,order,orderid,account,no,seq} -> sqli (first) + idor;
+    login/signin/auth/session/token endpoints -> sqli AND nosql AUTH-BYPASS on the credential fields (' OR '1'='1 , {"$ne":""});
+    name in {url,uri,next,return,returnurl,redirect,callback,dest,continue,link,site} -> ssrf + redirect;
+    name in {file,path,page,doc,document,template,include,view,lang,dir} -> lfi + ssti;
+    name in {cmd,command,exec,run,ping,host,domain,ip,addr} -> cmdi;
+    free-text search/comment/message/q/query/name -> xss + sqli.
+  ALWAYS include the obvious high-signal category for the endpoint — NEVER omit sqli on an id/login, ssrf on a url param, or lfi on a file param.
+- 6-8 DISTINCT candidates. Ensure CATEGORY DIVERSITY: at most 2 per category (more only if the endpoint strongly implies one, e.g. a login page), and never repeat near-identical payloads.
 
 PAYLOAD BANK (use these exact styles; pick real values, never placeholders):
   sqli: ' OR '1'='1     1' ORDER BY 5-- -     ' UNION SELECT NULL,NULL-- -     1 AND SLEEP(5)-- -
@@ -300,18 +308,23 @@ def _norm_category(cat: str, payload: str) -> str:
 
 
 async def ai_suggest_payloads(method: str, path: str, params: dict,
-                              body: str = "", header_names=None, count: int = 8) -> dict:
-    """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음."""
+                              body: str = "", header_names=None, count: int = 8,
+                              hint: str = "") -> dict:
+    """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음.
+    hint: 결과 기반 후속 생성용 라벨-only 힌트(취약 계열·판정·탐지 기술 이름만)."""
     key = _api_key()
     if not key:
         return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
     model, base_url = _model(), _base_url()
+    hint_line = (f"이전 검증에서 확인된 신호(라벨): {hint}. 이 계열을 승격/우회하는 페이로드 위주로.\n"
+                 if hint else "")
     user = (
         f"method: {method}\n"
         f"path (host removed): {path}\n"
         f"query params: {json.dumps(params or {}, ensure_ascii=False)[:800]}\n"
         f"body: {(body or '(none)')[:800]}\n"
         f"header names: {json.dumps(header_names or [], ensure_ascii=False)[:400]}\n"
+        f"{hint_line}"
         f"Propose up to {count} payload candidates."
     )
     payload = {
