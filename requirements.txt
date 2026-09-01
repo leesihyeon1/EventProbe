@@ -8,3 +8,4 @@ python-multipart>=0.0.6
 brotli>=1.1.0          # httpx 가 Content-Encoding: br 응답을 디코딩하기 위함
 zstandard>=0.22.0      # httpx 가 Content-Encoding: zstd 응답을 디코딩하기 위함
 python-dotenv>=1.0.0   # .env 파일에서 NVIDIA_API_KEY 등 로드
+playwright>=1.40.0     # SPA 실제 호출 API 캡처(헤드리스). 설치 후: python -m playwright install chromium

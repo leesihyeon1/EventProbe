@@ -29,6 +29,9 @@ from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloa
 from core.raw_http import raw_send
 from core.cve_matcher import match_cve_payloads
 from core.followup import hot_families, escalation_candidates
+from core import confirm as confirm_scan
+from core import discover as api_discover
+from core import capture as api_capture
 
 router = APIRouter(prefix="/api")
 
@@ -122,6 +125,24 @@ class MultiTargetRequest(BaseModel):
     default_headers: dict = {}
     use_defaults: bool = True
     concurrency: int = 12              # 동시 요청 수(속도) — 대상 부하/차단 방지 상한 적용
+
+# 확증 스캔 — 파라미터 1개에 오라클 프로브 세트를 보내 확증
+class ConfirmTarget(BaseModel):
+    location: str = "param"       # param | body | path | header
+    param: str = ""               # 대상 파라미터명 (path 는 무시)
+    base_value: str = ""          # 유효한 기존 값(sqli/cmdi 브레이크 접두). 없으면 빈 문자열
+
+class ConfirmRequest(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: dict = {}
+    body: Optional[str] = None
+    params: dict = {}
+    default_headers: dict = {}
+    use_defaults: bool = True
+    target: ConfirmTarget
+    category: str                 # 확증할 카테고리(로드된 페이로드 기준)
+    timeout: int = 10
 
 # 포트 스캔
 class PortScanRequest(BaseModel):
@@ -473,6 +494,139 @@ async def followup_suggest(req: FollowupRequest):
 
 
 # ── 다중 페이로드 일괄 테스트 ───────────────────────────────
+def _strip_query_param(url: str, key: str) -> str:
+    """URL 쿼리에서 key= 항목을 제거(확증 프로브가 같은 파라미터를 params 로 다시 넣을 때 중복 방지)."""
+    qi = url.find("?")
+    if qi < 0 or not key:
+        return url
+    base, q = url[:qi], url[qi + 1:]
+    kept = [seg for seg in q.split("&") if seg and seg.split("=", 1)[0] != key]
+    return base + ("?" + "&".join(kept) if kept else "")
+
+
+def _inject_probe(base_url: str, params: dict, body: Optional[str],
+                  headers: dict, location: str, param: str, value: str):
+    """프로브 value 를 지정 위치에 주입한 (final_url, body) 반환. params/headers 는 사본을 수정."""
+    loc = (location or "param").lower()
+    if loc == "header":
+        headers[param or "X-Test-Payload"] = value
+        return _url_with_params(base_url, params), body
+    if loc == "body":
+        if body and body.strip():
+            try:
+                bd = json.loads(body)
+                if isinstance(bd, dict):
+                    bd[param or "q"] = value
+                    return _url_with_params(base_url, params), json.dumps(bd)
+            except (ValueError, TypeError):
+                pass
+        return _url_with_params(base_url, params), value
+    if loc == "path":
+        qi = base_url.find("?")
+        stem, q = (base_url[:qi], base_url[qi:]) if qi >= 0 else (base_url, "")
+        sep = "" if stem.endswith("/") else "/"
+        return stem + sep + value.lstrip("/") + q, body
+    # param (default): URL 쿼리에서 같은 키 제거 후 params 로 주입
+    url2 = _strip_query_param(base_url, param or "q")
+    params[param or "q"] = value
+    return _url_with_params(url2, params), body
+
+
+@router.post("/confirm-scan")
+async def confirm_scan_endpoint(req: ConfirmRequest):
+    """파라미터 1개에 오라클 프로브 세트를 순차 전송하고 응답 차이로 취약 여부를 확증한다.
+
+    타이밍 오라클(시간 기반)의 정확도를 위해 프로브는 병렬이 아니라 순차 전송한다.
+    """
+    cat = (req.category or "").lower()
+    if not confirm_scan.is_supported(cat):
+        return {
+            "supported": False,
+            "category": cat,
+            "message": f"'{cat}' 은(는) 확증 프로브 미지원 — 단발 전송으로 확인하세요.",
+        }
+
+    plan = confirm_scan.probe_plan(cat, req.target.base_value)
+    if not plan:
+        return {"supported": False, "category": cat, "message": "프로브가 없습니다."}
+
+    sent_headers_base = merge_headers(req.headers, req.default_headers, req.use_defaults)
+    # 오픈 리다이렉트는 3xx Location 을 봐야 하므로 리다이렉트를 따라가지 않는다.
+    follow = cat != "redirect"
+
+    results = []
+    probes_out = []
+    async with httpx.AsyncClient(verify=False, follow_redirects=follow) as client:
+        for p in plan:
+            params = dict(req.params)
+            headers = dict(sent_headers_base)
+            final_url, body = _inject_probe(
+                req.url, params, req.body, headers,
+                req.target.location, req.target.param, p["value"],
+            )
+            try:
+                start = time.time()
+                resp = await client.request(
+                    method=req.method.upper(), url=final_url, headers=headers,
+                    content=body.encode() if body else None, timeout=req.timeout,
+                )
+                elapsed = (time.time() - start) * 1000
+                body_text = resp.text[:50000]
+                results.append({
+                    "role": p["role"], "status": resp.status_code, "time_ms": elapsed,
+                    "body": body_text, "headers": dict(resp.headers), "value": p["value"],
+                })
+                probes_out.append({
+                    "role": p["role"], "label": p["label"], "value": p["value"],
+                    "status": resp.status_code, "time_ms": round(elapsed),
+                })
+            except httpx.TimeoutException:
+                # 타임아웃도 신호가 될 수 있으나(예: SLEEP), 시간 측정이 불가하므로 실패로 기록
+                results.append({"role": p["role"], "status": 0, "time_ms": float(req.timeout) * 1000,
+                                "body": "", "headers": {}, "value": p["value"]})
+                probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
+                                   "status": 0, "time_ms": round(float(req.timeout) * 1000), "timeout": True})
+            except Exception as e:
+                results.append({"role": p["role"], "status": 0, "time_ms": 0.0,
+                                "body": "", "headers": {}, "value": p["value"]})
+                probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
+                                   "status": 0, "time_ms": 0, "error": str(e)[:120]})
+
+    decision = confirm_scan.decide(cat, results)
+    return {
+        "supported": True,
+        "category": cat,
+        "target": {"location": req.target.location, "param": req.target.param},
+        "probes_sent": len(plan),
+        "confirmed": decision["confirmed"],
+        "techniques": decision["techniques"],
+        "probes": probes_out,
+    }
+
+
+class DiscoverRequest(BaseModel):
+    url: str
+    timeout: int = 15
+
+
+@router.post("/discover-apis")
+async def discover_apis(req: DiscoverRequest):
+    """SPA가 호출하는 실제 API를 발견.
+
+    1차: 헤드리스 브라우저로 페이지를 실제 실행해 XHR/fetch 를 파라미터까지 캡처(정확).
+    2차(폴백): 캡처 실패 시 JS 번들 정적 분석으로 백엔드·엔드포인트 추정.
+    """
+    live = await api_capture.capture_apis(req.url, req.timeout)
+    if live.get("entries"):
+        return {"mode": "live", "entries": live["entries"], "captured": live.get("captured", 0)}
+
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        static = await api_discover.discover(client, req.url, req.timeout)
+    static["mode"] = "static"
+    static["live_error"] = live.get("error")
+    return static
+
+
 @router.post("/bulk-test")
 async def bulk_test(req: BulkRequest):
     data = load_payloads()

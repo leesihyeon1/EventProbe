@@ -1331,7 +1331,13 @@ textarea.code-editor:focus { border-color: var(--accent-dark); }
 }
 
 .target-result-header:hover { background: var(--bg-hover); }
-.target-result-header .target-url { font-size:12px; font-weight:600; flex:1; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.target-result-header .target-url { font-size:12px; font-weight:600; flex:1; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; user-select: text; cursor: text; }
+.target-result-header .btn-copy-url {
+  flex-shrink:0; font-size:10px; padding:2px 8px; border-radius:4px; cursor:pointer;
+  background:var(--bg-secondary); color:var(--text-secondary);
+  border:1px solid var(--border); user-select:none;
+}
+.target-result-header .btn-copy-url:hover { background:var(--bg-hover); color:var(--accent); border-color:var(--accent); }
 .target-result-header .target-chevron { font-size:9px; color:var(--text-muted); transition: transform .2s; }
 .target-result-block.collapsed .target-result-header .target-chevron { transform: rotate(-90deg); }
 .target-result-block.collapsed .target-result-body { display: none; }

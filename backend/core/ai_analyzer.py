@@ -183,7 +183,15 @@ _SUGGEST_SYSTEM = '''You are a web app pentest planner (authorized testing). Giv
 - location MUST be "param" (existing query/body param), "path" (append to URL path), or "body". Use "header" ONLY for Host / X-Forwarded-For / X-Forwarded-Host / X-Original-URL / Referer.
 - NEVER use User-Agent, Content-Type, Accept, or Accept-* as an injection target.
 - Identify the app from the path and pick fitting tests: /manager* = Tomcat Manager; /autodiscover* = MS Exchange (ProxyLogon path); /.env /.git = secret file read; /actuator* = Spring Boot; /wp-* = WordPress. If a query/body param exists, inject the payload INTO that param.
-- 6-8 DISTINCT candidates, no duplicates. Prefer categories that fit the endpoint/param.
+- PRIORITIZE by param name / endpoint and put the BEST-FIT category FIRST. Map:
+    numeric value OR name in {id,uid,pid,user,userid,order,orderid,account,no,seq} -> sqli (first) + idor;
+    login/signin/auth/session/token endpoints -> sqli AND nosql AUTH-BYPASS on the credential fields (' OR '1'='1 , {"$ne":""});
+    name in {url,uri,next,return,returnurl,redirect,callback,dest,continue,link,site} -> ssrf + redirect;
+    name in {file,path,page,doc,document,template,include,view,lang,dir} -> lfi + ssti;
+    name in {cmd,command,exec,run,ping,host,domain,ip,addr} -> cmdi;
+    free-text search/comment/message/q/query/name -> xss + sqli.
+  ALWAYS include the obvious high-signal category for the endpoint — NEVER omit sqli on an id/login, ssrf on a url param, or lfi on a file param.
+- 6-8 DISTINCT candidates. Ensure CATEGORY DIVERSITY: at most 2 per category (more only if the endpoint strongly implies one, e.g. a login page), and never repeat near-identical payloads.
 
 PAYLOAD BANK (use these exact styles; pick real values, never placeholders):
   sqli: ' OR '1'='1     1' ORDER BY 5-- -     ' UNION SELECT NULL,NULL-- -     1 AND SLEEP(5)-- -

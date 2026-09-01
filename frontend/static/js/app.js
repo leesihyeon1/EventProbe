@@ -28,6 +28,14 @@ const API = {
     const r = await fetch('/api/followup-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async confirmScan(data) {
+    const r = await fetch('/api/confirm-scan', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
+  async discoverApis(data) {
+    const r = await fetch('/api/discover-apis', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return r.json();
+  },
 };
 
 /* ── State ── */
@@ -35,6 +43,9 @@ const state = {
   payloads: null,
   selectedPayload: null,
   selectedCategory: null,
+  injectUrlBase: null,   // URL 삽입 누적 방지용 기준(원본) URL
+  injectUrlPos: null,    // 기준 URL 내 삽입 위치
+  injectUrlLast: null,   // 직전 URL 삽입 결과(수동 편집 감지용)
   lastResult: null,
   bulkResults: null,
   kvHeaders: [],
@@ -370,10 +381,179 @@ function fillFromParsed(n) {
   }
 }
 
-const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP' };
+// 전체 초기화 — 요청 패킷(메서드/URL/헤더/파라미터/바디) + 응답 + 분석을 빈 상태로 되돌림
+function clearRequest() {
+  // 메서드/URL/HTTP버전
+  const ms = document.getElementById('methodSelect'); if (ms) ms.value = 'GET';
+  const urlInput = document.getElementById('urlInput'); if (urlInput) urlInput.value = '';
+  const ver = document.getElementById('httpVersionSelect');
+  if (ver) { ver.value = 'HTTP/1.1'; }
+  const verCustom = document.getElementById('httpVersionCustom');
+  if (verCustom) { verCustom.value = ''; verCustom.style.display = 'none'; }
+
+  // 파라미터/헤더
+  state.kvParams = [];
+  state.kvHeaders = [];
+  renderKvEditor('paramsKv', state.kvParams);
+  // 헤더는 KV 모드로 되돌림
+  headerMode = 'kv';
+  const hkv = document.getElementById('headersKvWrap');   if (hkv) hkv.style.display = 'block';
+  const hraw = document.getElementById('headersRawWrap'); if (hraw) hraw.style.display = 'none';
+  document.getElementById('hdrModeKv')?.classList.add('active');
+  document.getElementById('hdrModeRaw')?.classList.remove('active');
+  const hrawTa = document.getElementById('headersRawEditor'); if (hrawTa) hrawTa.value = '';
+  renderKvEditor('headersKv', state.kvHeaders);
+
+  // 바디 / 기본헤더 옵션
+  const body = document.getElementById('bodyEditor'); if (body) body.value = '';
+  const chk = document.getElementById('useDefaultsChk'); if (chk) chk.checked = true;
+
+  // 삽입 바 / 선택 페이로드 / URL 삽입 스냅샷
+  document.getElementById('injectBar').style.display = 'none';
+  state.selectedPayload = null;
+  state.selectedCategory = null;
+  state.injectUrlBase = state.injectUrlPos = state.injectUrlLast = null;
+
+  // 응답 패널 비우기
+  const rb = document.getElementById('responseBody');
+  if (rb) rb.innerHTML = '<span style="color:var(--text-muted)">응답이 여기에 표시됩니다</span>';
+  const rh = document.getElementById('responseHeadersBody'); if (rh) rh.textContent = '';
+  const rs = document.getElementById('reqSummaryBody');      if (rs) rs.innerHTML = '';
+  const dv = document.getElementById('diffView');            if (dv) dv.innerHTML = '';
+
+  // 분석 패널 비우기
+  const av = document.getElementById('analysisVerdict'); if (av) av.innerHTML = '';
+  const ac = document.getElementById('analysisContent');
+  if (ac) ac.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><div class="msg">요청을 전송하면 분석 결과가 표시됩니다</div></div>';
+
+  state.lastResult = null;
+
+  switchReqTab('params');
+  if (typeof onHttpVersionChange === 'function') onHttpVersionChange();
+  toast('전체 초기화됨', 'success');
+}
+
+const _FMT_LABEL = { curl: 'cURL', wget: 'wget', raw: 'Raw HTTP', har: 'HAR' };
+
+/* ── HAR 임포트 — 기존 붙여넣기 모달 안에서만 동작(새 UI 없음) ── */
+const _HAR_STATIC_EXT = /\.(js|mjs|css|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|eot|map)(\?|$)/i;
+const _HAR_NOISE_MIME = /(image|font|css|javascript|octet-stream)/i;
+const _HAR_NOISE_HOST = /(google-analytics|googletagmanager|doubleclick|gstatic|facebook\.|hotjar|sentry|newrelic|clarity|criteo|adservice|analytics|beacon)/i;
+const _HAR_API_PATH   = /\/(api|v\d+(\.\d+)?|graphql|rest|search|query)(\/|\?|$)/i;
+
+function looksLikeHar(text) {
+  const t = (text || '').trim();
+  return t[0] === '{' && /"log"\s*:/.test(t) && /"entries"\s*:/.test(t);
+}
+
+// HAR 엔트리 1건 → 기존 폼 정규화 형식 {method,url,params,headers,body} + _meta
+function harEntryToNorm(e) {
+  const req = e.request || {};
+  const hdrLines = (req.headers || [])
+    .filter(h => h.name && h.name[0] !== ':')     // HTTP/2 의사헤더(:method 등) 제외
+    .map(h => `${h.name}: ${h.value}`);
+  const body = (req.postData && req.postData.text) || '';
+  const norm = normalizeParsed({
+    url: req.url || '', method: (req.method || 'GET').toUpperCase(),
+    headers: hdrLines, dataParts: body ? [body] : [], getMode: false,
+  });
+  norm._format = 'har';
+  const resp = e.response || {};
+  norm._meta = {
+    status: resp.status || 0,
+    mime: ((resp.content && resp.content.mimeType) || '').split(';')[0].trim(),
+  };
+  return norm;
+}
+
+function parseHar(text) {
+  let har;
+  try { har = JSON.parse(text); } catch { return null; }
+  const entries = har && har.log && har.log.entries;
+  if (!Array.isArray(entries)) return null;
+  return entries.map(harEntryToNorm);
+}
+
+// 정적/트래킹 제외 + 'API다움' 판정
+function _harIsApi(r) {
+  const url = r.url || '';
+  if (_HAR_STATIC_EXT.test(url) || _HAR_NOISE_HOST.test(url)) return false;
+  if (_HAR_NOISE_MIME.test(r._meta.mime || '')) return false;
+  const hasParams = (r.params && r.params.length) || (r.body && r.body.length);
+  const jsonish   = /json/i.test(r._meta.mime || '');
+  return jsonish || r.method !== 'GET' || hasParams || _HAR_API_PATH.test(url);
+}
+
+function _harKey(r) {
+  try { const u = new URL(r.url); return r.method + ' ' + u.host + u.pathname; }
+  catch { return r.method + ' ' + r.url; }
+}
+
+function _harScore(r) { return (r.params ? r.params.length : 0) + (r.body ? 1 : 0); }
+
+// state.harAll 을 필터·중복제거·정렬해서 미리보기 영역에 선택 목록으로 렌더
+function renderHarList() {
+  const all = state.harAll || [];
+  const apiOnly = state.harApiOnly !== false;
+  const src = apiOnly ? all.filter(_harIsApi) : all.slice();
+  const seen = new Set(); const list = [];
+  for (const r of src) { const k = _harKey(r); if (seen.has(k)) continue; seen.add(k); list.push(r); }
+  list.sort((a, b) => _harScore(b) - _harScore(a));
+  state.harView = list;
+
+  const el = document.getElementById('importPreview');
+  const head = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px">
+      <span class="tag tag-blue">HAR 감지</span><b>${list.length}개 요청</b>
+      <label style="margin-left:auto;color:var(--text-muted);cursor:pointer">
+        <input type="checkbox" ${apiOnly ? 'checked' : ''} onchange="state.harApiOnly=this.checked;renderHarList()"> API만</label>
+    </div>`;
+  if (!list.length) { el.innerHTML = head + '<span style="color:var(--text-muted)">표시할 요청이 없습니다 (전체 보기를 켜보세요)</span>'; return; }
+
+  const rows = list.map((r, i) => {
+    let host = '', path = r.url;
+    try { const u = new URL(r.url); host = u.host; path = u.pathname; } catch {}
+    const np = r.params ? r.params.length : 0;
+    const inj = np || r.body;
+    return `<div class="har-row" onclick="selectHarRow(${i})"
+        style="display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer">
+        <span class="tag ${r.method === 'GET' ? 'tag-blue' : 'tag-yellow'}" style="min-width:46px;text-align:center">${escapeHtml(r.method)}</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px">
+          <span style="color:var(--text-muted)">${escapeHtml(host)}</span>${escapeHtml(path)}</span>
+        ${inj ? '<span title="주입 후보 파라미터 있음">🎯</span>' : ''}
+        <span style="color:var(--text-muted);font-size:10px">p${np}</span>
+        <span style="color:${httpColor(r._meta.status)};font-size:10px;min-width:24px;text-align:right">${r._meta.status || '-'}</span>
+      </div>`;
+  }).join('');
+  el.innerHTML = head +
+    `<div style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:6px">${rows}</div>
+     <div style="font-size:10px;color:var(--text-muted);margin-top:6px">🎯 = 주입 후보 · 행 클릭하면 폼에 로드됩니다</div>`;
+}
+
+function selectHarRow(i) {
+  const r = (state.harView || [])[i];
+  if (!r) return;
+  fillFromParsed(r);
+  closeImportModal();
+  toast('요청을 불러왔습니다 (HAR)', 'success');
+}
+
+function importHarFile(file) {
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const all = parseHar(String(fr.result || ''));
+    if (!all) { toast('HAR 파싱 실패 — 올바른 .har 파일인지 확인하세요', 'error'); return; }
+    state.harAll = all; state.harApiOnly = true;
+    renderHarList();
+  };
+  fr.onerror = () => toast('파일 읽기 실패', 'error');
+  fr.readAsText(file);
+}
 
 function openImportModal() {
   document.getElementById('importRaw').value = '';
+  const hf = document.getElementById('harFile'); if (hf) hf.value = '';
+  state.harAll = null; state.harView = null;
   document.getElementById('importPreview').innerHTML =
     '<span style="color:var(--text-muted)">붙여넣으면 파싱 결과가 여기에 표시됩니다</span>';
   document.getElementById('importModal').classList.remove('hidden');
@@ -391,6 +571,12 @@ function previewImport() {
     el.innerHTML = '<span style="color:var(--text-muted)">붙여넣으면 파싱 결과가 여기에 표시됩니다</span>';
     return;
   }
+  // HAR(JSON) 붙여넣기 → 선택 목록 모드
+  if (looksLikeHar(text)) {
+    const all = parseHar(text);
+    if (all) { state.harAll = all; state.harApiOnly = true; renderHarList(); return; }
+  }
+  state.harAll = null;   // cURL/raw 로 되돌아오면 목록 모드 해제
   let n;
   try { n = parseRequestText(text); }
   catch (e) { el.innerHTML = '<span style="color:var(--danger)">파싱 실패: ' + escapeHtml(e.message) + '</span>'; return; }
@@ -406,6 +592,10 @@ function previewImport() {
 }
 
 function applyImport() {
+  // HAR 목록 모드에서는 행 클릭으로 선택 — 버튼은 안내만
+  if (state.harAll && (state.harView || []).length) {
+    toast('목록에서 요청을 클릭해 불러오세요', 'info'); return;
+  }
   const text = document.getElementById('importRaw').value;
   if (!text.trim()) { toast('내용을 붙여넣으세요', 'error'); return; }
   let n;
@@ -425,7 +615,7 @@ async function loadSidebar() {
   // 커스텀 페이로드 병합
   loadCustomPayloads();
   const aiCat = state.aiVariants.length
-    ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, payloads: state.aiVariants }]
+    ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, group: 'custom', payloads: state.aiVariants }]
     : [];
   const allCategories = [
     ...aiCat,
@@ -613,10 +803,17 @@ function injectPayload() {
 
   if (target === 'url') {
     const urlInput = document.getElementById('urlInput');
-    const pos = urlInput.selectionStart ?? urlInput.value.length;
-    const val = urlInput.value;
-    urlInput.value = val.slice(0, pos) + payload + val.slice(pos);
-    toast('URL 커서 위치에 삽입됨', 'success');
+    // 누적 방지: 페이로드 없는 '원본 URL'을 기준으로 매번 재적용.
+    // 현재 값이 직전에 우리가 만든 값과 다르면(=사용자가 수동 편집) 그 값을 새 기준으로 캡처.
+    if (state.injectUrlBase == null || urlInput.value !== state.injectUrlLast) {
+      state.injectUrlBase = urlInput.value;
+      state.injectUrlPos  = urlInput.selectionStart ?? urlInput.value.length;
+    }
+    const base = state.injectUrlBase;
+    const pos  = Math.min(state.injectUrlPos ?? base.length, base.length);
+    urlInput.value = base.slice(0, pos) + payload + base.slice(pos);
+    state.injectUrlLast = urlInput.value;   // 다음 삽입 때 '우리가 만든 값인지' 판별용
+    toast('URL 기준값에 삽입됨 (누적 방지)', 'success');
 
   } else if (target === 'body') {
     const bodyEl = document.getElementById('bodyEditor');
@@ -682,6 +879,122 @@ async function generateBypassVariants() {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+   확증 스캔 — 선택 페이로드 카테고리로 오라클 프로브 세트를 자동 전송·확증
+   ══════════════════════════════════════════════════════════════════ */
+
+// 인젝트바 대상(injectTarget) → 백엔드 location 매핑
+function _confirmLocation(target) {
+  if (target === 'body') return 'body';
+  if (target === 'header') return 'header';
+  return 'param';   // 'param' 및 'url'(쿼리 삽입)은 param 으로 확증
+}
+
+// 대상 파라미터의 '깨끗한 기존 값' 추정 — 현재 값이 주입된 페이로드면 접두로 안 씀
+function _confirmBaseValue(location, param) {
+  const payload = state.selectedPayload?.payload || '';
+  let cur = '';
+  if (location === 'param') {
+    const row = (state.kvParams || []).find(r => (r.key || '') === param);
+    if (row) cur = row.value || '';
+    else {
+      const m = (document.getElementById('urlInput').value || '')
+        .match(new RegExp('[?&]' + param.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^&#]*)'));
+      if (m) cur = decodeURIComponent(m[1]);
+    }
+  } else if (location === 'header') {
+    const row = (state.kvHeaders || []).find(r => (r.key || '') === param);
+    if (row) cur = row.value || '';
+  } else if (location === 'body') {
+    try { const bd = JSON.parse(document.getElementById('bodyEditor').value || '{}'); cur = String(bd[param] ?? ''); }
+    catch { cur = ''; }
+  }
+  // 현재 값이 곧 주입한 페이로드면(=원본이 덮인 상태) 접두로 쓰지 않음
+  return (cur && cur === payload) ? '' : cur;
+}
+
+async function confirmScan() {
+  const cat = state.selectedCategory?.id || '';
+  if (!cat) { toast('먼저 페이로드를 선택하세요', 'error'); return; }
+  const req = _currentRequestForm();
+  if (!req.url) { toast('요청 URL이 없습니다', 'error'); return; }
+
+  const target = document.getElementById('injectTarget').value;
+  const location = _confirmLocation(target);
+  const param = (document.getElementById('injectKey').value || '').trim()
+    || (location === 'header' ? 'X-Test-Payload' : 'q');
+  const baseValue = _confirmBaseValue(location, param);
+
+  const btn = document.getElementById('confirmScanBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '확증 중…';
+  try {
+    const res = await API.confirmScan({
+      method: req.method, url: req.url, params: req.params, body: req.body,
+      headers: getHeadersObj(), default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
+      target: { location, param, base_value: baseValue }, category: cat, timeout: 10,
+    });
+    if (res.supported === false) { toast(res.message || '이 카테고리는 확증 미지원', 'info'); return; }
+    if (res.error) { toast('확증 실패: ' + res.error, 'error'); return; }
+    renderConfirmResult(res, param);
+    switchView('request');
+    toast(res.confirmed ? '✅ 취약점 확증됨' : '깨끗 — 확증되지 않음', res.confirmed ? 'success' : 'info');
+  } catch (e) {
+    toast('확증 오류: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+// 확증 결과를 분석 패널 최상단 카드로 렌더
+function renderConfirmResult(res, param) {
+  const container = document.getElementById('analysisContent');
+  if (!container) return;
+  document.getElementById('analysisVerdict').innerHTML =
+    res.confirmed ? '<span class="tag tag-red">확증됨</span>' : '<span class="tag tag-green">미확증</span>';
+
+  const techRows = (res.techniques || []).map(t => `
+    <div class="detail-item"><span class="tag tag-red">✅ ${escapeHtml(t.name)}</span>
+      <span style="color:var(--text-muted);margin-left:6px">${escapeHtml(t.evidence || '')}</span></div>`).join('');
+
+  const probeRows = (res.probes || []).map(p => {
+    const st = p.timeout ? '<span style="color:var(--warning)">timeout</span>'
+      : p.error ? `<span style="color:var(--danger)">err</span>`
+      : `<span style="color:${httpColor(p.status)}">${p.status}</span>`;
+    return `<tr>
+      <td style="padding:2px 8px 2px 0;color:var(--text-secondary)">${escapeHtml(p.label)}</td>
+      <td style="padding:2px 8px 2px 0">${st}</td>
+      <td style="padding:2px 8px 2px 0;color:var(--text-muted)">${p.time_ms}ms</td>
+      <td style="padding:2px 0;color:var(--text-muted);font-family:var(--font-mono);font-size:10px">${escapeHtml(String(p.value).slice(0,48))}</td>
+    </tr>`;
+  }).join('');
+
+  const card = document.createElement('div');
+  card.className = 'analysis-card';
+  card.setAttribute('data-card-id', 'confirm');
+  card.style.borderColor = res.confirmed ? 'rgba(248,81,73,.5)' : 'rgba(63,185,80,.35)';
+  card.innerHTML = `
+    <div class="analysis-card-header">🎯 확증 스캔 — ${escapeHtml(res.category)} · ${escapeHtml(param)} <span style="margin-left:auto;font-size:9px;color:var(--text-muted);font-weight:400">${res.probes_sent}발</span></div>
+    <div class="analysis-card-body">
+      ${res.confirmed
+        ? `<div style="margin-bottom:6px">${techRows}</div>`
+        : `<div class="detail-item" style="color:var(--text-muted)">대조 프로브 간 유의미한 차이 없음 — 이 파라미터에서 ${escapeHtml(res.category)} 미확증.</div>`}
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
+        <thead><tr style="color:var(--text-muted);font-size:10px">
+          <th style="text-align:left;padding:2px 8px 4px 0">프로브</th><th style="text-align:left;padding:2px 8px 4px 0">상태</th>
+          <th style="text-align:left;padding:2px 8px 4px 0">시간</th><th style="text-align:left;padding:2px 0 4px 0">값</th>
+        </tr></thead>
+        <tbody>${probeRows}</tbody>
+      </table>
+    </div>`;
+
+  // 기존 확증 카드 있으면 교체, 없으면 최상단에 삽입
+  const prev = container.querySelector('[data-card-id="confirm"]');
+  if (prev) prev.replaceWith(card);
+  else if (container.firstChild) container.insertBefore(card, container.firstChild);
+  else container.appendChild(card);
+}
+
+/* ══════════════════════════════════════════════════════════════════
    AI 테스트 — 현재 요청을 AI가 인식해 페이로드 후보 생성 → GO TEST
    ══════════════════════════════════════════════════════════════════ */
 
@@ -708,40 +1021,13 @@ function buildFingerprint() {
   };
 }
 
-async function generateAiCandidates() {
-  const req = _currentRequestForm();
-  if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
-
-  switchSidebarTab('aitest');
-  const listEl = document.getElementById('aiCandidateList');
-  const metaEl = document.getElementById('aiSuggestMeta');
-  metaEl.textContent = '';
-  const genMsg = state.aiEnabled ? 'AI 페이로드 생성 중…' : 'CVE 페이로드 매칭 중…';
-  listEl.innerHTML = `<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">${genMsg}</div></div>`;
-
-  try {
-    const res = await API.aiSuggest({
-      method: req.method, url: req.url, params: req.params,
-      body: req.body, header_names: req.headerNames, count: 10,
-      fingerprint: buildFingerprint(),
-    });
-    if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
-    state.aiCandidates = res.candidates || [];
-    // 후보 클릭 시 매번 이 원본 요청 기준으로 적용하도록 스냅샷 저장(누적 방지)
-    state.aiBaseSnapshot = captureRequestForm();
-    renderAiCandidates(res);
-  } catch (e) {
-    listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
-  }
-}
-
-// 결과 기반 후속 페이로드 — 보안분석 신호(라벨만) 근거로 승격/우회 페이로드 생성
-async function generateFollowups() {
-  if (!state.lastResult || !state.lastResult.analysis) { toast('먼저 요청을 전송해 결과를 만드세요', 'error'); return; }
+// 직전 요청 결과가 있으면 '결과 기반 후속 페이로드' API 요청 본문을 구성(없으면 null).
+// 신호는 '라벨만' 전송(증거·응답본문 미포함) — 유출 방지.
+function _followupRequestBody(req) {
+  if (!state.lastResult || !state.lastResult.analysis) return null;
   const a = state.lastResult.analysis;
   const rq = state.lastResult._req || {};
 
-  // 라벨만 추출(증거·응답본문 미포함) — 유출 방지
   const findingNames = (a.findings || []).map(f => f.name).filter(Boolean);
   const alertNames   = (a.alerts   || []).map(x => x.name).filter(Boolean);
   // error_leaks/sensitive_data 는 증거 문자열을 포함하므로 원문 대신 '유형 라벨'만 추가
@@ -756,30 +1042,67 @@ async function generateFollowups() {
   if (rq.body && String(rq.body).trim()) location = 'body';
   const pk = Object.keys(rq.params || {})[0]; if (pk) param = pk;
 
+  return {
+    method: req.method, url: req.url, params: req.params, body: req.body,
+    header_names: req.headerNames,
+    location, param,
+    fingerprint: buildFingerprint(),
+    category: rq.category || (state.selectedCategory && state.selectedCategory.id) || '',
+    attack_outcome: a.attack_outcome || '',
+    finding_names: findingNames,
+    alert_names: alertNames,
+    tried_payload: rq.payload || (state.selectedPayload && state.selectedPayload.payload) || '',
+    count: 10,
+  };
+}
+
+// AI 페이로드 생성 — 현재 요청으로 후보 생성 + (직전 결과가 있으면) 결과 기반 후속 페이로드까지 함께 생성.
+async function generateAiCandidates() {
   const req = _currentRequestForm();
+  if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
+
   switchSidebarTab('aitest');
   const listEl = document.getElementById('aiCandidateList');
   const metaEl = document.getElementById('aiSuggestMeta');
   metaEl.textContent = '';
-  listEl.innerHTML = '<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">결과 기반 후속 페이로드 생성 중…</div></div>';
+  const fuBody = _followupRequestBody(req);   // 결과 없으면 null → 후속 생성 생략
+  const genMsg = fuBody
+    ? '페이로드 + 결과 기반 후속 생성 중…'
+    : (state.aiEnabled ? 'AI 페이로드 생성 중…' : 'CVE 페이로드 매칭 중…');
+  listEl.innerHTML = `<div class="empty-state" style="padding:20px"><div class="spinner"></div><div class="msg">${genMsg}</div></div>`;
 
   try {
-    const res = await API.followupSuggest({
-      method: req.method, url: req.url, params: req.params, body: req.body,
-      header_names: req.headerNames,
-      location, param,
-      fingerprint: buildFingerprint(),
-      category: rq.category || (state.selectedCategory && state.selectedCategory.id) || '',
-      attack_outcome: a.attack_outcome || '',
-      finding_names: findingNames,
-      alert_names: alertNames,
-      tried_payload: rq.payload || (state.selectedPayload && state.selectedPayload.payload) || '',
-      count: 10,
-    });
-    if (res.error) { listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(res.error)}</div></div>`; return; }
-    state.aiCandidates = res.candidates || [];
+    // 두 요청 병렬 — 각 실패는 개별적으로 흡수(하나가 죽어도 나머지는 렌더)
+    const [aiRes, fuRes] = await Promise.all([
+      API.aiSuggest({
+        method: req.method, url: req.url, params: req.params,
+        body: req.body, header_names: req.headerNames, count: 10,
+        fingerprint: buildFingerprint(),
+      }).catch(e => ({ error: e.message })),
+      fuBody ? API.followupSuggest(fuBody).catch(e => ({ error: e.message })) : Promise.resolve(null),
+    ]);
+
+    // 후보 병합: 결과 기반(followup) 을 앞에, AI/CVE 를 뒤에 (renderAiCandidates 가 source 로 그룹핑)
+    const fuCands = (fuRes && !fuRes.error && fuRes.candidates) ? fuRes.candidates : [];
+    const aiCands = (aiRes && !aiRes.error && aiRes.candidates) ? aiRes.candidates : [];
+    const cands = [...fuCands, ...aiCands];
+
+    if (!cands.length) {
+      const err = (aiRes && aiRes.error) || (fuRes && fuRes.error) || '후보를 생성하지 못했습니다';
+      listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">${escapeHtml(err)}</div></div>`;
+      return;
+    }
+
+    // 렌더 메타: AI 응답을 기본으로, 없으면 후속 응답 사용. 후속 포함 시 요약에 표기.
+    const baseRes = (aiRes && !aiRes.error) ? aiRes : (fuRes || {});
+    const summary = fuCands.length
+      ? `${baseRes.summary || ''}${baseRes.summary ? ' · ' : ''}결과 기반 후속 ${fuCands.length}개 포함`.trim()
+      : (baseRes.summary || '');
+
+    state.aiCandidates = cands;
+    // 후보 클릭 시 매번 이 원본 요청 기준으로 적용하도록 스냅샷 저장(누적 방지)
     state.aiBaseSnapshot = captureRequestForm();
-    renderAiCandidates(res);
+    renderAiCandidates({ ...baseRes, candidates: cands, summary });
   } catch (e) {
     listEl.innerHTML = `<div class="empty-state"><div class="msg" style="color:var(--danger)">오류: ${escapeHtml(e.message)}</div></div>`;
   }
@@ -1372,6 +1695,19 @@ function copyRawRequest(btn) {
   } else { fallbackCopy(text); done(); }
 }
 
+// 임의 텍스트 클립보드 복사 (버튼 피드백 포함). ev 로 부모 onclick 전파 차단.
+function copyText(text, btn, ev) {
+  if (ev) ev.stopPropagation();
+  const done = () => {
+    if (!btn) return;
+    const o = btn.textContent; btn.textContent = '복사됨';
+    setTimeout(() => { btn.textContent = o; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => { fallbackCopy(text); done(); });
+  } else { fallbackCopy(text); done(); }
+}
+
 function renderRequestSummary(req) {
   if (!req) return;
   const el = document.getElementById('reqSummaryBody');
@@ -1579,9 +1915,6 @@ function renderAnalysis(a, result) {
 
   // 헤더 verdict badge
   document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
-  // 결과가 있으면 '결과 기반 후속 페이로드' 버튼 노출
-  const fb = document.getElementById('followupBtn');
-  if (fb) fb.style.display = '';
 
   const container = document.getElementById('analysisContent');
 
@@ -1590,6 +1923,20 @@ function renderAnalysis(a, result) {
   container.innerHTML = `
     <!-- 판정 카드 (AI 종합 판정 있으면 대체, 없으면 결정적 판정) -->
     ${renderVerdictCard(a, confidenceColor)}
+
+    <!-- SPA 셸 경고 — 서버가 껍데기만 주고 본문은 JS가 렌더 → 실제 API를 테스트해야 함 -->
+    ${a.spa_shell ? `
+    <div class="analysis-card" data-card-id="spa" style="border-color:rgba(210,153,34,.55)">
+      <div class="analysis-card-header" style="color:var(--warning)">⚠️ SPA 셸 감지 — 서버측 테스트 대상 아님</div>
+      <div class="analysis-card-body">
+        <div class="detail-item">이 응답은 <b>${escapeHtml(a.spa_shell.framework)} SPA 껍데기</b>입니다(가시 텍스트 ${a.spa_shell.visible_len}자). 본문·검색결과·파라미터 반사는 모두 <b>브라우저의 JS가 렌더</b>하므로 서버 응답엔 나타나지 않습니다.</div>
+        <div class="detail-item">서버측(SQLi·주입 등) 테스트는 이 URL이 아니라 <b>DevTools → Network에서 실제 API 요청(XHR)</b>을 찾아 <b>Copy as cURL → 📋 붙여넣기</b> 하세요. 반사/주입은 그 API에서 발생합니다.</div>
+        <div class="detail-item" style="color:var(--text-muted)">클라이언트측 DOM XSS(파라미터가 JS로 렌더되는 경우)는 서버 응답으로 검증 불가 — 브라우저 DOM 확인이 필요합니다.</div>
+        <div id="spaApiBox" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+          <span style="font-size:11px;color:var(--text-muted)"><span class="spinner" style="width:10px;height:10px"></span> 헤드리스 브라우저로 실제 호출 API 캡처 중… (수 초 소요)</span>
+        </div>
+      </div>
+    </div>` : ''}
 
     <!-- 응답 메타 -->
     <div class="analysis-card" data-card-id="res-info">
@@ -1694,6 +2041,113 @@ function renderAnalysis(a, result) {
 
   // Alert 섹션은 별도 렌더링 (클릭 이벤트 필요)
   renderAlerts(mergedAlerts);
+
+  // SPA 셸이면 실제 호출 API를 자동 정적 분석해 카드에 채움
+  if (a.spa_shell) runApiDiscovery();
+}
+
+// SPA 번들 정적 분석 → SPA 카드의 #spaApiBox 에 백엔드·엔드포인트 목록 렌더
+async function runApiDiscovery() {
+  const box = document.getElementById('spaApiBox');
+  if (!box) return;
+  const url = (state.lastResult && state.lastResult._req && state.lastResult._req.url)
+    || document.getElementById('urlInput').value.trim();
+  if (!url) { box.innerHTML = ''; return; }
+  try {
+    const res = await API.discoverApis({ url, timeout: 30 });
+    const box2 = document.getElementById('spaApiBox');   // 렌더 후 재조회(그 사이 갱신 가능)
+    if (!box2) return;
+
+    // 1차: 라이브 캡처(실제 XHR, 파라미터 포함) — 기존 HAR 파이프라인 재사용
+    if (res.mode === 'live' && (res.entries || []).length) {
+      const norms = res.entries.map(harEntryToNorm).filter(_harIsApi);
+      const seen = new Set(); const list = [];
+      for (const r of norms) { const k = _harKey(r); if (seen.has(k)) continue; seen.add(k); list.push(r); }
+      list.sort((a, b) => _harScore(b) - _harScore(a));
+      if (list.length) { state.discoveredReqs = list; renderCaptured(); return; }
+    }
+    // 2차: 정적 폴백(백엔드·엔드포인트 추정)
+    if ((res.bases || []).length || (res.endpoints || []).length) {
+      state.discovered = { bases: res.bases || [], endpoints: res.endpoints || [] };
+      state.discBase = state.discovered.bases[0] || '';
+      renderDiscovered();
+      return;
+    }
+    box2.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">실제 API를 캡처하지 못했습니다 — DevTools에서 API를 찾아 붙여넣으세요.</span>';
+  } catch (e) {
+    const box2 = document.getElementById('spaApiBox');
+    if (box2) box2.innerHTML = '<span style="font-size:11px;color:var(--danger)">API 분석 오류: ' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+// 라이브 캡처된 실제 요청(파라미터 포함)을 클릭 목록으로 렌더 → 클릭 시 폼에 통째 로드
+function renderCaptured() {
+  const box = document.getElementById('spaApiBox');
+  if (!box) return;
+  const list = state.discoveredReqs || [];
+  const rows = list.map((r, i) => {
+    let host = '', path = r.url;
+    try { const u = new URL(r.url); host = u.host; path = u.pathname; } catch {}
+    const np = r.params ? r.params.length : 0;
+    const inj = np || r.body;
+    return `<div class="disc-ep" onclick="pickCaptured(${i})"
+        style="display:flex;gap:6px;align-items:center;padding:4px 6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:11px">
+        <span class="tag ${r.method === 'GET' ? 'tag-blue' : 'tag-yellow'}" style="min-width:42px;text-align:center">${escapeHtml(r.method)}</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <span style="color:var(--text-muted)">${escapeHtml(host)}</span><span style="font-family:var(--font-mono)">${escapeHtml(path)}</span></span>
+        ${inj ? '<span title="주입 후보 파라미터 있음">🎯</span>' : ''}
+        <span style="color:var(--text-muted);font-size:10px">p${np}</span>
+        <span style="color:${httpColor(r._meta.status)};font-size:10px;min-width:24px;text-align:right">${r._meta.status || '-'}</span>
+      </div>`;
+  }).join('');
+  box.innerHTML = `
+    <div style="font-size:11px;color:var(--success);font-weight:600;margin-bottom:4px">🎥 실제 호출된 API ${list.length}개 (헤드리스 캡처 · 파라미터 포함)</div>
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:6px">${rows}</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:5px">🎯 = 주입 후보 · 행 클릭 → 실제 요청 그대로 폼에 로드 → 🎯 확증 스캔</div>`;
+}
+
+function pickCaptured(i) {
+  const r = (state.discoveredReqs || [])[i];
+  if (!r) return;
+  fillFromParsed(r);
+  switchView('request');
+  toast('실제 요청을 폼에 로드했습니다 (헤드리스 캡처)', 'success');
+}
+
+function renderDiscovered() {
+  const box = document.getElementById('spaApiBox');
+  if (!box) return;
+  const { bases, endpoints } = state.discovered || { bases: [], endpoints: [] };
+  const baseChips = bases.map((b, i) => `
+    <span class="disc-base tag ${b === state.discBase ? 'tag-red' : 'tag-blue'}"
+          style="cursor:pointer" onclick="pickApiBase(${i})" title="클릭하면 이 백엔드를 기준 주소로 사용">${escapeHtml(b)}</span>`).join(' ');
+  const epRows = endpoints.map(e => `
+    <div class="disc-ep" onclick="pickApiEndpoint('${encodeURIComponent(e.path)}')"
+         style="display:flex;gap:6px;align-items:center;padding:3px 6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:11px">
+      <span class="tag ${e.method === 'GET' ? 'tag-blue' : 'tag-yellow'}" style="min-width:42px;text-align:center">${escapeHtml(e.method)}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono)">${escapeHtml(e.path)}</span>
+    </div>`).join('');
+  box.innerHTML = `
+    <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px">🔎 이 앱이 호출하는 실제 API (정적 분석 · 추정)</div>
+    <div style="margin-bottom:6px;line-height:1.9">${baseChips || '<span style="color:var(--text-muted);font-size:11px">백엔드 미검출</span>'}</div>
+    <div style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px">${epRows}</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:5px">백엔드 선택 → 엔드포인트 클릭 → 요청 폼에 로드(파라미터는 붙여넣기/HAR로 보강). 조합·버전은 추정이니 확인하세요.</div>`;
+}
+
+function pickApiBase(i) {
+  const b = (state.discovered?.bases || [])[i];
+  if (b == null) return;
+  state.discBase = b;
+  renderDiscovered();
+  toast('기준 백엔드: ' + b, 'info');
+}
+
+function pickApiEndpoint(pathEnc) {
+  const path = decodeURIComponent(pathEnc);
+  const base = (state.discBase || (state.discovered?.bases || [])[0] || '').replace(/\/+$/, '');
+  document.getElementById('urlInput').value = base + path;
+  switchView('request');
+  toast('폼에 로드됨 — 파라미터 보강 후 전송/확증 스캔', 'success');
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -2325,9 +2779,11 @@ function renderMultiTargetResults(data) {
     </div>
     ${(data.targets || []).map((t, i) => `
       <div class="target-result-block" id="trb-${i}">
-        <div class="target-result-header" onclick="toggleTargetBlock(${i})">
+        <div class="target-result-header" onclick="toggleTargetBlock('trb-${i}')">
           <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">#${i+1}</span>
-          <span class="target-url">${escapeHtml(t.url)}</span>
+          <span class="target-url" onclick="event.stopPropagation()" title="${escapeHtml(t.url)}">${escapeHtml(t.url)}</span>
+          <button class="btn-copy-url" title="URL 복사" data-url="${escapeHtml(t.url)}"
+                  onclick="copyText(this.dataset.url, this, event)">복사</button>
           <div class="multi-summary-chips">
             ${(() => {
               const rs = t.results || [];
@@ -2366,10 +2822,6 @@ function renderMultiTargetResults(data) {
   container.appendChild(area);
 }
 
-function toggleTargetBlock(i) {
-  document.getElementById(`trb-${i}`)?.classList.toggle('collapsed');
-}
-
 function generateClientSummary(results) {
   const total    = results.length;
   const blocked  = results.filter(r => r.analysis?.verdict === 'blocked').length;
@@ -2382,6 +2834,9 @@ function generateClientSummary(results) {
 // 상단 요약 카드(5개 공유)를 각 화면이 명시적으로 세팅.
 // cards: [{id, label, value, title?}] — 목록에 없는 카드는 숨김.
 function setSummary(cards) {
+  // 결과가 생겼으므로 요약 바 노출(시작 전에는 숨김 상태)
+  const sumBar = document.querySelector('.results-summary');
+  if (sumBar) sumBar.style.display = '';
   const ALL = ['summaryTotal', 'summaryBlocked', 'summaryPassed', 'summaryBypass', 'summaryRate'];
   const shown = new Set(cards.map(c => c.id));
   ALL.forEach(id => {
@@ -3300,11 +3755,9 @@ document.addEventListener('DOMContentLoaded', () => {
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
 
-  // 서버 AI 설정 여부 확인 (AI 버튼 노출 판단)
+  // 서버 AI 설정 여부 확인 (좌측 'AI 페이로드 생성' 동작 판단용)
   API.aiStatus().then(s => {
     state.aiEnabled = !!s.enabled;
-    const b = document.getElementById('aiSuggestBtn');
-    if (b) b.style.display = state.aiEnabled ? '' : 'none';
   });
 
   // Enter key on URL

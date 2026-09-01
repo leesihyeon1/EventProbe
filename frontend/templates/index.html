@@ -60,7 +60,8 @@
           현재 요청을 AI가 인식해 관련 페이로드 후보를 만듭니다.
           <b>호스트·인증·쿠키는 제외</b>하고 요청 정보만 전송합니다.
         </div>
-        <button class="btn btn-primary" style="font-size:12px;padding:6px" onclick="generateAiCandidates()">AI 페이로드 생성</button>
+        <button class="btn btn-primary" style="font-size:12px;padding:6px" onclick="generateAiCandidates()"
+                title="현재 요청으로 페이로드 후보 생성. 직전 요청 결과가 있으면 그 취약 신호 기반 '결과 기반 후속 페이로드'도 함께 생성됩니다(라벨-only).">AI 페이로드 생성</button>
         <div id="aiSuggestMeta" style="font-size:11px;color:var(--accent)"></div>
         <div class="sidebar-scroll" id="aiCandidateList" style="flex:1;min-height:0">
           <div class="empty-state" style="padding:20px">
@@ -118,7 +119,7 @@
         <span>기본헤더</span>
       </label>
       <button class="btn btn-secondary" onclick="openHeaderProfileModal()" title="기본 헤더 프로파일 편집" style="white-space:nowrap">⚙️</button>
-      <button id="aiSuggestBtn" class="btn btn-secondary" onclick="generateAiCandidates()" title="현재 요청을 AI가 인식해 페이로드 후보 생성 (호스트·인증 제외)" style="white-space:nowrap;display:none">AI 테스트</button>
+      <button class="btn btn-secondary" onclick="clearRequest()" title="요청·응답·분석을 모두 초기화" style="white-space:nowrap">초기화</button>
       <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
     </div>
 
@@ -147,6 +148,9 @@
       <!-- E: AI 우회 변형 생성 (AI 활성 시에만 노출) -->
       <button id="aiVariantBtn" class="btn btn-secondary" style="padding:4px 10px;font-size:11px;display:none"
               onclick="generateBypassVariants()" title="차단 우회용 변형 페이로드를 AI로 생성">🤖 우회 변형</button>
+      <!-- 확증 스캔: 선택 페이로드 카테고리로 오라클 프로브 세트를 보내 취약 여부 확증 -->
+      <button id="confirmScanBtn" class="btn btn-secondary" style="padding:4px 10px;font-size:11px"
+              onclick="confirmScan()" title="이 파라미터에 대해 참/거짓·시간 대조 프로브를 자동 전송해 '진짜 터졌는지' 확증합니다(4~7발).">🎯 확증 스캔</button>
     </div>
 
     <!-- ── View Area ── -->
@@ -247,13 +251,7 @@
           <div class="analysis-panel" id="analysisPanel">
             <div class="panel-header">
               <span>보안 분석</span>
-              <button id="followupBtn" class="btn btn-secondary"
-                style="margin-left:auto;font-size:11px;padding:3px 8px;display:none;white-space:nowrap"
-                onclick="generateFollowups()"
-                title="이 결과의 취약 신호를 토대로 승격/우회 페이로드 생성 (로컬 규칙 + 라벨-only AI 보강)">
-                결과 기반 후속 페이로드
-              </button>
-              <span id="analysisVerdict"></span>
+              <span id="analysisVerdict" style="margin-left:auto"></span>
             </div>
             <div class="analysis-scroll" id="analysisContent">
               <div class="empty-state">
@@ -268,7 +266,8 @@
       <!-- ═══ VIEW: 일괄 테스트 결과 ═══ -->
       <div class="view" data-view="results">
         <div class="results-view">
-          <div class="results-summary">
+          <!-- 테스트 실행 전에는 숨김 — 결과가 생기면 setSummary()가 노출 -->
+          <div class="results-summary" style="display:none">
             <div class="summary-card">
               <div class="num num-total" id="summaryTotal">-</div>
               <div class="lbl">총 테스트</div>
@@ -364,7 +363,7 @@
 <div class="modal-overlay hidden" id="importModal">
   <div class="modal" style="width:720px">
     <div class="modal-header">
-      <h2>📋 요청 붙여넣기 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">Raw HTTP / cURL / wget</span></h2>
+      <h2>📋 요청 붙여넣기 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">Raw HTTP / cURL / wget / HAR</span></h2>
       <button class="btn btn-secondary" onclick="closeImportModal()">✕ 닫기</button>
     </div>
     <div class="modal-body">
@@ -373,6 +372,12 @@
         <textarea id="importRaw" class="code-editor" rows="11" spellcheck="false" oninput="previewImport()"
           placeholder="예) POST /api/login HTTP/1.1&#10;Host: target.example.com&#10;Content-Type: application/json&#10;&#10;{&quot;user&quot;:&quot;admin&quot;}&#10;&#10;예) curl 'https://target/api?q=1' -H 'Authorization: Bearer x' --data '{&quot;a&quot;:1}'&#10;&#10;예) wget --method=POST --header='Content-Type: application/json' --body-data='{...}' https://target/api"
           style="min-height:200px;font-size:12px"></textarea>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-muted)">
+          또는 HAR 파일:
+          <input type="file" id="harFile" accept=".har,application/json"
+                 onchange="importHarFile(this.files[0])" style="font-size:11px">
+          <span>(DevTools → Network → Save all as HAR — SPA의 실제 API를 한 번에 가져옵니다)</span>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">파싱 미리보기</label>
@@ -458,6 +463,10 @@
           <label class="form-label">대상 URL 목록
             <span style="color:var(--text-muted);font-weight:400">(줄바꿈으로 구분 · Splunk CSV/로그를 여기로 드래그하거나 <a href="#" onclick="document.getElementById('splunkCsvInput').click();return false;" style="color:var(--accent);text-decoration:none">📁 파일 선택</a>)</span>
           </label>
+          <div style="margin:2px 0 8px;font-size:11px;color:var(--text-muted)">
+            Splunk 검색 예시:
+            <code style="font-family:var(--font-mono);color:var(--accent);background:var(--bg-primary);padding:2px 6px;border-radius:4px">(index=waf OR index=ips OR index=ids) &lt;IP•Domain&gt;</code>
+          </div>
           <input type="file" id="splunkCsvInput" accept=".csv,.txt,.log,.tsv" style="display:none" onchange="handleSplunkPick(this)">
           <textarea id="multiUrls" class="code-editor" rows="5"
             ondragover="event.preventDefault();this.classList.add('drop-active')"
