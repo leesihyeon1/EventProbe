@@ -1985,24 +1985,8 @@ def analyze_response(
     elif "medium" in alert_risks and result["risk_level"] in ("info", "low"):
         result["risk_level"] = "medium"
 
-    # 10. 최종 위험도 산정
-    if result["verdict"] == "bypass" or result["sensitive_data"]:
-        result["risk_level"] = "critical"
-        result["score"] = 90
-    elif result["error_leaks"]:
-        result["risk_level"] = "high"
-        result["score"] = 70
-    elif result["verdict"] == "passed" and category in ["sqli", "cmdi", "ssrf"]:
-        result["risk_level"] = "high"
-        result["score"] = 65
-    elif result["verdict"] == "blocked":
-        result["risk_level"] = "info"
-        result["score"] = 10
-    else:
-        result["risk_level"] = "medium"
-        result["score"] = 40
-
-    # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반
+    # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반.
+    #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
         status_code, headers_lower, body, response_time, payload, category, baseline
     )
@@ -2011,7 +1995,34 @@ def analyze_response(
     result["findings"] = findings
     result["attack_outcome"] = outcome
     result["attack_confidence"] = aconf
-    # 공격 성공이 확인되면 종합 판정/위험도 격상(상태코드 relabel보다 신뢰도 높음)
+
+    # 10. 최종 위험도 산정 — '차단되지 않음'이 아니라 '취약 증거'를 기준으로 한다.
+    if result["verdict"] == "bypass" or result["sensitive_data"]:
+        result["risk_level"] = "critical"
+        result["score"] = 90
+    elif result["error_leaks"]:
+        result["risk_level"] = "high"
+        result["score"] = 70
+    elif result["verdict"] == "passed":
+        # (구) '차단 안 됨 + sqli/cmdi/ssrf → high/65' 휴리스틱 제거: 차단되지 않았다고
+        #  취약한 것은 아니다(방어장비 미탐 ≠ 대상 취약). 실제 성공은 아래 성공 격상에서
+        #  처리하고, 증거가 없으면 미확정 신호 유무로만 위험도를 나눠 오탐을 막는다.
+        if outcome == "success":
+            pass   # 성공 격상 블록에서 risk/score 확정
+        elif findings:
+            result["risk_level"] = "medium"   # 반사·베이스라인 변화 등 추가 확인 필요 신호
+            result["score"] = 40
+        else:
+            result["risk_level"] = "low"      # 차단도 안 됐고 취약 신호도 없음
+            result["score"] = 25
+    elif result["verdict"] == "blocked":
+        result["risk_level"] = "info"
+        result["score"] = 10
+    else:
+        result["risk_level"] = "medium"
+        result["score"] = 40
+
+    # 공격 성공이 증거로 확인되면 종합 판정/위험도 격상(상태코드 relabel보다 신뢰도 높음)
     if outcome == "success":
         result["verdict"] = "bypass"
         if result["risk_level"] not in ("critical",):
