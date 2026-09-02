@@ -1040,10 +1040,30 @@ function _followupRequestBody(req) {
   }
   if ((a.sensitive_data || []).length) findingNames.push('민감정보 노출');
 
-  // 취약 위치 추정(단건 요청은 자유형 → best-effort)
-  let location = 'param', param = 'q';
-  if (rq.body && String(rq.body).trim()) location = 'body';
-  const pk = Object.keys(rq.params || {})[0]; if (pk) param = pk;
+  // 취약 위치 추정 — 방금 시도한 payload 가 들어간 지점을 최대한 정확히 되짚는다.
+  let location = 'param', param = '';
+  const tried = rq.payload || (state.selectedPayload && state.selectedPayload.payload) || '';
+  const bodyStr = rq.body ? String(rq.body) : '';
+  if (bodyStr.trim()) {
+    location = 'body';
+    // 본문에서 주입 필드명 추출: ① 시도한 payload 를 담은 필드 우선 ② JSON/폼 첫 필드
+    try {
+      const bd = JSON.parse(bodyStr);
+      if (bd && typeof bd === 'object') {
+        param = Object.keys(bd).find(k => tried && String(bd[k]).includes(tried)) || Object.keys(bd)[0] || '';
+      }
+    } catch {
+      const pairs = bodyStr.split('&').map(s => s.split('=')).filter(a => a[0]);
+      const dec = v => { try { return decodeURIComponent(v || ''); } catch { return v || ''; } };
+      const hit = tried ? pairs.find(([, v]) => dec(v).includes(tried) || (v || '').includes(tried)) : null;
+      param = (hit && hit[0]) || (pairs[0] && pairs[0][0]) || '';
+    }
+  }
+  if (!param) {
+    const pk = Object.keys(rq.params || {})[0];
+    param = pk || 'q';
+    if (pk) location = 'param';
+  }
 
   return {
     method: req.method, url: req.url, params: req.params, body: req.body,
@@ -1126,6 +1146,13 @@ function aiCandCard(c, idx) {
   const ref = isCve && c.reference
     ? `<a href="${escapeHtml(c.reference)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:10px;color:var(--accent)">참조 ↗</a>`
     : '';
+  // CVE 는 이름이 카드를 구분하지만, 결과기반/AI 후보는 why 가 같을 수 있어 payload 를
+  // 짧게 함께 보여줘야 서로 구분·판단이 된다.
+  const pv = String(c.payload || '');
+  const preview = pv.length > 70 ? pv.slice(0, 70) + '…' : pv;
+  const payloadLine = (!isCve && preview)
+    ? `<div style="font-size:10px;color:var(--text-secondary);font-family:var(--mono,monospace);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(preview)}</div>`
+    : '';
   return `
     <div class="payload-item ai-cand-item${isCve ? ' ai-cand-cve' : ''}" data-idx="${idx}" onclick="applyAiCandidate(${idx})"
          style="align-items:flex-start;gap:6px;cursor:pointer" title="${escapeHtml(c.payload)}&#10;— 클릭하면 요청 폼에 세팅">
@@ -1133,6 +1160,7 @@ function aiCandCard(c, idx) {
         <div style="font-size:11px;color:var(--accent);display:flex;gap:5px;align-items:center;flex-wrap:wrap">
           ${tag}${methodTag}<span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
         </div>
+        ${payloadLine}
         ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
       </div>
     </div>`;

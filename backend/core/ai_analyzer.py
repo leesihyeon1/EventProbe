@@ -398,6 +398,16 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
                     "why": str(c.get("why", "")),
                 })
 
+            # 카테고리 편중 방지 — 한 카테고리가 목록을 도배하지 않도록 카테고리당 최대 3개.
+            capped, per_cat = [], {}
+            for c in norm:
+                cat = c.get("category") or "other"
+                if per_cat.get(cat, 0) >= 3:
+                    continue
+                per_cat[cat] = per_cat.get(cat, 0) + 1
+                capped.append(c)
+            norm = capped
+
             if norm:
                 return {
                     "test_type": test_type,

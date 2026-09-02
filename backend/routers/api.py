@@ -444,7 +444,7 @@ async def followup_suggest(req: FollowupRequest):
 
     # 1) 로컬 승격 페이로드 (신호 → 카테고리, 고급 변형 우선)
     esc = escalation_candidates(data, families, req.location, req.param,
-                                per_family=5, exclude_payload=(req.tried_payload or None))
+                                per_family=3, exclude_payload=(req.tried_payload or None))
     # 2) 기술스택 지문 기반 CVE 매칭 (기능1 재사용)
     cve = match_cve_payloads(data, path, req.params, req.body or "", req.fingerprint or {}, limit=6)
 
