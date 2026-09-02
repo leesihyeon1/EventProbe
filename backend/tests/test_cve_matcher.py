@@ -92,6 +92,23 @@ def test_real_bank_matches_gpon_endpoint():
     assert top["cve"].startswith("CVE-2018-1056")
 
 
+def test_real_bank_matches_nginx_by_fingerprint():
+    """실제 뱅크: Server 지문이 nginx 일 때만 nginx 전용 CVE/오설정이 매칭된다."""
+    import json
+    import os
+    p = os.path.join(os.path.dirname(__file__), "..", "data", "payloads.json")
+    data = json.load(open(p, encoding="utf-8"))
+
+    with_fp = match_cve_payloads(data, path="/app/file", fingerprint={"server": "nginx/1.13.1"}, limit=15)
+    cves = {c.get("cve") for c in with_fp}
+    assert "CVE-2017-7529" in cves     # Range 정수 오버플로우
+    assert "CVE-2013-4547" in cves     # URI 공백/널 우회
+    assert any("alias" in (c.get("name") or "") for c in with_fp)  # off-by-slash 오설정
+
+    without_fp = match_cve_payloads(data, path="/app/file", fingerprint={}, limit=15)
+    assert "CVE-2017-7529" not in {c.get("cve") for c in without_fp}  # 지문 없으면 안 뜸
+
+
 def test_limit_respected():
     payloads = [
         {"name": f"p{i}", "payload": f"v{i}", "applies_to": {"always": True}}

