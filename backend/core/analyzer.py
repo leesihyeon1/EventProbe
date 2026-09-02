@@ -1558,11 +1558,28 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
 # 파일 읽기 성공 마커 (LFI/XXE)
 _FILE_READ_MARKERS = [
     (r"root:.*?:0:0:",                         "리눅스 /etc/passwd 내용"),
+    (r"root:[^:\n]{0,80}:\d{4,5}:\d:\d{4,5}:", "리눅스 /etc/shadow 내용(해시)"),
     (r"\[extensions\]|\[fonts\]|16-bit app support", "Windows win.ini 내용"),
+    (r"\[boot loader\]|\[operating systems\]", "Windows boot.ini 내용"),
+    (r"(?m)^\s*127\.0\.0\.1\s+localhost",      "hosts 파일 내용"),
+    (r"Linux version \d+\.\d+",                 "/proc/version 내용"),
+    (r"\d+\.\d+\.\d+\.\d+ - - \[\d{2}/\w{3}/\d{4}", "웹서버 access 로그 내용"),
     (r"<\?php[\s\S]{0,40}",                     "PHP 소스코드 노출"),
     (r"DB_PASSWORD|DB_USERNAME|APP_KEY=",       ".env 설정 노출"),
     (r"BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY",  "개인키 노출"),
 ]
+# 파일 읽기 시도로 보이는 payload 지표 — 카테고리(lfi/xxe)와 무관하게 파일 내용
+# 탐지를 켜기 위한 힌트. 수많은 경로 트래버설 익스플로잇이 'cve'·'sqli' 등으로 들어온다.
+# 힌트는 '콘텐츠 마커 검사를 켤지'만 정하는 게이트다. 실제 성공 판정은 엄격한 파일
+# '내용' 시그니처가 하므로, 힌트를 넉넉하게 잡아도 오탐이 늘지 않는다(인코딩 변형 포함).
+_FILE_READ_HINT = re.compile(
+    r"\.\.[\\/]|%2e|%252e|%c0%ae|"                 # 경로 트래버설(평문/단·이중 인코딩)
+    r"%2f|%5c|%252f|%255c|"                        # 인코딩된 슬래시/백슬래시
+    r"/etc/|etc%2f|/proc/|windows[\\/]|/windows/system32|win\.ini|boot\.ini|"
+    r"passwd|shadow|/hosts\b|access\.log|/environ\b|/cmdline\b|"
+    r"file://|LOAD_FILE|pg_read_file|xp_cmdshell",
+    re.I,
+)
 # 명령 실행 출력 마커 (Command Injection)
 _CMD_OUTPUT_MARKERS = [
     (r"uid=\d+\([^)]+\)\s+gid=\d+",            "id 출력(uid/gid)"),
@@ -1589,6 +1606,8 @@ _SENSITIVE_FILE_PROBES = [
     (r"id_rsa",        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY",             "SSH 개인키(id_rsa)"),
     (r"\.DS_Store",    r"Bud1",                                                ".DS_Store"),
     (r"phpinfo",       r"<title>phpinfo\(\)|>PHP Version\s*<",                 "phpinfo()"),
+    (r"/actuator/(?:env|configprops|heapdump|gateway)",
+     r'"propertySources"|"activeProfiles"|"systemProperties"|"predicate"|"route_id"', "Spring Actuator"),
 ]
 
 
@@ -1807,7 +1826,9 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                 return label, (body or "")[s:m.end() + 40]
         return None
 
-    if category in ("lfi", "xxe"):
+    # 파일 읽기 성공 — lfi/xxe 뿐 아니라, payload 가 파일 접근처럼 보이면 카테고리 무관하게
+    # 응답 '내용'으로 확증한다(경로 트래버설 익스플로잇은 흔히 cve/sqli 등으로 들어온다).
+    if category in ("lfi", "xxe") or _FILE_READ_HINT.search(payload or ""):
         h = _hit(_FILE_READ_MARKERS)
         if h:
             findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,

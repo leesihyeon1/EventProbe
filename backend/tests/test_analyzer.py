@@ -179,6 +179,59 @@ def test_unrelated_path_is_not_a_sensitive_file_probe():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 파일 읽기 성공 — 카테고리(lfi/xxe)에 갇히지 않고 내용으로 확증
+# ─────────────────────────────────────────────────────────────────────────────
+_PASSWD = "root:x:0:0:root:/root:/bin/bash\n"
+_SHADOW = "root:$6$abcXYZ$hashhashhash:19412:0:99999:7:::\n"
+
+
+def test_passwd_leak_via_cve_traversal_is_success():
+    """경로 트래버설 익스플로잇은 흔히 cve 카테고리로 들어온다 — 그래도 탐지돼야 한다."""
+    r = analyze_response(200, {}, _PASSWD, 90,
+                         payload="/index.php?option=com_x&controller=../../../../etc/passwd",
+                         category="cve")
+    assert r["attack_outcome"] == "success"
+    assert any("파일 읽기" in n for n in _names(r))
+
+
+def test_shadow_leak_via_lfi_is_success():
+    r = analyze_response(200, {}, _SHADOW, 90, payload="../../../etc/shadow", category="lfi")
+    assert r["attack_outcome"] == "success"
+
+
+def test_hosts_leak_is_success():
+    r = analyze_response(200, {}, "127.0.0.1 localhost\n10.0.0.5 internal", 90,
+                         payload="../../etc/hosts", category="lfi")
+    assert r["attack_outcome"] == "success"
+
+
+def test_loadfile_passwd_via_sqli_is_success():
+    r = analyze_response(200, {}, _PASSWD, 90,
+                         payload="' UNION SELECT LOAD_FILE('/etc/passwd')-- -", category="sqli")
+    assert r["attack_outcome"] == "success"
+
+
+def test_actuator_env_exposure_is_success():
+    r = analyze_response(200, {}, '{"activeProfiles":["prod"],"propertySources":[{}]}', 90,
+                         payload="/actuator/env", category="cve")
+    assert r["attack_outcome"] == "success"
+
+
+def test_traversal_not_exposed_stays_low():
+    r = analyze_response(200, {}, "<html>Not Found</html>", 90,
+                         payload="/x?c=../../../../etc/passwd", category="cve")
+    assert r["risk_level"] == "low"
+    assert r["attack_outcome"] == "inconclusive"
+
+
+def test_reflected_file_path_is_not_false_file_read():
+    """payload 경로 문자열이 반사돼도 실제 파일 '내용'이 아니면 파일 읽기 성공이 아니다."""
+    r = analyze_response(200, {}, "<div>you searched: ../../etc/passwd</div>", 90,
+                         payload="../../etc/passwd", category="xss")
+    assert not any("파일 읽기" in n for n in _names(r))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # WAF 지문 탐지
 # ─────────────────────────────────────────────────────────────────────────────
 def test_detect_waf_cloudflare():
