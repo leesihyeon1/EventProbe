@@ -30,7 +30,15 @@ _PASSWD_RE = re.compile(r"root:.*?:0:0:", re.I)
 _UID_RE    = re.compile(r"uid=\d+\([^)]+\)")
 
 # 확증 프로브를 지원하는 카테고리
-SUPPORTED = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor", "business"}
+SUPPORTED = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor", "business",
+             "ldap", "auth"}
+
+# 인증 실패를 가리키는 응답 키워드(대조군이 '실패'임을 확인하고, 우회 시 사라지는지 본다)
+_AUTH_FAIL_RE = re.compile(
+    r"invalid|incorrect|failed|failure|denied|wrong|not\s*found|unauthor|"
+    r"틀렸|실패|올바르지|일치하지|다시\s*시도|로그인\s*(?:실패|하세요)", re.I)
+# 세션/인증 쿠키 이름 힌트
+_SESSION_COOKIE_RE = re.compile(r"(session|sess|auth|token|jwt|sid|login|connect\.sid)", re.I)
 
 
 def _norm_cat(category: str) -> str:
@@ -123,6 +131,28 @@ def probe_plan(category: str, base_value: str = "") -> list[dict]:
             {"role": "nonexistent", "label": "없는 ID",     "value": str(n + 10_000_000)},
         ]
 
+    if cat == "ldap":
+        # 불린 기반 — 와일드카드/필터 브레이크아웃의 참/거짓 응답 차이로 확증.
+        return [
+            {"role": "baseline", "label": "원본",                 "value": b},
+            {"role": "l_wild",   "label": "와일드카드 * (참)",     "value": "*"},
+            {"role": "l_none",   "label": "무매칭 값 (거짓)",      "value": f"{b}zzq_nomatch_9137"},
+            {"role": "l_true",   "label": "필터 브레이크아웃(참)", "value": f"{b})(|(objectClass=*))"},
+            {"role": "l_false",  "label": "필터 브레이크아웃(거짓)", "value": f"{b})(&(cn=zzq)(cn=xyz))"},
+        ]
+
+    if cat == "auth":
+        # 인증 우회 — 대상 파라미터(보통 username)에 우회 페이로드를 넣고, 실패 대조군과
+        # 비교해 인증 성공 신호(세션 쿠키·리다이렉트·상태 개선·실패문구 소멸)를 확인한다.
+        # 나머지 필드(password 등)는 요청 폼 값 그대로(더미) 사용한다.
+        return [
+            {"role": "baseline", "label": "오답(대조)",          "value": "zzq_invalid_9137"},
+            {"role": "byp_sql",  "label": "' OR '1'='1'-- -",    "value": "' OR '1'='1'-- -"},
+            {"role": "byp_sql2", "label": "admin'-- -",          "value": "admin'-- -"},
+            {"role": "byp_or",   "label": "' OR 1=1#",           "value": "' OR 1=1#"},
+            {"role": "byp_ldap", "label": "*)(uid=*)",           "value": "*)(uid=*))(|(uid=*"},
+        ]
+
     return []
 
 
@@ -132,6 +162,14 @@ def _loc_header(headers: dict) -> str:
         if k.lower() == "location":
             return str(v)
     return ""
+
+
+def _has_session_cookie(headers: dict) -> bool:
+    """응답 Set-Cookie 에 세션/인증성 쿠키가 있으면 True."""
+    for k, v in (headers or {}).items():
+        if k.lower() == "set-cookie" and _SESSION_COOKIE_RE.search(str(v)):
+            return True
+    return False
 
 
 def decide(category: str, results: list[dict]) -> dict:
@@ -268,5 +306,58 @@ def decide(category: str, results: list[dict]) -> dict:
                                         f"({int(ne.get('status') or 0)}) → 소유권 검사 없음",
                         })
                         break
+
+    elif cat == "ldap":
+        # 불린 기반 — 참/거짓 쌍의 응답이 유의미하게 갈리면 확증(SQLi/NoSQL 불린과 동일).
+        for t, f, ctx in (("l_wild", "l_none", "와일드카드"), ("l_true", "l_false", "필터 브레이크아웃")):
+            if ok(t) and ok(f):
+                rt, rf = by[t], by[f]
+                status_diff = rt["status"] != rf["status"]
+                len_diff = abs(len(rt.get("body") or "") - len(rf.get("body") or ""))
+                if status_diff or len_diff >= _LEN_DELTA_MIN:
+                    ev = []
+                    if status_diff:
+                        ev.append(f"상태 참={rt['status']}/거짓={rf['status']}")
+                    if len_diff >= _LEN_DELTA_MIN:
+                        ev.append(f"본문 길이차 {len_diff}B")
+                    techniques.append({
+                        "name": f"LDAP 불린 기반 ({ctx})",
+                        "evidence": "; ".join(ev),
+                    })
+
+    elif cat == "auth":
+        # 인증 우회 — 실패 대조군(baseline) 대비, 우회 payload 가 '인증 성공' 신호를 보이면 확증.
+        c = by.get("baseline")
+        if c and int(c.get("status") or 0) > 0:
+            c_status = int(c.get("status") or 0)
+            c_body = c.get("body") or ""
+            c_sess = _has_session_cookie(c.get("headers") or {})
+            c_fail = bool(_AUTH_FAIL_RE.search(c_body))
+            c_redir = c_status in (301, 302, 303, 307, 308)
+            for role in ("byp_sql", "byp_sql2", "byp_or", "byp_ldap"):
+                r = by.get(role)
+                if not (r and int(r.get("status") or 0) > 0):
+                    continue
+                b_status = int(r.get("status") or 0)
+                b_body = r.get("body") or ""
+                signals = []
+                # ① 세션 쿠키 획득(대조군엔 없던)
+                if _has_session_cookie(r.get("headers") or {}) and not c_sess:
+                    signals.append("세션 쿠키 발급")
+                # ② 로그인 성공 리다이렉트(대조군은 리다이렉트 아님)
+                if b_status in (301, 302, 303, 307, 308) and not c_redir:
+                    signals.append(f"성공 리다이렉트({b_status})")
+                # ③ 상태 개선(대조 401/403 → 우회 200/302)
+                if c_status in (401, 403) and b_status in (200, 301, 302, 303, 307, 308):
+                    signals.append(f"상태 {c_status}→{b_status}")
+                # ④ 실패 문구 소멸(대조엔 있고 우회엔 없음, 200 응답)
+                if c_fail and b_status == 200 and not _AUTH_FAIL_RE.search(b_body):
+                    signals.append("인증 실패 문구 사라짐")
+                if signals:
+                    techniques.append({
+                        "name": "인증 우회",
+                        "evidence": f"'{r.get('value')}' → " + ", ".join(signals),
+                    })
+                    break
 
     return {"confirmed": bool(techniques), "techniques": techniques, "category": cat}

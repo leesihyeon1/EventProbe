@@ -240,6 +240,73 @@ def test_idor_not_confirmed_when_nonexistent_also_ok():
     assert not confirm.decide("business", results)["confirmed"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LDAP — 불린 기반(와일드카드 / 필터 브레이크아웃)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_ldap_supported_and_probe_plan():
+    assert confirm.is_supported("ldap")
+    roles = [p["role"] for p in confirm.probe_plan("ldap", "john")]
+    assert roles[0] == "baseline"
+    assert "l_wild" in roles and "l_true" in roles
+
+
+def test_ldap_boolean_confirmed_by_wildcard():
+    results = [
+        _r("baseline"),
+        _r("l_wild", status=200, body="USER " * 300),   # * → 전체 매칭
+        _r("l_none", status=200, body="no results"),
+        _r("l_true", status=200, body="x"),
+        _r("l_false", status=200, body="x"),
+    ]
+    d = confirm.decide("ldap", results)
+    assert d["confirmed"]
+    assert any("LDAP" in t["name"] for t in d["techniques"])
+
+
+def test_ldap_clean_not_confirmed():
+    same = [_r("baseline"), _r("l_wild", body="s"), _r("l_none", body="s"),
+            _r("l_true", body="s"), _r("l_false", body="s")]
+    assert not confirm.decide("ldap", same)["confirmed"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 인증 우회 (auth)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_auth_supported_and_probe_plan():
+    assert confirm.is_supported("auth")
+    roles = [p["role"] for p in confirm.probe_plan("auth", "")]
+    assert roles[0] == "baseline"
+    assert "byp_sql" in roles
+
+
+def test_auth_confirmed_by_session_and_redirect():
+    ctrl = _r("baseline", status=401, body="Invalid credentials")
+    byp = _r("byp_sql", status=302, body="",
+             headers={"Set-Cookie": "session=abc; HttpOnly"}, value="' OR '1'='1'-- -")
+    d = confirm.decide("auth", [ctrl, byp])
+    assert d["confirmed"]
+    assert any("인증 우회" in t["name"] for t in d["techniques"])
+
+
+def test_auth_confirmed_by_failure_message_gone():
+    ctrl = _r("baseline", status=200, body="로그인 실패: 올바르지 않은 정보")
+    byp = _r("byp_or", status=200, body="환영합니다 대시보드", value="' OR 1=1#")
+    assert confirm.decide("auth", [ctrl, byp])["confirmed"]
+
+
+def test_auth_not_confirmed_when_bypass_also_fails():
+    ctrl = _r("baseline", status=401, body="Invalid")
+    byp = _r("byp_sql", status=401, body="Invalid")
+    assert not confirm.decide("auth", [ctrl, byp])["confirmed"]
+
+
+def test_auth_not_confirmed_when_session_is_shared():
+    """앱이 대조군에도 세션 쿠키를 주면(게스트 세션) 우회로 보지 않는다."""
+    ctrl = _r("baseline", status=200, body="login form", headers={"Set-Cookie": "session=guest"})
+    byp = _r("byp_sql", status=200, body="login form", headers={"Set-Cookie": "session=guest2"})
+    assert not confirm.decide("auth", [ctrl, byp])["confirmed"]
+
+
 def test_decide_ignores_failed_probes():
     """전송 실패(status=0)한 프로브는 오라클이 무시해야 한다."""
     results = [_r("baseline"), _r("time0", status=0, time_ms=0), _r("time5", status=0, time_ms=0)]
