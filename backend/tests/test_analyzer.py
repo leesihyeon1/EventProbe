@@ -69,10 +69,22 @@ def test_status_400_is_blocked():
     assert r["verdict"] == "blocked"
 
 
-def test_block_keyword_in_body_marks_blocked():
+def test_block_keyword_in_short_body_marks_blocked():
     r = analyze_response(200, {}, "Request blocked by security policy", 60,
                          payload="x", category="xss")
     assert r["verdict"] == "blocked"
+
+
+def test_block_keyword_in_large_200_page_is_not_blocked():
+    """84KB 정상 페이지에 'forbidden' 단어가 우연히 있어도 차단으로 오판하지 않는다."""
+    body = "<html><body>" + ("<div>content forbidden action list</div> " * 1500) + "</body></html>"
+    assert len(body) > 40000
+    r = analyze_response(200, {"content-type": "text/html"}, body, 48,
+                         payload="../../etc/passwd", category="lfi",
+                         url="http://h/?lang=../../etc/passwd")
+    assert r["verdict"] != "blocked"
+    assert r["attack_outcome"] != "blocked"
+    assert r["block_reason"] == []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

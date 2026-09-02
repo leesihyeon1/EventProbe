@@ -60,6 +60,22 @@ BLOCK_KEYWORDS = [
     "security violation", "request blocked", "attack detected",
     "illegal request", "rejected", "차단", "금지", "접근 거부",
 ]
+# 차단 상태코드(성공 코드와 구분)
+_BLOCK_STATUS = (400, 403, 406, 429, 503)
+
+
+def _body_signals_block(status_code: int, body: str, body_lower: str) -> bool:
+    """바디의 차단 키워드를 '차단'으로 볼지 판단.
+
+    차단 페이지는 대개 짧다. 상태코드가 200 같은 성공인데 응답이 크면(예: 84KB 정상
+    페이지에 'forbidden' 단어가 우연히 포함) 차단으로 오판하지 않는다.
+    """
+    if not any(k in body_lower for k in BLOCK_KEYWORDS):
+        return False
+    if status_code in _BLOCK_STATUS:
+        return True
+    # 성공 상태코드에서는 '짧은 차단 페이지'일 때만 인정(대형 정상 페이지 오탐 방지)
+    return len(body or "") < 4096
 
 # ── 에러 누출 패턴 ────────────────────────────────────────────────────────────
 ERROR_LEAK_PATTERNS = [
@@ -1972,7 +1988,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                              "evidence": ", ".join(changed)})
 
     # ⑤ 차단 신호
-    blocked = status_code in (403, 406, 429, 503) or any(k in body_lower for k in BLOCK_KEYWORDS)
+    blocked = status_code in (403, 406, 429, 503) or _body_signals_block(status_code, body, body_lower)
 
     # 종합 판정
     success = [f for f in findings if f["verdict"] == "성공"]
@@ -2065,12 +2081,13 @@ def analyze_response(
         result["details"].append(f"WAF 탐지: {waf_name}")
         result["confidence"] = min(result["confidence"] + 20, 95)
 
-    # 3. 응답 바디 차단 키워드
-    for kw in BLOCK_KEYWORDS:
-        if kw in body_lower:
-            result["block_reason"].append(f"바디 키워드: '{kw}'")
-            result["verdict"] = "blocked"
-            result["confidence"] = min(result["confidence"] + 15, 95)
+    # 3. 응답 바디 차단 키워드 — 단, 대형 성공 응답의 우연한 매칭은 차단으로 보지 않는다
+    if _body_signals_block(status_code, body, body_lower):
+        for kw in BLOCK_KEYWORDS:
+            if kw in body_lower:
+                result["block_reason"].append(f"바디 키워드: '{kw}'")
+                result["verdict"] = "blocked"
+                result["confidence"] = min(result["confidence"] + 15, 95)
 
     # 4. 에러 누출 탐지 (실제 탐지된 증거 문자열을 함께 표기 → 응답에서 검색·검증 가능)
     for pattern, desc in ERROR_LEAK_PATTERNS:
