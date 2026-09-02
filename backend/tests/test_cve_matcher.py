@@ -92,6 +92,26 @@ def test_real_bank_matches_gpon_endpoint():
     assert top["cve"].startswith("CVE-2018-1056")
 
 
+def test_real_bank_curated_cves_present():
+    """수동 큐레이션한 유명 CVE 들이 지문에 맞게 매칭되는지."""
+    import json
+    import os
+    p = os.path.join(os.path.dirname(__file__), "..", "data", "payloads.json")
+    data = json.load(open(p, encoding="utf-8"))
+
+    nextjs = {c.get("cve") for c in match_cve_payloads(data, path="/dashboard",
+                                                       fingerprint={"powered_by": "next.js"}, limit=15)}
+    assert "CVE-2025-29927" in nextjs
+
+    iis = {c.get("cve") for c in match_cve_payloads(data, path="/",
+                                                    fingerprint={"server": "Microsoft-IIS/8.5"}, limit=15)}
+    assert "CVE-2015-1635" in iis
+
+    # PHPUnit eval-stdin 은 always → 경로 무관 노출
+    anywhere = {c.get("cve") for c in match_cve_payloads(data, path="/", limit=20)}
+    assert "CVE-2017-9841" in anywhere
+
+
 def test_real_bank_matches_nginx_by_fingerprint():
     """실제 뱅크: Server 지문이 nginx 일 때만 nginx 전용 CVE/오설정이 매칭된다."""
     import json
