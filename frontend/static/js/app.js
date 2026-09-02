@@ -2068,17 +2068,6 @@ function renderAnalysis(a, result) {
     <!-- 공격 결과 분석 (증거 기반) -->
     ${renderAttackCard(a)}
 
-    <!-- 원시 로그(기존 상세) — 접힘 -->
-    ${a.details?.length ? `
-    <div class="analysis-card collapsed" data-card-id="details">
-      <div class="analysis-card-header">원시 로그 <span class="analysis-card-chevron">▼</span></div>
-      <div class="analysis-card-body">
-        <div class="detail-list">
-          ${a.details.map(d => `<div class="detail-item">${escapeHtml(d)}</div>`).join('')}
-        </div>
-      </div>
-    </div>` : ''}
-
     <!-- AI 상세 분석 (NVIDIA NIM) -->
     ${a.ai ? renderAiCard(a.ai) : ''}
   `;
