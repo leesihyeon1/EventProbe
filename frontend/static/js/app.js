@@ -57,6 +57,9 @@ const state = {
   aiVariants: [],         // AI가 생성한 우회 변형 페이로드
   aiCandidates: [],       // AI 테스트 후보 페이로드
   aiBaseSnapshot: null,   // 후보 생성 시점의 원본 요청(클릭마다 이 기준으로 적용)
+  hideAiWhenCve: (localStorage.getItem('hideAiWhenCve') ?? '1') === '1',  // 강한 CVE 매칭 시 AI 생성 접기(기본 on)
+  _forceShowAi: false,    // 이번 결과에서 사용자가 'AI 생성 펼치기'를 눌렀는지
+  _lastAiRes: null,       // renderAiCandidates 재호출용(펼치기 토글)
 };
 
 /* ── Utils ── */
@@ -1123,6 +1126,7 @@ async function generateAiCandidates() {
       : (baseRes.summary || '');
 
     state.aiCandidates = cands;
+    state._forceShowAi = false;   // 새 결과마다 'AI 펼치기' 상태 초기화
     // 후보 클릭 시 매번 이 원본 요청 기준으로 적용하도록 스냅샷 저장(누적 방지)
     state.aiBaseSnapshot = captureRequestForm();
     renderAiCandidates({ ...baseRes, candidates: cands, summary });
@@ -1174,12 +1178,19 @@ function renderAiCandidates(res) {
   if (!cands.length) { listEl.innerHTML = '<div class="empty-state"><div class="msg">후보가 없습니다</div></div>'; return; }
 
   // 원본 인덱스 보존하며 소스별 3그룹으로 분류 (페이로드 탭과 동일한 접기 카드 패턴)
+  state._lastAiRes = res;
   const wi = cands.map((c, i) => ({ c, i }));
-  const groups = [
+  let groups = [
     { label: '결과 기반', items: wi.filter(x => x.c.source === 'followup') },
     { label: 'CVE 익스플로잇', items: wi.filter(x => x.c.source === 'cve' || x.c.cve) },
     { label: 'AI 생성', items: wi.filter(x => x.c.source !== 'followup' && !(x.c.source === 'cve' || x.c.cve)) },
   ].filter(g => g.items.length);
+
+  // 강한 CVE 매칭(이 엔드포인트에 특정된 익스플로잇)이 있으면 일반 'AI 생성' 스캐터샷은 접는다.
+  const strong = cands.some(c => c.specific && (c.source === 'cve' || c.cve));
+  const aiGroup = groups.find(g => g.label === 'AI 생성');
+  const hiddenAiCount = (state.hideAiWhenCve && strong && !state._forceShowAi && aiGroup) ? aiGroup.items.length : 0;
+  if (hiddenAiCount) groups = groups.filter(g => g.label !== 'AI 생성');
 
   listEl.innerHTML = groups.map(g => `
     <div class="sidebar-group open">
@@ -1191,9 +1202,28 @@ function renderAiCandidates(res) {
       <div class="sidebar-group-body">
         ${g.items.map(x => aiCandCard(x.c, x.i)).join('')}
       </div>
-    </div>`).join('');
+    </div>`).join('')
+    + (hiddenAiCount ? `
+    <div style="font-size:10px;color:var(--text-muted);padding:8px 6px;line-height:1.5">
+      🎯 이 엔드포인트에 특정된 CVE 익스플로잇이 있어 일반 <b>AI 생성 후보 ${hiddenAiCount}개</b>를 접었습니다.
+      <a onclick="revealAiCandidates()" style="color:var(--accent);cursor:pointer">펼치기</a>
+    </div>` : '');
   // 배치 실행 버튼은 숨김 — 클릭→폼세팅→직접 전송 방식
   const gt = document.getElementById('goTestBtn'); if (gt) gt.style.display = 'none';
+}
+
+// '강한 CVE 시 AI 접기' 토글 (체크박스 onchange)
+function onHideAiToggle() {
+  const cb = document.getElementById('hideAiWhenCve');
+  state.hideAiWhenCve = !!(cb && cb.checked);
+  localStorage.setItem('hideAiWhenCve', state.hideAiWhenCve ? '1' : '0');
+  if (state._lastAiRes) renderAiCandidates(state._lastAiRes);   // 즉시 반영
+}
+
+// 접힌 AI 생성 후보를 이번 결과 한정으로 펼친다
+function revealAiCandidates() {
+  state._forceShowAi = true;
+  if (state._lastAiRes) renderAiCandidates(state._lastAiRes);
 }
 
 // 후보 클릭 → 원본 요청 스냅샷으로 되돌린 뒤 payload 주입 (클릭마다 누적 방지)
@@ -3785,6 +3815,10 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSidebar();
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
+
+  // 'CVE 강할 때 AI 접기' 체크박스 초기 상태 반영
+  const hideCb = document.getElementById('hideAiWhenCve');
+  if (hideCb) hideCb.checked = state.hideAiWhenCve;
 
   // 서버 AI 설정 여부 확인 (좌측 'AI 페이로드 생성' 동작 판단용)
   API.aiStatus().then(s => {

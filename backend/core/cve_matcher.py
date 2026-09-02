@@ -73,6 +73,8 @@ def match_cve_payloads(payloads_data: dict, path: str, params: Optional[dict] = 
             "risk": p.get("risk", ""),
             "name": p.get("name", ""),
             "source": "cve",
+            # specific=True: 이 엔드포인트에 특정 매칭(경로/파라미터/지문). always 만인 항목은 False(약).
+            "specific": bool(matched),
             "_score": score,
         }
         # 단일 POST/raw CVE: method·body·헤더까지 전달(폼에 그대로 세팅)
