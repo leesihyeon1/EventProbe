@@ -232,6 +232,45 @@ def test_reflected_file_path_is_not_false_file_read():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# URL 직접 접근 — payload 를 고르지 않고 주소만으로 민감 파일을 GET 한 경우
+# ─────────────────────────────────────────────────────────────────────────────
+def test_url_only_git_config_exposed():
+    """payload 없이 /public/.git/config 를 직접 GET 해도 노출을 탐지한다."""
+    r = analyze_response(200, {}, "[core]\n\trepositoryformatversion = 0\n", 80,
+                         payload="", category="", url="http://h/public/.git/config")
+    assert r["attack_outcome"] == "success"
+    assert any("노출" in n and "미노출" not in n for n in _names(r))
+
+
+def test_url_only_git_config_not_exposed_is_low():
+    """사용자 신고 케이스: 주소만으로 GET, 실제 내용 없으면 '미노출(안전)' + low."""
+    r = analyze_response(200, {}, "<html>app shell</html>", 80,
+                         payload="", category="", url="http://h/public/.git/config")
+    assert r["risk_level"] == "low"
+    assert r["attack_outcome"] == "inconclusive"
+    assert any("미노출" in n for n in _names(r))
+
+
+def test_url_query_traversal_passwd_exposed():
+    r = analyze_response(200, {}, "root:x:0:0:root:/root:/bin/bash", 80,
+                         payload="", category="", url="http://h/dl?file=../../../../etc/passwd")
+    assert r["attack_outcome"] == "success"
+
+
+def test_plain_url_has_no_false_finding():
+    r = analyze_response(200, {}, "<html>홈페이지</html>", 80,
+                         payload="", category="", url="http://h/products/list?page=2")
+    assert r["risk_level"] == "low"
+    assert r["findings"] == []
+
+
+def test_analyze_response_backward_compatible_without_url():
+    """url 인자 없이 호출하던 기존 코드도 그대로 동작한다."""
+    r = analyze_response(200, {}, "<html>ok</html>", 80, payload="x", category="sqli")
+    assert r["risk_level"] == "low"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # WAF 지문 탐지
 # ─────────────────────────────────────────────────────────────────────────────
 def test_detect_waf_cloudflare():

@@ -1796,10 +1796,13 @@ def _extract_sleep_seconds(payload: str) -> Optional[int]:
     return None
 
 
-def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline):
+def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline, url=None):
     """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환."""
     findings = []
     body_lower = (body or "").lower()
+    # 파일 접근 탐지용 프로브 문자열: payload 뿐 아니라 요청 URL(경로+쿼리)도 포함.
+    # 페이로드를 고르지 않고 주소만으로 민감 파일을 직접 GET 한 경우도 잡기 위함.
+    file_probe = f"{payload or ''} {url or ''}"
 
     # ① payload 반사 (클라이언트측 XSS 실행 컨텍스트 정밀 판정 포함)
     refl = _detect_reflection(body or "", payload)
@@ -1828,7 +1831,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # 파일 읽기 성공 — lfi/xxe 뿐 아니라, payload 가 파일 접근처럼 보이면 카테고리 무관하게
     # 응답 '내용'으로 확증한다(경로 트래버설 익스플로잇은 흔히 cve/sqli 등으로 들어온다).
-    if category in ("lfi", "xxe") or _FILE_READ_HINT.search(payload or ""):
+    if category in ("lfi", "xxe") or _FILE_READ_HINT.search(file_probe):
         h = _hit(_FILE_READ_MARKERS)
         if h:
             findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,
@@ -1862,7 +1865,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # ②-c 민감 파일 노출 — 상태코드가 아니라 '실제 파일 내용'으로 노출/미노출을 판정.
     #     (카테고리 무관: .git/config·.env 등은 cve/path 프로브로 들어온다)
-    sf = _detect_sensitive_file(payload, body or "")
+    sf = _detect_sensitive_file(file_probe, body or "")
     if sf and sf["exposed"]:
         findings.append({"name": f"민감 파일 노출 — {sf['targeted']}", "verdict": "성공", "confidence": 92,
                          "why": f"요청한 {sf['targeted']} 의 실제 내용이 응답에 노출됨 → 소스/시크릿 유출",
@@ -1954,8 +1957,13 @@ def analyze_response(
     payload: Optional[str] = None,
     category: Optional[str] = None,
     baseline: Optional[dict] = None,
+    url: Optional[str] = None,
 ) -> dict:
-    """HTTP 응답을 분석하여 보안 판정 결과 반환"""
+    """HTTP 응답을 분석하여 보안 판정 결과 반환.
+
+    url: 요청 URL(경로+쿼리). payload 를 고르지 않고 주소만으로 민감 파일을
+         직접 GET 한 경우(예: /public/.git/config)도 탐지하기 위해 함께 검사한다.
+    """
 
     result = {
         "verdict": "unknown",
@@ -2056,7 +2064,7 @@ def analyze_response(
     # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반.
     #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
-        status_code, headers_lower, body, response_time, payload, category, baseline
+        status_code, headers_lower, body, response_time, payload, category, baseline, url
     )
     result["reflection"] = _detect_reflection(body, payload)
     result["spa_shell"] = _detect_spa_shell(body, headers_lower)
