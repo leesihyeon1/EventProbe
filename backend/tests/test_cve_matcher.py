@@ -77,6 +77,21 @@ def test_dedup_same_location_param_payload():
     assert len(out) == 1
 
 
+def test_real_bank_matches_gpon_endpoint():
+    """실제 payloads.json 에서 /GponForm/diag_Form 이 정확한 CVE 익스플로잇(POST+dest_host)에 매칭."""
+    import json
+    import os
+    p = os.path.join(os.path.dirname(__file__), "..", "data", "payloads.json")
+    data = json.load(open(p, encoding="utf-8"))
+    out = match_cve_payloads(data, path="/GponForm/diag_Form", limit=8)
+    gpon = [c for c in out if "GponForm" in (c.get("payload") or "")]
+    assert gpon, "GPON 엔드포인트가 CVE 뱅크에 매칭되어야 한다"
+    top = gpon[0]
+    assert top["method"] == "POST"
+    assert "dest_host" in (top.get("body") or "")
+    assert top["cve"].startswith("CVE-2018-1056")
+
+
 def test_limit_respected():
     payloads = [
         {"name": f"p{i}", "payload": f"v{i}", "applies_to": {"always": True}}
