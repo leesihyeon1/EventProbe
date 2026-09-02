@@ -734,7 +734,7 @@ function selectPayload(catId, payloadId) {
 
   // Inject Bar 업데이트
   document.getElementById('injectPayloadPreview').textContent = payload.payload;
-  document.getElementById('injectPayloadName').textContent = `${cat.icon} ${payload.name}`;
+  document.getElementById('injectPayloadName').textContent = payload.name;
   document.getElementById('injectBar').style.display = 'flex';
   refreshInjectTargets();                 // A: 대상 파라미터/헤더 자동완성 갱신
   // E: AI 활성 시에만 우회변형 버튼 노출
