@@ -166,6 +166,80 @@ def test_redirect_not_confirmed_for_internal_location():
     assert not d["confirmed"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NoSQL — 불린 기반($where/문자열 보간)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_nosql_supported_and_probe_plan():
+    assert confirm.is_supported("nosql")
+    plan = confirm.probe_plan("nosql", "admin")
+    roles = [p["role"] for p in plan]
+    assert roles[0] == "baseline"
+    assert "n_true" in roles and "n_false" in roles
+
+
+def test_nosql_boolean_confirmed_by_status_diff():
+    results = [
+        _r("baseline"),
+        _r("n_true", status=200, body="X" * 500),
+        _r("n_false", status=401, body="denied"),
+        _r("n_true2", status=200, body="y"),
+        _r("n_false2", status=200, body="y"),
+    ]
+    d = confirm.decide("nosql", results)
+    assert d["confirmed"]
+    assert any("NoSQL" in t["name"] for t in d["techniques"])
+
+
+def test_nosql_clean_not_confirmed():
+    same = [_r("baseline"), _r("n_true", body="same"), _r("n_false", body="same"),
+            _r("n_true2", body="same"), _r("n_false2", body="same")]
+    assert not confirm.decide("nosql", same)["confirmed"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IDOR — 이웃 객체 ID 차등 (category 'business' 별칭 포함)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_idor_supported_via_business_alias():
+    assert confirm.is_supported("business")
+    assert confirm.is_supported("idor")
+
+
+def test_idor_probe_plan_numeric_only():
+    roles = [p["role"] for p in confirm.probe_plan("business", "123")]
+    assert roles == ["baseline", "id_down", "id_up", "nonexistent"]
+    assert confirm.probe_plan("idor", "abc-uuid") == []   # 숫자형만 열거 가능
+
+
+def test_idor_confirmed_when_neighbor_accessible():
+    results = [
+        _r("baseline", status=200, body="A" * 400),
+        _r("id_down", status=200, body="B" * 380),      # 다른 실제 객체
+        _r("id_up", status=404, body="nf"),
+        _r("nonexistent", status=404, body="not found"),  # 대조군 실패
+    ]
+    d = confirm.decide("business", results)
+    assert d["confirmed"]
+    assert any("IDOR" in t["name"] for t in d["techniques"])
+
+
+def test_idor_not_confirmed_when_all_same_spa():
+    """모든 ID 가 같은 껍데기(SPA)면 확증하지 않는다(오탐 방지)."""
+    big = "A" * 400
+    results = [_r("baseline", body=big), _r("id_down", body=big),
+               _r("id_up", body=big), _r("nonexistent", body=big)]
+    assert not confirm.decide("idor", results)["confirmed"]
+
+
+def test_idor_not_confirmed_when_nonexistent_also_ok():
+    """없는 ID 도 200·유사 크기면 대조가 안 돼 확증하지 않는다."""
+    results = [
+        _r("baseline", status=200, body="A" * 400),
+        _r("id_up", status=200, body="B" * 390),
+        _r("nonexistent", status=200, body="C" * 395),   # 대조 실패 안 함
+    ]
+    assert not confirm.decide("business", results)["confirmed"]
+
+
 def test_decide_ignores_failed_probes():
     """전송 실패(status=0)한 프로브는 오라클이 무시해야 한다."""
     results = [_r("baseline"), _r("time0", status=0, time_ms=0), _r("time5", status=0, time_ms=0)]

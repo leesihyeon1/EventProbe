@@ -30,7 +30,13 @@ _PASSWD_RE = re.compile(r"root:.*?:0:0:", re.I)
 _UID_RE    = re.compile(r"uid=\d+\([^)]+\)")
 
 # 확증 프로브를 지원하는 카테고리
-SUPPORTED = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect"}
+SUPPORTED = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor", "business"}
+
+
+def _norm_cat(category: str) -> str:
+    """카테고리 별칭 정규화 — IDOR 페이로드는 'business' 카테고리로 들어온다."""
+    c = (category or "").lower()
+    return "idor" if c in ("idor", "business") else c
 
 
 def is_supported(category: str) -> bool:
@@ -46,7 +52,7 @@ def probe_plan(category: str, base_value: str = "") -> list[dict]:
     'append' 계열(sqli/cmdi)은 유효한 기존 값 뒤에 브레이크 시퀀스를 붙인다.
     """
     b = base_value or ""
-    cat = (category or "").lower()
+    cat = _norm_cat(category)
 
     if cat == "sqli":
         return [
@@ -94,6 +100,29 @@ def probe_plan(category: str, base_value: str = "") -> list[dict]:
             {"role": "probe",    "label": "외부 도메인", "value": "//evil.example.com"},
         ]
 
+    if cat == "nosql":
+        # 불린 기반($where/문자열 보간) — 항상 참/거짓 조건의 응답 차이로 확증.
+        return [
+            {"role": "baseline", "label": "원본",              "value": b},
+            {"role": "n_true",   "label": "항상 참(' || '1'=='1)", "value": f"{b}' || '1'=='1"},
+            {"role": "n_false",  "label": "항상 거짓(' && '1'=='2)", "value": f"{b}' && '1'=='2"},
+            {"role": "n_true2",  "label": '항상 참(" || "1"=="1)', "value": f'{b}" || "1"=="1'},
+            {"role": "n_false2", "label": '항상 거짓(" && "1"=="2)', "value": f'{b}" && "1"=="2'},
+        ]
+
+    if cat == "idor":
+        # 이웃 객체 ID 차등 — 숫자형 ID 만 ±1 열거로 확증 가능.
+        s = b.strip()
+        if not re.fullmatch(r"-?\d+", s):
+            return []
+        n = int(s)
+        return [
+            {"role": "baseline",    "label": "원본 ID",     "value": str(n)},
+            {"role": "id_down",     "label": "이웃 ID(-1)", "value": str(n - 1)},
+            {"role": "id_up",       "label": "이웃 ID(+1)", "value": str(n + 1)},
+            {"role": "nonexistent", "label": "없는 ID",     "value": str(n + 10_000_000)},
+        ]
+
     return []
 
 
@@ -111,7 +140,7 @@ def decide(category: str, results: list[dict]) -> dict:
     반환: {"confirmed": bool, "techniques": [{"name","evidence"}], "category": str}
     techniques 가 비어 있으면 '깨끗'(확증 실패).
     """
-    cat = (category or "").lower()
+    cat = _norm_cat(category)
     by = {r["role"]: r for r in results}
     techniques: list[dict] = []
 
@@ -197,5 +226,47 @@ def decide(category: str, results: list[dict]) -> dict:
                 "name": "오픈 리다이렉트",
                 "evidence": f"Location 헤더가 외부로 이동: {loc[:100]}",
             })
+
+    elif cat == "nosql":
+        # 불린 기반 — 항상 참/거짓 응답이 유의미하게 갈리면 확증(SQLi 불린과 동일 원리).
+        for t, f, ctx in (("n_true", "n_false", "작은따옴표"), ("n_true2", "n_false2", "큰따옴표")):
+            if ok(t) and ok(f):
+                rt, rf = by[t], by[f]
+                status_diff = rt["status"] != rf["status"]
+                len_diff = abs(len(rt.get("body") or "") - len(rf.get("body") or ""))
+                if status_diff or len_diff >= _LEN_DELTA_MIN:
+                    ev = []
+                    if status_diff:
+                        ev.append(f"상태 참={rt['status']}/거짓={rf['status']}")
+                    if len_diff >= _LEN_DELTA_MIN:
+                        ev.append(f"본문 길이차 {len_diff}B")
+                    techniques.append({
+                        "name": f"NoSQL 불린 기반 ({ctx} 컨텍스트)",
+                        "evidence": "; ".join(ev),
+                    })
+
+    elif cat == "idor":
+        # 이웃 객체 ID 차등 — 원본 ID 는 실제 객체(200·본문 O), 없는 ID 는 실패(대조),
+        # 이웃 ID 가 200·'다른' 실제 객체를 주면 소유권 검사 없이 임의 접근 → IDOR.
+        base = by.get("baseline")
+        b_body = (base or {}).get("body") or ""
+        b_len = len(b_body)
+        if base and int(base.get("status") or 0) == 200 and b_len >= 30:
+            ne = by.get("nonexistent")
+            ne_body = (ne or {}).get("body") or ""
+            ne_negative = bool(ne) and (
+                int(ne.get("status") or 0) != 200 or len(ne_body) < max(30, 0.3 * b_len)
+            )
+            if ne_negative:  # 대조군이 '실패'해야 열거 신호를 신뢰할 수 있다
+                for role, lbl in (("id_down", "-1"), ("id_up", "+1")):
+                    r = by.get(role)
+                    nb = (r or {}).get("body") or ""
+                    if r and int(r.get("status") or 0) == 200 and nb and nb != b_body and len(nb) >= 0.5 * b_len:
+                        techniques.append({
+                            "name": "IDOR (직접 객체 참조)",
+                            "evidence": f"이웃 ID({lbl})가 200·다른 객체 반환, 없는 ID 는 실패 "
+                                        f"({int(ne.get('status') or 0)}) → 소유권 검사 없음",
+                        })
+                        break
 
     return {"confirmed": bool(techniques), "techniques": techniques, "category": cat}
