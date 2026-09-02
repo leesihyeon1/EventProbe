@@ -48,6 +48,22 @@ def test_status_403_is_blocked_info():
     assert r["risk_level"] == "info"
 
 
+def test_blocked_without_baseline_hedges_path_vs_payload():
+    """403 을 '공격 차단 성공'으로 단정하지 않고, baseline 비교를 안내해야 한다."""
+    r = analyze_response(403, {}, "403 Forbidden", 234,
+                         payload="../../../../etc/passwd", category="lfi")
+    why = next(f["why"] for f in r["findings"] if f["name"] == "차단됨")
+    assert "경로 자체" in why          # payload 특정 차단이라 단정하지 않음
+    assert "baseline" in why           # 구분 방법 안내
+
+
+def test_blocked_with_baseline_no_hint():
+    r = analyze_response(403, {}, "403", 234, payload="../../etc/passwd", category="lfi",
+                         baseline={"status_code": 403, "body": "403"})
+    why = next(f["why"] for f in r["findings"] if f["name"] == "차단됨")
+    assert "baseline" not in why
+
+
 def test_status_400_is_blocked():
     r = analyze_response(400, {}, "Bad Request", 40, payload="x", category="sqli")
     assert r["verdict"] == "blocked"

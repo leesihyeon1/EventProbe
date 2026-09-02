@@ -1982,8 +1982,13 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     elif blocked:
         outcome = "blocked"
         conf = 70
+        # 403 등은 WAF가 payload 를 막은 것일 수도, 경로 자체가 원래 거부되는 것일 수도 있다.
+        # baseline(정상 값) 이 없으면 'payload 특정 차단'인지 단정할 수 없으므로 그렇게 서술.
+        why = f"상태 {status_code} 또는 차단 응답 — WAF/필터 또는 경로 자체 접근제한으로 거부됨"
+        if not baseline:
+            why += " (정상 파라미터로 baseline 비교 시 payload 특정 차단인지 구분 가능)"
         findings.append({"name": "차단됨", "verdict": "차단", "confidence": 70,
-                         "why": f"상태 {status_code} 또는 차단 응답 — WAF/필터가 막음", "evidence": f"HTTP {status_code}"})
+                         "why": why, "evidence": f"HTTP {status_code}"})
     else:
         outcome = "inconclusive"
         conf = 30
