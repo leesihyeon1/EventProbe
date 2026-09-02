@@ -739,7 +739,24 @@ function selectPayload(catId, payloadId) {
   document.getElementById('injectPayloadPreview').textContent = payload.payload;
   document.getElementById('injectPayloadName').textContent = payload.name;
   document.getElementById('injectBar').style.display = 'flex';
+
+  // 페이로드가 주입 위치/대상(param·헤더명)을 지정하면 삽입 바에 자동 반영.
+  // CVE header 페이로드(location=header, param=Range/User-Agent 등)와 header 카테고리
+  // (location 없음이지만 param=헤더명) 모두 대상 헤더가 자동 선택된다.
+  let _loc = (payload.location || '').toLowerCase();
+  if (!_loc && cat?.id === 'header') _loc = 'header';
+  const _TGT = { header: 'header', body: 'body', param: 'param', path: 'url' };
+  const _tsel = document.getElementById('injectTarget');
+  if (_TGT[_loc] && _tsel && _tsel.value !== _TGT[_loc]) {
+    _tsel.value = _TGT[_loc];
+    onInjectTargetChange();               // 위치 변경 반영(→ refreshInjectTargets)
+  }
   refreshInjectTargets();                 // A: 대상 파라미터/헤더 자동완성 갱신
+  // 대상 param/헤더명은 refresh 이후에 세팅해야 기본값으로 덮이지 않는다
+  if (payload.param) {
+    const _kEl = document.getElementById('injectKey');
+    if (_kEl) _kEl.value = payload.param;
+  }
   // E: AI 활성 시에만 우회변형 버튼 노출
   const aiBtn = document.getElementById('aiVariantBtn');
   if (aiBtn) aiBtn.style.display = state.aiEnabled ? '' : 'none';
