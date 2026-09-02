@@ -1576,6 +1576,40 @@ _SSRF_MARKERS = [
     (r"\"compute\"\s*:|\"network\"\s*:.*macAddress",                    "Azure 메타데이터"),
 ]
 
+# 민감 파일 탐색 프로브: (요청 payload 의 파일 지표, 노출 확증용 본문 시그니처, 파일 라벨)
+# 상태코드가 아니라 '응답 본문에 실제 파일 내용이 있는가'로 노출을 판정하기 위한 표.
+# 200 응답이라도 본문이 일반 페이지/오류 페이지/SPA 껍데기면 시그니처가 없어 '미노출'로 판정된다.
+_SENSITIVE_FILE_PROBES = [
+    (r"\.git/config",  r"repositoryformatversion|\[remote\s+\"|\[branch\s+\"", "Git 설정(.git/config)"),
+    (r"\.git/HEAD",    r"^\s*ref:\s*refs/heads/",                              "Git HEAD(.git/HEAD)"),
+    (r"\.env(?![a-z])", r"(?m)^[A-Z][A-Z0-9_]{2,}\s*=\S",                      "환경파일(.env)"),
+    (r"wp-config\.php", r"DB_PASSWORD|DB_NAME|AUTH_KEY|define\(\s*['\"]DB_",   "WordPress wp-config.php"),
+    (r"web\.config",   r"<configuration[\s>]|<system\.web",                    "IIS web.config"),
+    (r"\.htaccess",    r"RewriteEngine|RewriteRule|AuthType|Require\s",        ".htaccess"),
+    (r"id_rsa",        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY",             "SSH 개인키(id_rsa)"),
+    (r"\.DS_Store",    r"Bud1",                                                ".DS_Store"),
+    (r"phpinfo",       r"<title>phpinfo\(\)|>PHP Version\s*<",                 "phpinfo()"),
+]
+
+
+def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
+    """민감 파일 탐색 페이로드에 대해 '실제 노출' 여부를 본문 내용으로 판정.
+
+    반환:
+      - None                : 민감 파일 탐색 페이로드가 아님(해당 없음)
+      - {"exposed": True,  ...}: 요청한 파일의 실제 내용이 응답에 있음 → 노출 확증
+      - {"exposed": False, ...}: 파일을 요청했으나 내용이 없음 → 미노출(200이어도 안전)
+    """
+    p = payload or ""
+    for path_re, sig_re, label in _SENSITIVE_FILE_PROBES:
+        if re.search(path_re, p, re.I):
+            m = re.search(sig_re, body or "", re.I)
+            if m:
+                return {"targeted": label, "exposed": True,
+                        "evidence": _clip_evidence(m.group(0), 120)}
+            return {"targeted": label, "exposed": False, "evidence": ""}
+    return None
+
 # ── 클라이언트측(client-side) 취약점 탐지용 ──────────────────────────
 # DOM XSS 소스: 공격자가 제어 가능한 클라이언트 입력
 _DOM_SOURCES = [
@@ -1805,6 +1839,19 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
                              "why": f"Location 헤더가 외부로 이동: {loc[:80]}", "evidence": loc[:120]})
 
+    # ②-c 민감 파일 노출 — 상태코드가 아니라 '실제 파일 내용'으로 노출/미노출을 판정.
+    #     (카테고리 무관: .git/config·.env 등은 cve/path 프로브로 들어온다)
+    sf = _detect_sensitive_file(payload, body or "")
+    if sf and sf["exposed"]:
+        findings.append({"name": f"민감 파일 노출 — {sf['targeted']}", "verdict": "성공", "confidence": 92,
+                         "why": f"요청한 {sf['targeted']} 의 실제 내용이 응답에 노출됨 → 소스/시크릿 유출",
+                         "evidence": sf["evidence"]})
+    elif sf:
+        findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
+                         "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
+                                " (200 응답은 일반 페이지·오류 페이지·SPA 껍데기일 수 있음)",
+                         "evidence": ""})
+
     # ②-b 클라이언트측(client-side) 취약점 신호
     # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
     if category == "xss":
@@ -2009,11 +2056,12 @@ def analyze_response(
         #  처리하고, 증거가 없으면 미확정 신호 유무로만 위험도를 나눠 오탐을 막는다.
         if outcome == "success":
             pass   # 성공 격상 블록에서 risk/score 확정
-        elif findings:
+        elif any(f.get("verdict") in ("성공", "미확정") for f in findings):
             result["risk_level"] = "medium"   # 반사·베이스라인 변화 등 추가 확인 필요 신호
             result["score"] = 40
         else:
-            result["risk_level"] = "low"      # 차단도 안 됐고 취약 신호도 없음
+            # 차단도 안 됐고 우려 신호도 없음(‘안전/미노출’ 신호만 있거나 무신호) → 낮음
+            result["risk_level"] = "low"
             result["score"] = 25
     elif result["verdict"] == "blocked":
         result["risk_level"] = "info"

@@ -422,6 +422,10 @@ _VERDICT_SYSTEM = (
     "규칙:\n"
     "1) outcome 은 주어진 '확정_판정'을 그대로 따른다(뒤집지 말 것). 공격 성공 신호가 있으면 success, "
     "없으면 inconclusive. 보안 헤더/쿠키 같은 '응답 위생' 문제는 별개이며 '공격이 차단됐다'는 뜻이 아니다.\n"
+    "1-b) 이번 공격의 결과가 판정의 중심이다. '응답 위생'은 이번 공격 결과가 아니므로 주된 발견처럼 "
+    "앞세우지 말 것 — 공격 결과(성공 / 미확정 / '안전·미노출')를 먼저 서술하고, 위생 문제는 있으면 뒤에 "
+    "한 문장으로만 덧붙인다. 공격_성공_신호에 '안전'·'미노출' 항목이 있으면 해당 공격이 성공하지 않았다는 "
+    "뜻이니 그 사실(예: 요청한 파일이 응답에 노출되지 않음)을 명확히 서술한다.\n"
     "2) severity 는 공격 결과와 알림 위험도 중 가장 높은 값.\n"
     "3) 문장은 자연스러운 한국어로 쓰고, 내부 필드명·변수명(attack_signals, security_alerts, outcome 등)을 "
     "그대로 노출하지 말 것. 무엇을 확인해서 무엇을 확인한다는 식의 동어반복·순환 문장 금지. 신호가 실제로 "
@@ -434,11 +438,11 @@ _VERDICT_SYSTEM = (
     '{"outcome":"success|blocked|inconclusive","severity":"critical|high|medium|low|info",'
     '"confidence":0-100,"reasoning":"한국어 1-2문장","priority":"한국어 짧게 또는 빈 문자열",'
     '"remediation":"한국어 짧게 또는 빈 문자열"}\n'
-    "좋은 예: "
-    '{"outcome":"inconclusive","severity":"low","confidence":65,'
-    '"reasoning":"공격이 성공했다는 신호는 없고, 보안 헤더 누락과 세션 쿠키 Secure 미설정 같은 경미한 응답 위생 문제만 확인됩니다.",'
-    '"priority":"같은 요청을 정상 파라미터로 보내 기준 응답과 비교해 오탐 여부를 확인",'
-    '"remediation":"Content-Security-Policy 헤더 추가, 세션 쿠키에 Secure·HttpOnly 플래그 설정"}'
+    "좋은 예(민감 파일 탐색이 미노출로 끝난 경우 — 공격 결과를 먼저, 위생은 뒤에 한 문장): "
+    '{"outcome":"inconclusive","severity":"low","confidence":80,'
+    '"reasoning":"요청한 .git/config 파일이 응답 본문에 노출되지 않아 소스·시크릿 유출은 확인되지 않습니다(200 응답은 일반 페이지로 보임). 별개로 CSP 헤더 누락 등 경미한 응답 위생 문제가 있습니다.",'
+    '"priority":"",'
+    '"remediation":"응답 위생 개선이 필요하면 Content-Security-Policy 헤더 추가, 세션 쿠키에 Secure·HttpOnly 설정"}'
 )
 
 

@@ -125,6 +125,60 @@ def test_sql_error_leak_is_escalated():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 민감 파일 노출 — 상태코드가 아니라 '실제 파일 내용'으로 판정
+# ─────────────────────────────────────────────────────────────────────────────
+def _names(r):
+    return [f["name"] for f in r["findings"]]
+
+
+def test_git_config_not_exposed_is_low_and_explicit():
+    """`.git/config` 에 200이 와도 실제 git 내용이 없으면 '미노출(안전)'로 명확히 판정.
+
+    회귀 방지: 예전에는 신호가 비어 AI가 CSP/쿠키 위생만 결과처럼 서술했다.
+    """
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "<!doctype html><html><body><div id=app></div></body></html>", 80,
+                         payload="/.git/config", category="cve")
+    assert r["risk_level"] == "low"
+    assert r["verdict"] == "passed"
+    assert r["attack_outcome"] == "inconclusive"
+    assert any("미노출" in n for n in _names(r)), "미노출 사실이 신호로 남아야 한다"
+
+
+def test_git_config_exposed_is_success():
+    r = analyze_response(200, {},
+                         "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n", 80,
+                         payload="/.git/config", category="cve")
+    assert r["attack_outcome"] == "success"
+    assert r["verdict"] == "bypass"
+    assert r["risk_level"] == "high"
+    assert any("노출" in n and "미노출" not in n for n in _names(r))
+
+
+def test_env_file_not_exposed_is_low():
+    r = analyze_response(200, {}, "<html>Not Found</html>", 80,
+                         payload="/.env", category="cve")
+    assert r["risk_level"] == "low"
+    assert any("미노출" in n for n in _names(r))
+
+
+def test_env_file_exposed_is_critical():
+    """.env 실제 노출은 자격증명 유출 → critical."""
+    r = analyze_response(200, {}, "APP_ENV=production\nDB_PASSWORD=s3cr3t\nAPI_KEY=abc\n", 80,
+                         payload="/.env", category="cve")
+    assert r["attack_outcome"] == "success"
+    assert r["risk_level"] == "critical"
+
+
+def test_unrelated_path_is_not_a_sensitive_file_probe():
+    """payload 에 .env 유사어(environment)가 있어도 오탐하지 않는다."""
+    r = analyze_response(200, {}, "<html>ok</html>", 80,
+                         payload="/api/environment", category="cve")
+    assert r["risk_level"] == "low"
+    assert r["findings"] == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # WAF 지문 탐지
 # ─────────────────────────────────────────────────────────────────────────────
 def test_detect_waf_cloudflare():
