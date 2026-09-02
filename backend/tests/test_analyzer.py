@@ -312,6 +312,57 @@ def test_analyze_response_backward_compatible_without_url():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 카테고리 무관 결과 확인 — PoC·붙여넣기·기타 페이로드(카테고리 미설정)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_rce_output_detected_without_category():
+    """명령 출력(uid/gid)은 카테고리 없이도 전역 탐지."""
+    r = analyze_response(200, {}, "uid=0(root) gid=0(root) groups=0(root)", 80,
+                         payload="", category="", url="http://h/ping?ip=1;id")
+    assert r["attack_outcome"] == "success"
+    assert any("명령 실행" in n for n in _names(r))
+
+
+def test_ssti_detected_in_body_without_category():
+    r = analyze_response(200, {}, "result: 49", 80,
+                         payload="", category="", req_body="name={{7*7}}")
+    assert r["attack_outcome"] == "success"
+
+
+def test_sqli_error_detected_urlencoded_body_without_category():
+    """붙여넣기 요청의 URL 인코딩 본문(%27)도 디코딩해 SQLi 로 인식."""
+    r = analyze_response(200, {}, "You have an error in your SQL syntax; check MySQL", 80,
+                         payload="", category="", req_body="q=1%27 OR %271%27=%271")
+    assert r["attack_outcome"] == "success"
+    assert any("SQL" in n for n in _names(r))
+
+
+def test_ssrf_metadata_detected_with_hint_without_category():
+    r = analyze_response(200, {}, "ami-id: ami-123\ninstance-id: i-abc", 80,
+                         payload="", category="",
+                         url="http://h/fetch?u=http://169.254.169.254/latest/meta-data")
+    assert r["attack_outcome"] == "success"
+
+
+def test_lfi_double_encoded_body_without_category():
+    r = analyze_response(200, {}, "root:x:0:0:root:/root:/bin/bash", 80,
+                         payload="", category="", req_body="file=..%252f..%252fetc%252fpasswd")
+    assert r["attack_outcome"] == "success"
+
+
+def test_normal_json_post_no_false_finding():
+    r = analyze_response(200, {}, '{"ok":true}', 80,
+                         payload="", category="", req_body='{"name":"kim","age":20}')
+    assert r["findings"] == []
+
+
+def test_ssrf_metadata_text_without_hint_not_flagged():
+    """SSRF 시도 흔적이 없으면 응답에 metadata 유사 문구가 있어도 SSRF 성공으로 보지 않는다."""
+    r = analyze_response(200, {}, "our instance-id format is i-xxx", 80,
+                         payload="", category="", url="http://h/docs")
+    assert not any("메타데이터" in n for n in _names(r))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # WAF 지문 탐지
 # ─────────────────────────────────────────────────────────────────────────────
 def test_detect_waf_cloudflare():

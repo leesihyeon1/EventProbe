@@ -194,7 +194,7 @@ async def send_request(req: SingleRequest):
             analysis = analyze_response(
                 status_code=r["status_code"], headers=r["headers"], body=r["body"],
                 response_time=r["response_time"], payload=req.payload, category=req.category,
-                baseline=req.baseline, url=_url_with_params(req.url, req.params),
+                baseline=req.baseline, url=_url_with_params(req.url, req.params), req_body=req.body,
             )
             if response_analysis_enabled():
                 analysis["ai"] = await ai_analyze({
@@ -241,6 +241,7 @@ async def send_request(req: SingleRequest):
             category=req.category,
             baseline=req.baseline,
             url=_url_with_params(req.url, req.params),
+            req_body=req.body,
         )
 
         # AI 상세 분석 — 응답 body 를 외부로 보내므로 기본 비활성(AI_RESPONSE_ANALYSIS=true 일 때만).
@@ -682,7 +683,7 @@ async def bulk_test(req: BulkRequest):
                 analysis = analyze_response(
                     response.status_code, dict(response.headers),
                     body_text, elapsed, p["payload"], req.category,
-                    url=_url_with_params(req.url, params),
+                    url=_url_with_params(req.url, params), req_body=body,
                 )
                 results.append({
                     "payload_id": p["id"],
@@ -803,7 +804,7 @@ async def multi_target_test(req: MultiTargetRequest):
                     )
                     elapsed = (time.time() - start) * 1000
                     bt = resp.text[:5000]
-                    analysis = analyze_response(resp.status_code, dict(resp.headers), bt, elapsed, p["payload"], req.category, url=_url_with_params(url, params))
+                    analysis = analyze_response(resp.status_code, dict(resp.headers), bt, elapsed, p["payload"], req.category, url=_url_with_params(url, params), req_body=body)
                     return {
                         "payload_id": p["id"], "payload_name": p["name"],
                         "payload": p["payload"], "description": p["description"],

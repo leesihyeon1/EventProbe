@@ -4,6 +4,7 @@
 import ast
 import re
 from typing import Optional
+from urllib.parse import unquote
 
 
 def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
@@ -1587,6 +1588,21 @@ _FILE_READ_HINT = re.compile(
     r"file://|LOAD_FILE|pg_read_file|xp_cmdshell",
     re.I,
 )
+# 공격 유형 추론 힌트 — 카테고리를 고르지 않은 요청(PoC·붙여넣기 등)에서도 payload·URL·
+# 본문을 보고 어떤 공격인지 추정해, 맥락이 필요한 오라클(SSRF·SQLi·리다이렉트)을 켠다.
+# (증거가 자명한 오라클—명령 출력·파일 내용—은 힌트 없이 전역으로 동작한다.)
+_SSRF_HINT = re.compile(
+    r"169\.254\.169\.254|/latest/meta-data|metadata\.google|metadata\.azure|"
+    r"localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|file://|gopher://|dict://|"
+    r"internal|/computeMetadata", re.I)
+_SQLI_HINT = re.compile(
+    r"\bUNION\b\s+SELECT|\bSELECT\b.+\bFROM\b|SLEEP\s*\(|pg_sleep|benchmark\s*\(|"
+    r"waitfor\s+delay|information_schema|xp_cmdshell|load_file\s*\(|"
+    r"'\s*OR\s*'|\"\s*OR\s*\"|\bOR\b\s+\d+\s*=\s*\d+|\bAND\b\s+\d+\s*=\s*\d+|"
+    r"'--|\"--|--\s|/\*.*\*/", re.I)
+_REDIRECT_HINT = re.compile(
+    r"redirect|url=|next=|returnurl|return_to|dest=|goto=|callback=|//[a-z0-9.-]+\.", re.I)
+
 # 명령 실행 출력 마커 (Command Injection)
 _CMD_OUTPUT_MARKERS = [
     (r"uid=\d+\([^)]+\)\s+gid=\d+",            "id 출력(uid/gid)"),
@@ -1803,13 +1819,24 @@ def _extract_sleep_seconds(payload: str) -> Optional[int]:
     return None
 
 
-def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline, url=None):
-    """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환."""
+def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline,
+                    url=None, req_body=None):
+    """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환.
+
+    payload/카테고리에만 의존하지 않고, 요청 전체(payload+URL+본문)를 프로브로 삼아
+    공격 유형을 추론한다. 그래서 PoC·붙여넣기 요청처럼 카테고리가 없어도 결과를 확인한다.
+    """
     findings = []
     body_lower = (body or "").lower()
-    # 파일 접근 탐지용 프로브 문자열: payload 뿐 아니라 요청 URL(경로+쿼리)도 포함.
-    # 페이로드를 고르지 않고 주소만으로 민감 파일을 직접 GET 한 경우도 잡기 위함.
-    file_probe = f"{payload or ''} {url or ''}"
+    # 공격 탐지용 프로브: payload 뿐 아니라 요청 URL(경로+쿼리)·본문까지 합친다.
+    # 페이로드 미선택으로 주소/본문에만 공격이 들어간 경우(직접 GET·붙여넣기 POST)도 잡기 위함.
+    # URL 인코딩된 요청(%27=', %2f=/ 등)도 매칭되도록 디코딩본을 함께 붙인다.
+    _raw_probe = f"{payload or ''} {url or ''} {req_body or ''}"
+    try:
+        probe = _raw_probe + " " + unquote(unquote(_raw_probe))
+    except Exception:
+        probe = _raw_probe
+    file_probe = probe
 
     # ① payload 반사 (클라이언트측 XSS 실행 컨텍스트 정밀 판정 포함)
     refl = _detect_reflection(body or "", payload)
@@ -1844,28 +1871,37 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     if h:
         findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,
                          "why": h[0], "evidence": h[1]})
-    if category == "cmdi":
-        h = _hit(_CMD_OUTPUT_MARKERS)
-        if h:
-            findings.append({"name": "명령 실행 출력", "verdict": "성공", "confidence": 93,
-                             "why": h[0], "evidence": h[1]})
-    if category == "ssrf":
-        h = _hit(_SSRF_MARKERS)
-        if h:
+    # 명령 실행 출력 — uid/gid·Windows ver/dir 는 매우 구체적인 출력 시그니처라 요청 형태와
+    # 무관하게 확인한다(어느 요청이든 이 출력이 있으면 명령 실행 성공).
+    hc = _hit(_CMD_OUTPUT_MARKERS)
+    if hc:
+        findings.append({"name": "명령 실행 출력", "verdict": "성공", "confidence": 93,
+                         "why": hc[0], "evidence": hc[1]})
+
+    # 내부/클라우드 메타데이터 응답(SSRF) — 정상 API/문서에도 나올 수 있어, 요청이
+    # SSRF 처럼 보일 때(내부주소·메타데이터 URL 등)만 성공 신호로 본다.
+    if category == "ssrf" or _SSRF_HINT.search(probe):
+        hs = _hit(_SSRF_MARKERS)
+        if hs:
             findings.append({"name": "내부/메타데이터 응답", "verdict": "성공", "confidence": 85,
-                             "why": h[0], "evidence": h[1]})
-    if category == "ssti" and payload and re.search(r"7\s*\*\s*7|7\*'7'", payload):
-        # 49 가 payload 자체가 아니라 결과로 나왔는지
-        if "49" in (body or "") and "7*7" not in (body or ""):
-            findings.append({"name": "템플릿 평가됨(7*7=49)", "verdict": "성공", "confidence": 90,
-                             "why": "표현식이 서버에서 계산됨 → SSTI", "evidence": "응답에 '49' 포함"})
-    if category == "sqli":
+                             "why": hs[0], "evidence": hs[1]})
+
+    # SSTI — 요청에 7*7 표현식이 있고 결과 49 가 나오면(원문 아님) 서버 평가 성공. 카테고리 무관.
+    if re.search(r"7\s*\*\s*7|7\*'7'", probe) and "49" in (body or "") and "7*7" not in (body or ""):
+        findings.append({"name": "템플릿 평가됨(7*7=49)", "verdict": "성공", "confidence": 90,
+                         "why": "표현식이 서버에서 계산됨 → SSTI", "evidence": "응답에 '49' 포함"})
+
+    # SQL/DB 에러 노출 — SQLi 처럼 보이는 요청일 때 error-based 성공 신호로 본다(카테고리 무관).
+    if category == "sqli" or _SQLI_HINT.search(probe):
         for pat, desc in ERROR_LEAK_PATTERNS:
             if re.search(pat, body or "", re.I):
-                findings.append({"name": "SQL 에러 노출", "verdict": "성공", "confidence": 85,
+                findings.append({"name": "SQL/DB 에러 노출", "verdict": "성공", "confidence": 85,
                                  "why": f"{desc} — error-based 성공 가능", "evidence": desc})
                 break
-    if category == "redirect":
+
+    # 외부 리다이렉트 — 3xx Location 이 외부로 나가면 오픈 리다이렉트 성공. 리다이렉트처럼
+    # 보이는 요청일 때만(정상 SSO 리다이렉트 오탐 억제).
+    if category == "redirect" or _REDIRECT_HINT.search(probe):
         loc = headers_lower.get("location", "")
         if status_code in (301, 302, 303, 307, 308) and re.search(r"^https?://|^//", loc):
             findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
@@ -1887,14 +1923,14 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # ②-b 클라이언트측(client-side) 취약점 신호
     # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
-    if category == "xss":
+    if category == "xss" or refl:
         dom = _detect_dom_xss(body or "")
         if dom:
             findings.append({"name": "DOM 기반 XSS 싱크", "verdict": "미확정", "confidence": 55,
                              "why": f"클라이언트 입력({dom['source']})이 위험 싱크({dom['sink']})로 흐름 → DOM XSS 가능(브라우저 실행 확인 필요)",
                              "evidence": dom["evidence"]})
     # 클라이언트 템플릿 인젝션(CSTI) — 템플릿 표현식 미평가 반사 + 프레임워크 존재
-    if category in ("xss", "ssti") or (payload and any(t in payload for t in ("{{", "${", "#{"))):
+    if category in ("xss", "ssti") or any(t in probe for t in ("{{", "${", "#{")):
         csti = _detect_csti(body or "", payload or "")
         if csti:
             findings.append({"name": "클라이언트 템플릿 인젝션(CSTI) 가능", "verdict": "미확정", "confidence": 60,
@@ -1967,6 +2003,7 @@ def analyze_response(
     category: Optional[str] = None,
     baseline: Optional[dict] = None,
     url: Optional[str] = None,
+    req_body: Optional[str] = None,
 ) -> dict:
     """HTTP 응답을 분석하여 보안 판정 결과 반환.
 
@@ -2073,7 +2110,7 @@ def analyze_response(
     # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반.
     #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
-        status_code, headers_lower, body, response_time, payload, category, baseline, url
+        status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body
     )
     result["reflection"] = _detect_reflection(body, payload)
     result["spa_shell"] = _detect_spa_shell(body, headers_lower)
