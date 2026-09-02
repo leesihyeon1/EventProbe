@@ -423,9 +423,11 @@ _VERDICT_SYSTEM = (
     "1) outcome 은 주어진 '확정_판정'을 그대로 따른다(뒤집지 말 것). 공격 성공 신호가 있으면 success, "
     "없으면 inconclusive. 보안 헤더/쿠키 같은 '응답 위생' 문제는 별개이며 '공격이 차단됐다'는 뜻이 아니다.\n"
     "1-b) 이번 공격의 결과가 판정의 중심이다. '응답 위생'은 이번 공격 결과가 아니므로 주된 발견처럼 "
-    "앞세우지 말 것 — 공격 결과(성공 / 미확정 / '안전·미노출')를 먼저 서술하고, 위생 문제는 있으면 뒤에 "
-    "한 문장으로만 덧붙인다. 공격_성공_신호에 '안전'·'미노출' 항목이 있으면 해당 공격이 성공하지 않았다는 "
-    "뜻이니 그 사실(예: 요청한 파일이 응답에 노출되지 않음)을 명확히 서술한다.\n"
+    "앞세우지 말 것 — 공격 결과를 먼저 서술하고, 위생 문제는 있으면 뒤에 한 문장으로만 덧붙인다.\n"
+    "1-c) 각 공격_신호에는 verdict 가 붙어 있다(성공/안전/미확정). 반드시 그 verdict 대로 서술한다: "
+    "'성공'=실제로 뚫림, '안전'=그 항목은 안전함(예: 요청한 파일이 응답에 노출되지 않음), '미확정'=추가 확인 필요. "
+    "verdict 가 '안전'인 항목을 '노출됨/성공'처럼 쓰지 말 것. 신호 이름의 글자(예: '미노출'에 든 '노출')만 보고 "
+    "반대로 해석하지 말고, 반드시 verdict 와 why 를 근거로 삼는다. '노출됐지만 성공 아님' 같은 모순 문장 금지.\n"
     "2) severity 는 공격 결과와 알림 위험도 중 가장 높은 값.\n"
     "3) 문장은 자연스러운 한국어로 쓰고, 내부 필드명·변수명(attack_signals, security_alerts, outcome 등)을 "
     "그대로 노출하지 말 것. 무엇을 확인해서 무엇을 확인한다는 식의 동어반복·순환 문장 금지. 신호가 실제로 "
@@ -434,6 +436,9 @@ _VERDICT_SYSTEM = (
     "있으면 85-100, 성공 신호가 전혀 없어 미확인이면 50-70. 미확인(inconclusive)에 100 을 주지 말 것.\n"
     "5) reasoning 은 무엇이 관찰됐고 그래서 어떤 상태인지 1-2문장. priority 는 다음에 실제로 확인/수행할 구체적 "
     "행동(없으면 빈 문자열). remediation 은 구체적 수정(없으면 빈 문자열). 없는 내용을 지어내지 말 것.\n"
+    "6) remediation 에서 누락된 보안 헤더/쿠키 플래그를 하나하나 나열하지 말 것. 여러 개면 "
+    "'여러 보안 헤더 누락(CSP·HSTS 등) 및 쿠키 플래그 미설정 보완' 처럼 한 구절로 요약한다. 공격이 실제로 "
+    "성공(verdict 성공/outcome success)했다면 remediation 은 그 취약점 수정에 집중하고 위생은 덧붙이지 않는다.\n"
     "오직 JSON 객체 하나만 출력(그 외 설명 금지): "
     '{"outcome":"success|blocked|inconclusive","severity":"critical|high|medium|low|info",'
     '"confidence":0-100,"reasoning":"한국어 1-2문장","priority":"한국어 짧게 또는 빈 문자열",'
@@ -442,7 +447,7 @@ _VERDICT_SYSTEM = (
     '{"outcome":"inconclusive","severity":"low","confidence":80,'
     '"reasoning":"요청한 .git/config 파일이 응답 본문에 노출되지 않아 소스·시크릿 유출은 확인되지 않습니다(200 응답은 일반 페이지로 보임). 별개로 CSP 헤더 누락 등 경미한 응답 위생 문제가 있습니다.",'
     '"priority":"",'
-    '"remediation":"응답 위생 개선이 필요하면 Content-Security-Policy 헤더 추가, 세션 쿠키에 Secure·HttpOnly 설정"}'
+    '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 및 쿠키 Secure·HttpOnly 미설정 보완"}'
 )
 
 
@@ -459,7 +464,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
         f"상태코드: {ctx.get('status')}\n"
         f"응답시간_ms: {ctx.get('time')}\n"
         f"확정_판정: {ctx.get('outcome')}\n"
-        f"공격_성공_신호: {json.dumps(findings, ensure_ascii=False)}\n"
+        f"공격_신호(각 항목 verdict=성공/안전/미확정, why=근거): {json.dumps(findings, ensure_ascii=False)}\n"
         f"응답_보안_점검: {json.dumps(alerts, ensure_ascii=False)}\n"
         f"위 신호만 근거로 종합 판정을 JSON 으로 주세요."
     )

@@ -209,7 +209,8 @@ async def send_request(req: SingleRequest):
                 analysis["ai_verdict"] = await ai_verdict({
                     "category": req.category, "status": r["status_code"], "time": r["response_time"],
                     "outcome": analysis.get("attack_outcome"),
-                    "findings": [f["name"] for f in analysis.get("findings", [])],
+                    "findings": [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why")}
+                                 for f in analysis.get("findings", [])],
                     "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
                 })
             return {
@@ -262,7 +263,8 @@ async def send_request(req: SingleRequest):
             analysis["ai_verdict"] = await ai_verdict({
                 "category": req.category, "status": response.status_code, "time": round(elapsed, 2),
                 "outcome": analysis.get("attack_outcome"),
-                "findings": [f["name"] for f in analysis.get("findings", [])],
+                "findings": [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why")}
+                             for f in analysis.get("findings", [])],
                 "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
             })
 
