@@ -152,7 +152,9 @@ def test_git_config_exposed_is_success():
     assert r["attack_outcome"] == "success"
     assert r["verdict"] == "bypass"
     assert r["risk_level"] == "high"
-    assert any("노출" in n and "미노출" not in n for n in _names(r))
+    # 노출을 성공 신호로 보고하되, '미노출(안전)'로 잘못 보고하지 않는다
+    assert any(f["verdict"] == "성공" for f in r["findings"])
+    assert not any("미노출" in n for n in _names(r))
 
 
 def test_env_file_not_exposed_is_low():
@@ -232,6 +234,44 @@ def test_reflected_file_path_is_not_false_file_read():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 강한 시그니처는 전역(요청 형태 무관), 약한 시그니처는 파일 접근 맥락에서만
+# ─────────────────────────────────────────────────────────────────────────────
+def test_strong_signature_detected_on_any_endpoint():
+    """평범한 API 응답이라도 passwd 내용이 유출되면(강한 시그니처) 전역 탐지."""
+    r = analyze_response(200, {}, '{"note":"root:x:0:0:root:/root:/bin/bash"}', 80,
+                         payload="", category="", url="http://h/api/user/1")
+    assert r["attack_outcome"] == "success"
+
+
+def test_strong_git_config_detected_on_any_path():
+    r = analyze_response(200, {}, "[core]\nrepositoryformatversion = 0", 80,
+                         payload="", category="", url="http://h/backup/x")
+    assert r["attack_outcome"] == "success"
+
+
+def test_weak_signature_no_false_positive_on_docs():
+    """약한 시그니처(hosts, <?php)는 파일 접근 맥락이 아니면 오탐하지 않는다."""
+    r = analyze_response(200, {}, "설정 예시: 127.0.0.1 localhost 를 hosts 에 추가하세요", 80,
+                         payload="", category="", url="http://h/docs/setup")
+    assert r["findings"] == []
+    assert r["risk_level"] == "low"
+
+
+def test_weak_signature_detected_in_file_access_context():
+    r = analyze_response(200, {}, "127.0.0.1 localhost\n10.0.0.5 db", 80,
+                         payload="../../etc/hosts", category="lfi")
+    assert r["attack_outcome"] == "success"
+
+
+def test_no_duplicate_finding_when_strong_and_path_overlap():
+    """git 경로 요청 + git 내용 노출 시, 강한 마커와 민감파일 탐지가 중복 보고하지 않는다."""
+    r = analyze_response(200, {}, "[core]\nrepositoryformatversion = 0", 80,
+                         payload="", category="", url="http://h/public/.git/config")
+    success = [f for f in r["findings"] if f["verdict"] == "성공"]
+    assert len(success) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # URL 직접 접근 — payload 를 고르지 않고 주소만으로 민감 파일을 GET 한 경우
 # ─────────────────────────────────────────────────────────────────────────────
 def test_url_only_git_config_exposed():
@@ -239,7 +279,8 @@ def test_url_only_git_config_exposed():
     r = analyze_response(200, {}, "[core]\n\trepositoryformatversion = 0\n", 80,
                          payload="", category="", url="http://h/public/.git/config")
     assert r["attack_outcome"] == "success"
-    assert any("노출" in n and "미노출" not in n for n in _names(r))
+    assert any(f["verdict"] == "성공" for f in r["findings"])
+    assert not any("미노출" in n for n in _names(r))
 
 
 def test_url_only_git_config_not_exposed_is_low():

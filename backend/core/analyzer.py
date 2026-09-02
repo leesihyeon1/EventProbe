@@ -1555,10 +1555,18 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
 # 공격 결과 분석 — "이 공격이 실제로 통했는가"를 증거 기반으로 판정 (결정적)
 # ════════════════════════════════════════════════════════════════════════════════
 
-# 파일 읽기 성공 마커 (LFI/XXE)
-_FILE_READ_MARKERS = [
-    (r"root:.*?:0:0:",                         "리눅스 /etc/passwd 내용"),
-    (r"root:[^:\n]{0,80}:\d{4,5}:\d:\d{4,5}:", "리눅스 /etc/shadow 내용(해시)"),
+# 파일 읽기 성공 마커 — 강/약으로 분리한다.
+# 강한 마커: 매우 구체적이라 오탐이 거의 없다. 요청 형태와 무관하게 '모든 응답'에서
+#   확인한다(어느 엔드포인트든 이 내용이 있으면 실제 파일/소스 유출).
+_FILE_READ_MARKERS_STRONG = [
+    (r"root:.*?:0:0:",                          "리눅스 /etc/passwd 내용"),
+    (r"root:[^:\n]{0,80}:\d{4,5}:\d:\d{4,5}:",  "리눅스 /etc/shadow 내용(해시)"),
+    (r"BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY",  "개인키 노출"),
+    (r"repositoryformatversion\s*=",            "Git 설정(.git/config) 내용"),
+]
+# 약한 마커: 정상 문서/코드 예제 페이지에도 나올 수 있어 오탐 위험이 있다. 요청이
+#   파일 접근처럼 보일 때만(lfi/xxe 또는 _FILE_READ_HINT) 확인한다.
+_FILE_READ_MARKERS_WEAK = [
     (r"\[extensions\]|\[fonts\]|16-bit app support", "Windows win.ini 내용"),
     (r"\[boot loader\]|\[operating systems\]", "Windows boot.ini 내용"),
     (r"(?m)^\s*127\.0\.0\.1\s+localhost",      "hosts 파일 내용"),
@@ -1566,7 +1574,6 @@ _FILE_READ_MARKERS = [
     (r"\d+\.\d+\.\d+\.\d+ - - \[\d{2}/\w{3}/\d{4}", "웹서버 access 로그 내용"),
     (r"<\?php[\s\S]{0,40}",                     "PHP 소스코드 노출"),
     (r"DB_PASSWORD|DB_USERNAME|APP_KEY=",       ".env 설정 노출"),
-    (r"BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY",  "개인키 노출"),
 ]
 # 파일 읽기 시도로 보이는 payload 지표 — 카테고리(lfi/xxe)와 무관하게 파일 내용
 # 탐지를 켜기 위한 힌트. 수많은 경로 트래버설 익스플로잇이 'cve'·'sqli' 등으로 들어온다.
@@ -1829,13 +1836,14 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                 return label, (body or "")[s:m.end() + 40]
         return None
 
-    # 파일 읽기 성공 — lfi/xxe 뿐 아니라, payload 가 파일 접근처럼 보이면 카테고리 무관하게
-    # 응답 '내용'으로 확증한다(경로 트래버설 익스플로잇은 흔히 cve/sqli 등으로 들어온다).
-    if category in ("lfi", "xxe") or _FILE_READ_HINT.search(file_probe):
-        h = _hit(_FILE_READ_MARKERS)
-        if h:
-            findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,
-                             "why": h[0], "evidence": h[1]})
+    # 파일/소스 내용 노출 — 강한 시그니처는 요청 형태와 무관하게 '모든 응답'에서 확인하고,
+    # 약한 시그니처는 파일 접근처럼 보일 때만(lfi/xxe 또는 _FILE_READ_HINT) 확인한다.
+    h = _hit(_FILE_READ_MARKERS_STRONG)
+    if not h and (category in ("lfi", "xxe") or _FILE_READ_HINT.search(file_probe)):
+        h = _hit(_FILE_READ_MARKERS_WEAK)
+    if h:
+        findings.append({"name": "파일 읽기 성공", "verdict": "성공", "confidence": 92,
+                         "why": h[0], "evidence": h[1]})
     if category == "cmdi":
         h = _hit(_CMD_OUTPUT_MARKERS)
         if h:
@@ -1867,9 +1875,10 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     #     (카테고리 무관: .git/config·.env 등은 cve/path 프로브로 들어온다)
     sf = _detect_sensitive_file(file_probe, body or "")
     if sf and sf["exposed"]:
-        findings.append({"name": f"민감 파일 노출 — {sf['targeted']}", "verdict": "성공", "confidence": 92,
-                         "why": f"요청한 {sf['targeted']} 의 실제 내용이 응답에 노출됨 → 소스/시크릿 유출",
-                         "evidence": sf["evidence"]})
+        if not h:   # 강한 마커(위)로 이미 노출을 잡았으면 중복 표기하지 않음
+            findings.append({"name": f"민감 파일 노출 — {sf['targeted']}", "verdict": "성공", "confidence": 92,
+                             "why": f"요청한 {sf['targeted']} 의 실제 내용이 응답에 노출됨 → 소스/시크릿 유출",
+                             "evidence": sf["evidence"]})
     elif sf:
         findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
                          "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
