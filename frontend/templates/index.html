@@ -594,6 +594,8 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
+        <button class="btn btn-secondary" onclick="runTlsScan()"
+                title="첫 호스트의 TLS 전송계층 점검(버전·cipher·인증서·Heartbleed). 외부 도구 없이 수행. 인가된 대상에만 사용.">🔒 TLS 점검</button>
         <button class="btn btn-primary" onclick="runPortScan()">🔌 포트 스캔 시작</button>
       </div>
     </div>

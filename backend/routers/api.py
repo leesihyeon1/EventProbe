@@ -32,6 +32,7 @@ from core.followup import hot_families, escalation_candidates
 from core import confirm as confirm_scan
 from core import discover as api_discover
 from core import capture as api_capture
+from core.tlsscan import tls_scan
 
 router = APIRouter(prefix="/api")
 
@@ -944,6 +945,30 @@ async def port_scan(req: PortScanRequest):
         "total_risky": total_risky,
         "hosts": host_results,
     }
+
+
+class TlsScanRequest(BaseModel):
+    host: str = ""
+    port: int = 443
+    timeout: float = 8.0
+    heartbleed: bool = True
+
+
+@router.post("/tls-scan")
+async def tls_scan_endpoint(req: TlsScanRequest):
+    """대상의 TLS 전송계층 점검(버전·cipher·인증서·Heartbleed). 외부 바이너리 미사용.
+
+    전송계층 스캔은 HTTP 요청보다 침습적 → 인가된 대상에만 사용.
+    URL 을 넣어도 host 로 정규화한다.
+    """
+    raw = (req.host or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="host 가 필요합니다")
+    # URL 이 들어오면 host[:port] 만 추출
+    parsed = urlsplit(raw if "://" in raw else "//" + raw, scheme="https")
+    host = parsed.hostname or raw
+    port = parsed.port or req.port or 443
+    return await tls_scan(host, port, float(req.timeout or 8.0), bool(req.heartbleed))
 
 
 # ── 페이로드 목록 조회 ──────────────────────────────────────

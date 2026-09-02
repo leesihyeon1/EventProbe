@@ -2954,6 +2954,67 @@ function parsePorts(raw) {
   return [...result].sort((a, b) => a - b);
 }
 
+/* ── TLS 전송계층 점검 (버전·cipher·인증서·Heartbleed) ── */
+async function runTlsScan() {
+  const hostsRaw = document.getElementById('scanHosts').value.trim();
+  if (!hostsRaw) { toast('호스트를 입력하세요', 'error'); return; }
+  const host = hostsRaw.split('\n').map(h => h.trim()).filter(Boolean)[0];
+  const timeout = parseFloat(document.getElementById('scanTimeout').value) || 8;
+
+  closeBulkModal();
+  showLoadingOverlay(`${host} TLS 점검 중…`);
+  try {
+    const res = await fetch('/api/tls-scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, timeout: Math.max(timeout, 5) }),
+    });
+    const data = await res.json();
+    if (data.detail) throw new Error(data.detail);
+    hideLoadingOverlay();
+    renderTlsScanResults(data);
+    switchView('results');
+  } catch (e) {
+    hideLoadingOverlay();
+    toast('TLS 점검 실패: ' + e.message, 'error');
+  }
+}
+
+function renderTlsScanResults(d) {
+  ['portScanArea', 'multiResultsArea', 'tlsScanArea'].forEach(id => document.getElementById(id)?.remove());
+  const area = document.createElement('div');
+  area.id = 'tlsScanArea';
+  area.style.padding = '14px';
+  const RISK = { critical: 'tag-red', high: 'tag-red', medium: 'tag-orange', low: 'tag-blue', info: 'tag-blue' };
+  const findings = d.findings || [];
+  const rows = findings.length
+    ? findings.map(f => `
+        <div class="attack-finding" style="margin-bottom:6px">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span class="tag ${RISK[f.risk] || 'tag-blue'}">${escapeHtml(f.risk || 'info')}</span>
+            <b style="font-size:12px">${escapeHtml(f.name)}</b>
+          </div>
+          ${f.evidence ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${escapeHtml(f.evidence)}</div>` : ''}
+        </div>`).join('')
+    : `<div class="detail-item" style="color:var(--success)">✅ TLS 취약 신호 없음 — 버전/cipher/인증서 정상</div>`;
+  const hb = d.heartbleed;
+  const hbLine = hb
+    ? (hb.vulnerable
+        ? `<div class="detail-item" style="color:var(--danger)">🔴 Heartbleed 취약 — ${escapeHtml(hb.detail || '')}</div>`
+        : `<div class="detail-item" style="color:var(--text-muted)">Heartbleed: 안전/미확인 — ${escapeHtml(hb.detail || hb.error || '')}</div>`)
+    : '';
+  area.innerHTML = `
+    <h3 style="margin:0 0 8px">🔒 TLS 점검 — ${escapeHtml(d.host)}:${d.port}</h3>
+    ${d.error ? `<div class="detail-item" style="color:var(--danger)">연결 실패: ${escapeHtml(d.error)}</div>` : `
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
+        협상 버전 <b>${escapeHtml(d.version || '-')}</b> · cipher <b>${escapeHtml(d.cipher || '-')}</b>
+      </div>
+      ${rows}
+      ${hbLine}
+    `}`;
+  const container = document.querySelector('.results-view') || document.body;
+  container.prepend(area);
+}
+
 async function runPortScan() {
   const hostsRaw = document.getElementById('scanHosts').value.trim();
   if (!hostsRaw) { toast('호스트를 입력하세요', 'error'); return; }
