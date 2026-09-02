@@ -155,10 +155,7 @@
               onclick="generateBypassVariants()" title="차단 우회용 변형 페이로드를 AI로 생성">우회 변형</button>
       <!-- 확증 스캔: 선택 페이로드 카테고리로 오라클 프로브 세트를 보내 취약 여부 확증 -->
       <button id="confirmScanBtn" class="btn btn-secondary" style="padding:4px 10px;font-size:11px"
-              onclick="confirmScan()" title="이 파라미터에 대해 참/거짓·시간 대조 프로브를 자동 전송해 '진짜 터졌는지' 확증합니다(4~7발).">확증 스캔</button>
-      <!-- 인증 우회 확증: 대상 파라미터(보통 username)에 우회 페이로드를 넣어 로그인 성공 신호로 확증 -->
-      <button id="authBypassBtn" class="btn btn-secondary" style="padding:4px 10px;font-size:11px"
-              onclick="confirmScan('auth')" title="대상 파라미터(보통 username)에 인증 우회 페이로드를 넣고, 실패 대조군과 비교해 로그인 성공 신호(세션 쿠키·리다이렉트·상태 개선)로 우회 여부를 확증합니다. password 등 다른 필드는 요청 폼 값(더미)을 그대로 씁니다.">인증 우회 확증</button>
+              onclick="confirmScan()" title="이 파라미터에 대해 참/거짓·시간 대조 프로브를 자동 전송해 '진짜 터졌는지' 확증합니다(4~7발). 로그인 요청이면 인증 우회도 자동 병행합니다.">확증 스캔</button>
     </div>
 
     <!-- ── View Area ── -->

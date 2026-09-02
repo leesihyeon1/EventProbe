@@ -2,6 +2,7 @@ import time
 import json
 import asyncio
 import socket
+import re
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -537,34 +538,28 @@ def _inject_probe(base_url: str, params: dict, body: Optional[str],
     return _url_with_params(url2, params), body
 
 
-@router.post("/confirm-scan")
-async def confirm_scan_endpoint(req: ConfirmRequest):
-    """파라미터 1개에 오라클 프로브 세트를 순차 전송하고 응답 차이로 취약 여부를 확증한다.
+_LOGIN_RE = re.compile(r"login|sign[\-_ ]?in|signin|logon|/auth|/session|/account|/admin|oauth", re.I)
+_PW_RE = re.compile(r"pass(word|wd)?|\bpwd\b|\bpw\b|credential|secret", re.I)
+_CRED_PARAMS = {"user", "username", "email", "login", "userid", "uid", "account", "id"}
 
-    타이밍 오라클(시간 기반)의 정확도를 위해 프로브는 병렬이 아니라 순차 전송한다.
-    """
-    cat = (req.category or "").lower()
-    if not confirm_scan.is_supported(cat):
-        return {
-            "supported": False,
-            "category": cat,
-            "message": f"'{cat}' 은(는) 확증 프로브 미지원 — 단발 전송으로 확인하세요.",
-        }
 
-    plan = confirm_scan.probe_plan(cat, req.target.base_value)
-    if not plan:
-        return {"supported": False, "category": cat, "message": "프로브가 없습니다."}
+def _looks_login(req: "ConfirmRequest") -> bool:
+    """요청이 로그인/인증 흐름처럼 보이면 True (인증 우회 오라클 자동 병행 판단)."""
+    blob = f"{req.url or ''} {req.body or ''} {' '.join((req.params or {}).keys())}"
+    if _LOGIN_RE.search(blob):
+        return True
+    if (req.target.param or "").lower() in _CRED_PARAMS and _PW_RE.search(blob):
+        return True
+    return False
 
-    sent_headers_base = merge_headers(req.headers, req.default_headers, req.use_defaults)
-    # 오픈 리다이렉트는 3xx Location 을 봐야 하므로 리다이렉트를 따라가지 않는다.
-    follow = cat != "redirect"
 
-    results = []
-    probes_out = []
+async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: list, follow: bool):
+    """프로브 세트를 순차 전송(타이밍 정확도) 후 (results, probes_out) 반환."""
+    results, probes_out = [], []
     async with httpx.AsyncClient(verify=False, follow_redirects=follow) as client:
         for p in plan:
             params = dict(req.params)
-            headers = dict(sent_headers_base)
+            headers = dict(headers_base)
             final_url, body = _inject_probe(
                 req.url, params, req.body, headers,
                 req.target.location, req.target.param, p["value"],
@@ -576,17 +571,15 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
                     content=body.encode() if body else None, timeout=req.timeout,
                 )
                 elapsed = (time.time() - start) * 1000
-                body_text = resp.text[:50000]
                 results.append({
                     "role": p["role"], "status": resp.status_code, "time_ms": elapsed,
-                    "body": body_text, "headers": dict(resp.headers), "value": p["value"],
+                    "body": resp.text[:50000], "headers": dict(resp.headers), "value": p["value"],
                 })
                 probes_out.append({
                     "role": p["role"], "label": p["label"], "value": p["value"],
                     "status": resp.status_code, "time_ms": round(elapsed),
                 })
             except httpx.TimeoutException:
-                # 타임아웃도 신호가 될 수 있으나(예: SLEEP), 시간 측정이 불가하므로 실패로 기록
                 results.append({"role": p["role"], "status": 0, "time_ms": float(req.timeout) * 1000,
                                 "body": "", "headers": {}, "value": p["value"]})
                 probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
@@ -596,16 +589,54 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
                                 "body": "", "headers": {}, "value": p["value"]})
                 probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
                                    "status": 0, "time_ms": 0, "error": str(e)[:120]})
+    return results, probes_out
 
-    decision = confirm_scan.decide(cat, results)
+
+@router.post("/confirm-scan")
+async def confirm_scan_endpoint(req: ConfirmRequest):
+    """대상 파라미터에 오라클 프로브 세트를 순차 전송해 취약 여부를 확증한다.
+
+    선택 페이로드의 카테고리 오라클을 돌리고, 요청이 로그인/인증 흐름처럼 보이면
+    '인증 우회' 오라클도 자동으로 함께 돌려 결과를 합친다(별도 버튼 불필요).
+    타이밍 오라클 정확도를 위해 프로브는 순차 전송한다.
+    """
+    cat = (req.category or "").lower()
+    sent_headers_base = merge_headers(req.headers, req.default_headers, req.use_defaults)
+    techniques, all_probes, ran = [], [], []
+
+    # 1) 카테고리 오라클 (선택 페이로드 계열)
+    if cat and cat != "auth" and confirm_scan.is_supported(cat):
+        plan = confirm_scan.probe_plan(cat, req.target.base_value)
+        if plan:
+            results, probes = await _run_confirm_probes(
+                req, sent_headers_base, plan, follow=(cat != "redirect"))
+            techniques += confirm_scan.decide(cat, results)["techniques"]
+            all_probes += probes
+            ran.append(cat)
+
+    # 2) 인증 우회 오라클 — 로그인처럼 보이면(또는 명시적으로 auth) 자동 병행.
+    #    로그인 성공 리다이렉트(302)를 포착해야 하므로 리다이렉트는 따라가지 않는다.
+    if cat == "auth" or _looks_login(req):
+        aplan = confirm_scan.probe_plan("auth", req.target.base_value)
+        results, probes = await _run_confirm_probes(req, sent_headers_base, aplan, follow=False)
+        techniques += confirm_scan.decide("auth", results)["techniques"]
+        all_probes += [{**pp, "role": "auth:" + pp["role"]} for pp in probes]
+        ran.append("인증우회")
+
+    if not ran:
+        return {
+            "supported": False, "category": cat,
+            "message": f"'{cat}' 은(는) 확증 프로브 미지원 — 단발 전송으로 확인하세요.",
+        }
+
     return {
         "supported": True,
-        "category": cat,
+        "category": "+".join(ran),
         "target": {"location": req.target.location, "param": req.target.param},
-        "probes_sent": len(plan),
-        "confirmed": decision["confirmed"],
-        "techniques": decision["techniques"],
-        "probes": probes_out,
+        "probes_sent": len(all_probes),
+        "confirmed": bool(techniques),
+        "techniques": techniques,
+        "probes": all_probes,
     }
 
 

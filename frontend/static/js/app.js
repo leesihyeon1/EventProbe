@@ -915,9 +915,8 @@ function _confirmBaseValue(location, param) {
   return (cur && cur === payload) ? '' : cur;
 }
 
-async function confirmScan(forceCategory) {
-  // forceCategory: 선택 페이로드와 무관하게 확증 유형을 강제(예: 'auth' 인증 우회)
-  const cat = forceCategory || state.selectedCategory?.id || '';
+async function confirmScan() {
+  const cat = state.selectedCategory?.id || '';
   if (!cat) { toast('먼저 페이로드를 선택하세요', 'error'); return; }
   const req = _currentRequestForm();
   if (!req.url) { toast('요청 URL이 없습니다', 'error'); return; }
@@ -928,9 +927,7 @@ async function confirmScan(forceCategory) {
     || (location === 'header' ? 'X-Test-Payload' : 'q');
   const baseValue = _confirmBaseValue(location, param);
 
-  const btn = forceCategory === 'auth'
-    ? document.getElementById('authBypassBtn')
-    : document.getElementById('confirmScanBtn');
+  const btn = document.getElementById('confirmScanBtn');
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '확증 중…';
   try {
