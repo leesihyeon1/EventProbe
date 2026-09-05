@@ -1342,7 +1342,15 @@ function renderAiCandidates(res) {
   const hiddenAiCount = (state.hideAiWhenCve && strong && !state._forceShowAi && aiGroup) ? aiGroup.items.length : 0;
   if (hiddenAiCount) groups = groups.filter(g => g.label !== 'AI 생성');
 
-  listEl.innerHTML = groups.map(g => `
+  // 이번 생성이 실제로 참조한 RAG 문서(모델이 개별 인용을 안 해도 항상 표시) — '뭘 참조했나' 가시화
+  const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>34 ? s.slice(0,34)+'…' : s; };
+  const ragTitles = (res.rag_sources || []).map(_shortDoc);
+  const ragNote = (res.rag_used && ragTitles.length) ? `
+    <div title="이번 AI 생성에 근거로 검색·주입된 문서" style="font-size:10px;color:var(--purple);background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px;margin-bottom:6px;line-height:1.5">
+      참조 문서 ${res.rag_used} — ${ragTitles.map(escapeHtml).join(', ')}
+    </div>` : '';
+
+  listEl.innerHTML = ragNote + groups.map(g => `
     <div class="sidebar-group open">
       <div class="sidebar-group-header" onclick="toggleSidebarGroup(this)">
         <span class="group-chevron">▾</span>
