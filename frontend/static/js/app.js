@@ -976,6 +976,16 @@ async function confirmScan() {
 }
 
 // 확증 결과를 분석 패널 최상단 카드로 렌더
+// 가운데 생략(head…tail) — 공통 prefix 가 긴 확증 프로브에서 구분되는 접미사(SLEEP 등)를
+// 보이게 한다. 끝에서 자르면(slice) 정작 구분점이 사라진다.
+function _ellipsisMid(s, max = 90) {
+  s = String(s == null ? '' : s);
+  if (s.length <= max) return s;
+  const head = Math.max(12, Math.floor(max * 0.45));
+  const tail = max - head - 1;
+  return s.slice(0, head) + '…' + s.slice(s.length - tail);
+}
+
 function renderConfirmResult(res, param) {
   const container = document.getElementById('analysisContent');
   if (!container) return;
@@ -994,7 +1004,7 @@ function renderConfirmResult(res, param) {
       <td style="padding:2px 8px 2px 0;color:var(--text-secondary)">${escapeHtml(p.label)}</td>
       <td style="padding:2px 8px 2px 0">${st}</td>
       <td style="padding:2px 8px 2px 0;color:var(--text-muted)">${p.time_ms}ms</td>
-      <td style="padding:2px 0;color:var(--text-muted);font-family:var(--font-mono);font-size:10px">${escapeHtml(String(p.value).slice(0,48))}</td>
+      <td style="padding:2px 0;color:var(--text-muted);font-family:var(--font-mono);font-size:10px;word-break:break-all;white-space:normal" title="${escapeHtml(String(p.value))}">${escapeHtml(_ellipsisMid(p.value, 90))}</td>
     </tr>`;
   }).join('');
 
