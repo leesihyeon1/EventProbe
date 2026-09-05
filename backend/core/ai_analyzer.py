@@ -466,11 +466,14 @@ _VERDICT_SYSTEM = (
     '{"outcome":"success|blocked|inconclusive","severity":"critical|high|medium|low|info",'
     '"confidence":0-100,"reasoning":"한국어 1-2문장","priority":"한국어 짧게 또는 빈 문자열",'
     '"remediation":"한국어 짧게 또는 빈 문자열"}\n'
-    "좋은 예(민감 파일 탐색이 미노출로 끝난 경우 — 공격 결과를 먼저, 위생은 뒤에 한 문장): "
-    '{"outcome":"inconclusive","severity":"low","confidence":80,'
-    '"reasoning":"요청한 .git/config 파일이 응답 본문에 노출되지 않아 소스·시크릿 유출은 확인되지 않습니다(200 응답은 일반 페이지로 보임). 별개로 CSP 헤더 누락 등 경미한 응답 위생 문제가 있습니다.",'
-    '"priority":"",'
-    '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 및 쿠키 Secure·HttpOnly 미설정 보완"}'
+    "7) reasoning 은 반드시 '공격_신호'의 evidence/verdict 에 근거해 그 공격 유형에 맞게 쓴다. 파일/노출 "
+    "공격이 아니면(예: 명령 주입·SQLi·SSTI) '파일이 노출되지 않았다'고 쓰지 말 것 — evidence 가 '명령 실행 "
+    "출력 검색 → 미검출'이면 '명령 실행 흔적이 확인되지 않음'처럼 그 내용을 그대로 반영한다.\n"
+    "좋은 예(명령 주입이 미확인으로 끝난 경우 — 공격 유형에 맞춰, 위생은 뒤에 한 문장): "
+    '{"outcome":"inconclusive","severity":"low","confidence":75,'
+    '"reasoning":"주입한 명령의 실행 출력(uid= 등)이 응답에서 확인되지 않아 명령 주입 성공은 미확인입니다(200 일반 페이지). 블라인드일 수 있으니 확증 스캔/OOB 로 재확인하세요. 별개로 CSP 등 보안 헤더 누락이 있습니다.",'
+    '"priority":"확증 스캔 또는 OOB(콜백)로 blind 실행 여부 재확인",'
+    '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 보완"}'
 )
 
 

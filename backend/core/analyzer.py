@@ -1736,6 +1736,34 @@ def _checked_desc(category: str) -> str:
     return _CHECKED_DESC.get((category or "").lower(), _CHECKED_DEFAULT)
 
 
+# 명령 주입처럼 보이는 요청 지표(GPON dest_host, 셸 메타문자 등)
+_CMDI_HINT = re.compile(r";|\||&&|\$\(|`|%0a|\bsleep\b|\bid\b|whoami|/bin/|dest_host|\bexec\b|\bcmd=", re.I)
+
+
+def _checked_desc_for(probe: str, category: str) -> str:
+    """요청 내용(payload+URL+본문)으로 공격 유형을 추론해, '응답에서 무엇을 검색했는지' 서술.
+
+    카테고리가 뭉뚱그려진 경우(cve 등) 파일 노출로 오해하지 않도록, 실제 공격 성격에 맞춰
+    검색한 성공 시그니처를 나열한다(예: GPON dest_host → 명령 실행 출력 uid=).
+    """
+    probe = probe or ""
+    cat = (category or "").lower()
+    parts = []
+    if _CMDI_HINT.search(probe) or cat == "cmdi":
+        parts.append("명령 실행 출력(uid=0(root) 등)")
+    if _FILE_READ_HINT.search(probe) or cat in ("lfi", "xxe"):
+        parts.append("파일 내용(root:x:0:0 · 개인키 등)")
+    if re.search(r"7\s*\*\s*7|\{\{|\$\{|#\{", probe):
+        parts.append("템플릿 계산 결과(예: 49)")
+    if _SQLI_HINT.search(probe) or cat == "sqli":
+        parts.append("SQL/DB 에러 · 시간지연 · 참/거짓 차이")
+    if _SSRF_HINT.search(probe) or cat == "ssrf":
+        parts.append("클라우드 메타데이터")
+    if not parts:
+        parts.append(_checked_desc(cat))
+    return " · ".join(parts)
+
+
 def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
     """민감 파일 탐색 페이로드에 대해 '실제 노출' 여부를 본문 내용으로 판정.
 
@@ -2233,15 +2261,16 @@ def analyze_response(
     has_signal = any(f.get("verdict") in ("성공", "안전", "미확정") for f in findings)
     if (is_attack_attempt and outcome == "inconclusive" and not has_signal
             and not result["sensitive_data"] and not result["error_leaks"]):
+        _mprobe = f"{payload or ''} {url or ''} {req_body or ''}"
+        _sigs = _checked_desc_for(_mprobe, category)
+        _bn = "" if baseline else " · baseline 없음"
         findings.append({
             "name": "자동 판정 불가 — 수동 확인 필요", "verdict": "미확인", "confidence": 30,
             "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화 등)를 "
                    "찾지 못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. "
                    "응답 본문을 직접 확인하고, 확증 스캔 또는 baseline 비교로 검증하세요.",
-            "evidence": f"응답에서 성공 시그니처 [{_checked_desc(category)}]를 검색 → 미검출; "
-                        f"반사·시간지연·baseline 변화도 없음 "
-                        f"(HTTP {status_code} · {len(body)}B · {response_time:.0f}ms"
-                        + ("" if baseline else " · baseline 없음") + ")",
+            "evidence": f"응답에서 성공 시그니처 [{_sigs}]를 검색 → 미검출; 반사·시간지연·baseline 변화도 없음 "
+                        f"(HTTP {status_code} · {len(body)}B · {response_time:.0f}ms{_bn})",
         })
 
     result["findings"] = findings

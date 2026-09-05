@@ -38,6 +38,17 @@ def test_no_signal_attack_is_marked_unknown_not_safe():
     assert any(f["verdict"] == "미확인" for f in r["findings"])
 
 
+def test_unknown_evidence_matches_attack_type_not_file():
+    """GPON(명령 주입) 미확인 증거는 '파일 노출'이 아니라 '명령 실행 출력' 검색으로 서술."""
+    r = analyze_response(200, {"server": "Apache"}, "<html>router page</html>", 60,
+                         payload="/GponForm/diag_Form?images/", category="cve",
+                         url="http://h/GponForm/diag_Form?images/",
+                         req_body="wan_conlist=0&dest_host=;id;&ipv=0")
+    ev = next(f["evidence"] for f in r["findings"] if f["verdict"] == "미확인")
+    assert "명령 실행 출력" in ev
+    assert "root:x:0:0" not in ev   # 파일 노출로 오해하지 않음
+
+
 def test_success_signal_has_no_unknown_finding():
     r = analyze_response(200, {}, "root:x:0:0:root", 60,
                          payload="../../etc/passwd", category="lfi")
