@@ -45,11 +45,28 @@ _SESSION_COOKIE_RE = re.compile(r"(session|sess|auth|token|jwt|sid|login|connect
 # (요청에는 hex 만 있고 평문은 없으므로 우연 반사와 구분된다.)
 _SQL_ERR_MARKER = "SQLIQZX7"
 _SQL_ERR_HEX = _SQL_ERR_MARKER.encode().hex()   # 예: 53514c49515a5837
-# 에러 기반이 마커 없이도 'DB 에러 유발' 로 잡히도록 하는 SQL 에러 시그니처(대조엔 없어야 함)
-_SQL_ERROR_RE = re.compile(
-    r"SQL syntax|mysql_fetch|MySQLSyntaxError|ORA-\d{5}|Microsoft SQL Server|"
-    r"PostgreSQL.*ERROR|sqlite3\.OperationalError|ODBC.*Driver|"
-    r"XPATH syntax error|valid MySQL result|Warning.*\Wmysqli?_", re.I)
+# 에러 기반이 마커 없이도 'DB 에러 유발' 로 잡히도록 하는 SQL 에러 시그니처.
+# 대상 DB 를 미리 알 수 없으므로(=마커 payload 는 MySQL 전용) 주요 DBMS 의 에러 문구를
+# 폭넓게 인식한다. 어느 DB든 주입된 따옴표로 쿼리가 깨지면 이 중 하나가 응답에 뜬다.
+# (빈 대안 '||' 이 생기면 모든 문자열에 매칭되므로 절대 넣지 말 것 — 리스트 join 으로 방지)
+_SQL_ERROR_RE = re.compile("|".join([
+    # MySQL / MariaDB
+    r"SQL syntax", r"You have an error in your SQL", r"mysql_fetch", r"MySQLSyntaxError",
+    r"valid MySQL result", r"Warning.*\Wmysqli?_", r"XPATH syntax error",
+    # PostgreSQL
+    r"PostgreSQL.*ERROR", r"syntax error at or near", r"unterminated quoted string",
+    r"invalid input syntax for", r"PG::\w+Error", r"org\.postgresql\.util\.PSQLException",
+    # Microsoft SQL Server
+    r"Microsoft SQL Server", r"Unclosed quotation mark",
+    r"is not a recognized built-in function", r"Incorrect syntax near", r"SqlException",
+    # Oracle
+    r"ORA-\d{5}", r"quoted string not properly terminated", r"Oracle.*Driver", r"PLS-\d{5}",
+    # SQLite
+    r"sqlite3\.OperationalError", r"SQLite3::", r"unrecognized token",
+    r'near ".+": syntax error',
+    # 공통(드라이버/함수 없음/표준 SQLSTATE)
+    r"ODBC.*Driver", r"SQLSTATE\[", r"function .{0,40} does not exist", r"DBD::\w+",
+]), re.I)
 
 
 def _norm_cat(category: str) -> str:

@@ -112,6 +112,22 @@ def test_sqli_error_based_confirmed_by_db_error():
     assert d["confirmed"]
 
 
+def test_sqli_error_based_cross_dbms():
+    """대상 DB 를 몰라도, 주입으로 깨진 각 DBMS 의 에러 문구를 폭넓게 인식해 확증."""
+    errors = {
+        "mysql": "You have an error in your SQL syntax near 'x'",
+        "postgres": "ERROR: syntax error at or near \"x\"",
+        "postgres_func": "ERROR: function extractvalue(integer, text) does not exist",
+        "mssql": "'EXTRACTVALUE' is not a recognized built-in function name.",
+        "mssql_quote": "Unclosed quotation mark after the character string",
+        "oracle": "ORA-00933: SQL command not properly ended",
+        "sqlite": "unrecognized token: near syntax error",
+    }
+    for db, err in errors.items():
+        d = confirm.decide("sqli", [_r("baseline", body="normal home page"), _r("err", body=err)])
+        assert d["confirmed"], f"{db} 에러가 확증되지 않음"
+
+
 def test_sqli_error_based_not_confirmed_when_baseline_already_errors():
     """항상 SQL 에러를 뱉는 페이지는 error-based 로 오확증하지 않는다."""
     err = "You have an error in your SQL syntax"
