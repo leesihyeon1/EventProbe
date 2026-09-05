@@ -2116,6 +2116,24 @@ function _findingEvidenceBlock(findings) {
   </div>`;
 }
 
+// RAG 참조 문서(맥락) 펼침 블록 — 이 판정/생성에 실제 검색·주입된 문서 발췌를 보여준다.
+function _ragContextBlock(ragCtx, usedCount) {
+  const ctx = ragCtx || [];
+  if (!usedCount || !ctx.length) return '';
+  const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>30 ? s.slice(0,30)+'…' : s; };
+  return `
+    <details style="margin-top:8px;background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px">
+      <summary style="font-size:10px;color:var(--purple);cursor:pointer;line-height:1.5">참고 문서 ${usedCount} — ${ctx.map(c => escapeHtml(_shortDoc(c.title)) + (c.loc ? ' ' + escapeHtml(c.loc) : '')).slice(0,3).join(', ')}${ctx.length>3?' 외':''} <span style="color:var(--text-muted)">(펼쳐 근거 맥락 보기)</span></summary>
+      <div style="margin-top:5px;display:flex;flex-direction:column;gap:5px">
+        ${ctx.map(c => `
+          <div style="font-size:10px;line-height:1.45;border-top:1px solid rgba(188,140,255,.18);padding-top:4px">
+            <div style="color:var(--purple)">${escapeHtml(_shortDoc(c.title))}${c.loc?' · '+escapeHtml(c.loc):''}${(c.score!=null)?' <span style="color:var(--text-muted)">(관련도 '+escapeHtml(String(c.score))+')</span>':''}</div>
+            <div style="color:var(--text-secondary)">${escapeHtml(c.excerpt || '')}</div>
+          </div>`).join('')}
+      </div>
+    </details>`;
+}
+
 // 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
 function renderVerdictCard(a, confidenceColor) {
   const ai = a.ai_verdict;
@@ -2140,6 +2158,7 @@ function renderVerdictCard(a, confidenceColor) {
           ${ai.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority)}</div>` : ''}
           ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation)}</div>` : ''}
           ${_findingEvidenceBlock(a.findings)}
+          ${_ragContextBlock(ai.rag_context, ai.rag_used)}
         </div>
       </div>`;
   }

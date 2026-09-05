@@ -582,6 +582,12 @@ async def ai_verdict(ctx: dict) -> dict | None:
             parsed["outcome"] = ctx["outcome"]
         parsed["model"] = model
         parsed["rag_used"] = len(retrieved)   # 참고문서 반영 개수(UI 표시용)
+        # 실제 근거로 검색된 문서 스니펫(맥락) — 분석 탭에서 펼쳐 볼 수 있게 함께 반환
+        parsed["rag_context"] = [
+            {"title": r.get("title", ""), "loc": r.get("loc", ""), "score": r.get("score"),
+             "excerpt": re.sub(r"\s+", " ", str(r.get("text", ""))).strip()[:240]}
+            for r in retrieved[:4]
+        ]
         return parsed
     except httpx.TimeoutException:
         return {"error": "AI 판정 시간 초과", "model": model}
