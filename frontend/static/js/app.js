@@ -1976,21 +1976,44 @@ function renderAttackCard(a) {
     </div>`;
 }
 
-// 보안 Alert 카드처럼, findings 의 '실제 매칭 증거'를 판정 카드에 표시
+// 실제로 무엇을 조회(전송)했는지 — method + 전체 URL(+파라미터) + body 로 재구성.
+function _sentRequestLine() {
+  const req = state.lastResult && state.lastResult._req;
+  if (!req || !req.url) return '';
+  let url = req.url;
+  const p = req.params || {};
+  const keys = Object.keys(p);
+  if (keys.length) {
+    const qs = keys.map(k => `${k}=${p[k]}`).join('&');
+    url += (url.includes('?') ? '&' : '?') + qs;
+  }
+  let s = `${(req.method || 'GET').toUpperCase()} ${url}`;
+  if (req.body) s += `\n(body) ${req.body}`;
+  return s;
+}
+
+// 판정 근거: '조회한 요청(전송)' + findings 의 실제 매칭 증거를 판정 카드에 표시.
 function _findingEvidenceBlock(findings) {
   const V = { '성공':'tag-red', '차단':'tag-green', '안전':'tag-green', '미확정':'tag-blue', '미확인':'tag-orange' };
+  const sent = _sentRequestLine();
   const evs = (findings || []).filter(f => f && f.evidence);
-  if (!evs.length) return '';
-  return `<div style="margin-top:8px">
-    <div class="alert-section-label">탐지된 증거 <span class="evidence-hint">(응답에서 검색해 확인)</span></div>
-    ${evs.map(f => `<div style="margin:4px 0">
-      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-        <span class="tag ${V[f.verdict] || 'tag-blue'}" style="font-size:9px">${escapeHtml(f.verdict || '')}</span>
-        <span style="font-size:10px;color:var(--text-secondary)">${escapeHtml(f.name || '')}</span>
-      </div>
-      <div class="attack-evidence">${escapeHtml(String(f.evidence))}</div>
-    </div>`).join('')}
-  </div>`;
+  if (!sent && !evs.length) return '';
+  let html = '<div style="margin-top:8px">';
+  if (sent) {
+    html += `<div class="alert-section-label">조회한 요청(전송)</div>
+      <div class="attack-evidence" style="white-space:pre-wrap">${escapeHtml(sent)}</div>`;
+  }
+  if (evs.length) {
+    html += `<div class="alert-section-label" style="margin-top:6px">응답 증거 <span class="evidence-hint">(응답에서 검색해 확인)</span></div>`
+      + evs.map(f => `<div style="margin:4px 0">
+        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          <span class="tag ${V[f.verdict] || 'tag-blue'}" style="font-size:9px">${escapeHtml(f.verdict || '')}</span>
+          <span style="font-size:10px;color:var(--text-secondary)">${escapeHtml(f.name || '')}</span>
+        </div>
+        <div class="attack-evidence">${escapeHtml(String(f.evidence))}</div>
+      </div>`).join('');
+  }
+  return html + '</div>';
 }
 
 // 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
