@@ -310,15 +310,26 @@ def _norm_category(cat: str, payload: str) -> str:
 
 async def ai_suggest_payloads(method: str, path: str, params: dict,
                               body: str = "", header_names=None, count: int = 8,
-                              hint: str = "") -> dict:
+                              hint: str = "", retrieved=None) -> dict:
     """요청(호스트 제외)을 보고 테스트 종류 인식 + 후보 payload 생성. 응답 데이터는 보내지 않음.
-    hint: 결과 기반 후속 생성용 라벨-only 힌트(취약 계열·판정·탐지 기술 이름만)."""
+    hint: 결과 기반 후속 생성용 라벨-only 힌트(취약 계열·판정·탐지 기술 이름만).
+    retrieved: RAG 로 검색한 문서 스니펫 [{title, text, loc}] — 프롬프트에 근거로 주입."""
     key = _api_key()
     if not key:
         return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
     model, base_url = _model(), _base_url()
     hint_line = (f"이전 검증에서 확인된 신호(라벨): {hint}. 이 계열을 승격/우회하는 페이로드 위주로.\n"
                  if hint else "")
+    # RAG 검색 결과를 '이 대상에 적합한 실제 근거'로 주입(있으면 최우선 적용/변형)
+    rag_block = ""
+    if retrieved:
+        lines = []
+        for i, r in enumerate(retrieved[:6], 1):
+            snip = re.sub(r"\s+", " ", str(r.get("text", "")))[:400]
+            lines.append(f"{i}) [{r.get('title', '')}{(' ' + r.get('loc', '')) if r.get('loc') else ''}] {snip}")
+        rag_block = ("RETRIEVED (인제스트한 참고문서에서 이 요청에 적합. 여기 나온 실제 페이로드/파라미터/"
+                     "기법을 최우선으로 이 요청에 맞게 구체화하라. 문서에 없는 파라미터는 지어내지 말 것):\n"
+                     + "\n".join(lines) + "\n\n")
     user = (
         f"method: {method}\n"
         f"path (host removed): {path}\n"
@@ -326,6 +337,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
         f"body: {(body or '(none)')[:800]}\n"
         f"header names: {json.dumps(header_names or [], ensure_ascii=False)[:400]}\n"
         f"{hint_line}"
+        f"{rag_block}"
         f"Propose up to {count} payload candidates."
     )
     payload = {

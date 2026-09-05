@@ -4,7 +4,7 @@ import asyncio
 import socket
 import re
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 import sys, os
@@ -38,6 +38,7 @@ from core import confirm as confirm_scan
 from core import discover as api_discover
 from core import capture as api_capture
 from core.tlsscan import tls_scan
+from core import rag
 
 router = APIRouter(prefix="/api")
 
@@ -377,12 +378,27 @@ async def ai_suggest(req: AiSuggestRequest):
     cve_cands = match_cve_payloads(load_payloads(), path, req.params, req.body or "",
                                    req.fingerprint or {}, limit=8)
 
-    # 2) AI 후보 (키 있을 때만). path/param/body/헤더 '이름'만 전송(host·인증 제외)
+    # 1-b) RAG 검색 — 인제스트한 공개 문서에서 이 요청에 맞는 실제 페이로드/기법을 top-k 검색
+    retrieved = []
+    if rag.has_sources():
+        fp = req.fingerprint or {}
+        rag_q = " ".join(filter(None, [
+            re.sub(r"[/?&=]", " ", path),
+            " ".join((req.params or {}).keys()),
+            str(fp.get("server", "")), str(fp.get("powered_by", "")),
+        ]))
+        try:
+            retrieved = await asyncio.to_thread(rag.search, rag_q, 6)
+        except Exception:
+            retrieved = []
+
+    # 2) AI 후보 (키 있을 때만). path/param/body/헤더 '이름' + RAG 검색 스니펫 전송(host·인증 제외)
     ai_res = None
     if ai_enabled():
         safe_header_names = [h for h in (req.header_names or [])
                              if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
-        ai_res = await ai_suggest_payloads(req.method, path, req.params, req.body or "", safe_header_names, count)
+        ai_res = await ai_suggest_payloads(req.method, path, req.params, req.body or "", safe_header_names, count,
+                                           retrieved=retrieved)
     ai_res = ai_res if isinstance(ai_res, dict) else {}
     ai_cands = ai_res.get("candidates") or []
     ai_err = ai_res.get("error")
@@ -1005,6 +1021,39 @@ async def tls_scan_endpoint(req: TlsScanRequest):
     host = parsed.hostname or raw
     port = parsed.port or req.port or 443
     return await tls_scan(host, port, float(req.timeout or 8.0), bool(req.heartbleed))
+
+
+# ── RAG 문서 인제스트/검색(공개 테스트 문서용) ────────────────
+@router.post("/rag/ingest")
+async def rag_ingest(url: str = Form(""), file: UploadFile = File(None)):
+    """공개 테스트 문서(PDF/URL/텍스트)를 로컬 RAG 코퍼스에 색인. 검색·저장은 로컬."""
+    try:
+        if file is not None:
+            data = await file.read()
+            fn = file.filename or "upload"
+            if fn.lower().endswith(".pdf") or (data[:5] == b"%PDF-"):
+                src = await asyncio.to_thread(rag.ingest_pdf, fn, data)
+            else:
+                src = await asyncio.to_thread(rag.ingest_text, fn, data.decode("utf-8", "ignore"), "text", fn)
+        elif url.strip():
+            src = await asyncio.to_thread(rag.ingest_url, url.strip())
+        else:
+            raise HTTPException(status_code=400, detail="url 또는 file 이 필요합니다")
+        return {"ok": True, "source": src}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"인제스트 실패: {type(e).__name__} {e}")
+
+
+@router.get("/rag/sources")
+def rag_sources():
+    return {"sources": rag.list_sources()}
+
+
+@router.delete("/rag/sources/{source_id}")
+def rag_delete(source_id: str):
+    return {"ok": rag.delete_source(source_id)}
 
 
 # ── 페이로드 목록 조회 ──────────────────────────────────────

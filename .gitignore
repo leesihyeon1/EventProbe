@@ -7,3 +7,6 @@ __pycache__/
 Thumbs.db
 .venv/
 *.env
+
+# RAG 인제스트 문서(로컬 코퍼스)
+backend/data/rag/

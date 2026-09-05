@@ -24,6 +24,17 @@ const API = {
     const r = await fetch('/api/ai-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
   },
+  async ragSources() {
+    try { const r = await fetch('/api/rag/sources'); return r.json(); } catch (e) { return { sources: [] }; }
+  },
+  async ragIngest(formData) {
+    const r = await fetch('/api/rag/ingest', { method:'POST', body: formData });
+    return r.json();
+  },
+  async ragDelete(id) {
+    const r = await fetch('/api/rag/sources/' + encodeURIComponent(id), { method:'DELETE' });
+    return r.json();
+  },
   async followupSuggest(data) {
     const r = await fetch('/api/followup-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
@@ -1131,6 +1142,53 @@ function _followupRequestBody(req) {
 }
 
 // AI 페이로드 생성 — 현재 요청으로 후보 생성 + (직전 결과가 있으면) 결과 기반 후속 페이로드까지 함께 생성.
+/* ── 참고 문서(RAG) 관리 ── */
+async function loadRagSources() {
+  const el = document.getElementById('ragSources');
+  const cnt = document.getElementById('ragCount');
+  if (!el) return;
+  const res = await API.ragSources();
+  const srcs = res.sources || [];
+  if (cnt) cnt.textContent = srcs.length ? `(${srcs.length})` : '';
+  if (!srcs.length) { el.innerHTML = '<span style="color:var(--text-muted)">등록된 문서 없음</span>'; return; }
+  el.innerHTML = srcs.map(s => `
+    <div style="display:flex;gap:6px;align-items:center;padding:3px 0;border-top:1px solid var(--border)">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.source_ref||'')}">
+        ${escapeHtml(s.title||s.id)} <span style="color:var(--text-muted)">· ${escapeHtml(s.kind)} · ${s.chunks}청크</span>
+      </span>
+      <button class="btn btn-secondary" style="font-size:10px;padding:1px 6px" onclick="ragDelete('${s.id}')">삭제</button>
+    </div>`).join('');
+}
+
+async function ragIngestUrl() {
+  const url = (document.getElementById('ragUrl').value || '').trim();
+  if (!url) { toast('URL을 입력하세요', 'error'); return; }
+  toast('문서 색인 중…', 'info');
+  const fd = new FormData(); fd.append('url', url);
+  const res = await API.ragIngest(fd);
+  if (res.detail) { toast('인제스트 실패: ' + res.detail, 'error'); return; }
+  document.getElementById('ragUrl').value = '';
+  toast(`추가됨: ${res.source?.title || ''} (${res.source?.chunks || 0}청크)`, 'success');
+  loadRagSources();
+}
+
+async function ragIngestFile() {
+  const f = document.getElementById('ragFile').files[0];
+  if (!f) { toast('파일을 선택하세요', 'error'); return; }
+  toast('문서 색인 중…', 'info');
+  const fd = new FormData(); fd.append('file', f);
+  const res = await API.ragIngest(fd);
+  if (res.detail) { toast('인제스트 실패: ' + res.detail, 'error'); return; }
+  document.getElementById('ragFile').value = '';
+  toast(`추가됨: ${res.source?.title || ''} (${res.source?.chunks || 0}청크)`, 'success');
+  loadRagSources();
+}
+
+async function ragDelete(id) {
+  await API.ragDelete(id);
+  loadRagSources();
+}
+
 async function generateAiCandidates() {
   const req = _currentRequestForm();
   if (!req.url) { toast('먼저 요청 URL을 입력/붙여넣기 하세요', 'error'); return; }
@@ -3953,6 +4011,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 'CVE 강할 때 AI 접기' 체크박스 초기 상태 반영
   const hideCb = document.getElementById('hideAiWhenCve');
   if (hideCb) hideCb.checked = state.hideAiWhenCve;
+
+  // 참고 문서(RAG) 목록 로드
+  loadRagSources();
 
   // 서버 AI 설정 여부 확인 (좌측 'AI 페이로드 생성' 동작 판단용)
   API.aiStatus().then(s => {

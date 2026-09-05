@@ -67,6 +67,24 @@
           <input type="checkbox" id="hideAiWhenCve" onchange="onHideAiToggle()" style="margin:0">
           강한 CVE 매칭 시 AI 생성 후보 숨기기
         </label>
+
+        <!-- 참고 문서(RAG): 공개 테스트 문서(PDF/URL)를 색인해 생성 근거로 사용 -->
+        <details style="border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+          <summary style="font-size:11px;color:var(--text-secondary);cursor:pointer">참고 문서(RAG) <span id="ragCount" style="color:var(--text-muted)"></span></summary>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+            <div style="font-size:10px;color:var(--text-muted);line-height:1.4">공개 테스트 문서(PayloadsAllTheThings·치트시트·API 문서 등)를 넣으면 AI 생성 시 근거로 검색·주입됩니다.</div>
+            <div style="display:flex;gap:4px">
+              <input id="ragUrl" class="form-input" type="text" placeholder="https://…  (문서/페이지 URL)" style="flex:1;font-size:11px;padding:4px 6px">
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 8px" onclick="ragIngestUrl()">추가</button>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input id="ragFile" type="file" accept=".pdf,.txt,.md" style="flex:1;font-size:10px">
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 8px" onclick="ragIngestFile()">업로드</button>
+            </div>
+            <div id="ragSources" style="font-size:10px;color:var(--text-secondary)"></div>
+          </div>
+        </details>
+
         <div id="aiSuggestMeta" style="font-size:11px;color:var(--accent)"></div>
         <div class="sidebar-scroll" id="aiCandidateList" style="flex:1;min-height:0">
           <div class="empty-state" style="padding:20px">
