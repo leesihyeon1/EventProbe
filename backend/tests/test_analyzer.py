@@ -254,6 +254,30 @@ def test_traversal_not_exposed_stays_low():
     assert r["attack_outcome"] == "inconclusive"
 
 
+def test_proc_self_environ_exposed_is_success():
+    """/proc/self/environ 덤프(CGI 환경변수)가 응답에 있으면 파일 읽기 성공."""
+    environ = ("USER=www-data\x00HOME=/var/www\x00SCRIPT_FILENAME=/var/www/index.php\x00"
+               "DOCUMENT_ROOT=/var/www\x00HTTP_USER_AGENT=Mozilla\x00PATH=/usr/bin\x00")
+    r = analyze_response(200, {}, environ, 60,
+                         payload="/proc/self/environ", category="lfi",
+                         url="http://h/?f=/proc/self/environ")
+    assert r["attack_outcome"] == "success"
+
+
+def test_proc_self_environ_not_exposed_is_low():
+    r = analyze_response(200, {}, "<html>home</html>", 60,
+                         payload="/proc/self/environ", category="lfi")
+    assert r["risk_level"] == "low"
+    assert r["attack_outcome"] == "inconclusive"
+
+
+def test_proc_environ_mention_no_false_positive():
+    """일반 페이지에 'PATH=' 문구가 있어도 오탐하지 않는다(널바이트/CGI 변수 필요)."""
+    r = analyze_response(200, {}, "<html>set your PATH= in docs</html>", 60,
+                         payload="x", category="xss")
+    assert not any("environ" in n for n in _names(r))
+
+
 def test_reflected_file_path_is_not_false_file_read():
     """payload 경로 문자열이 반사돼도 실제 파일 '내용'이 아니면 파일 읽기 성공이 아니다."""
     r = analyze_response(200, {}, "<div>you searched: ../../etc/passwd</div>", 90,

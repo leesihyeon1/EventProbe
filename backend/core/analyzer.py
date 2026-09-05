@@ -1648,6 +1648,14 @@ _FILE_READ_MARKERS_WEAK = [
     (r"\d+\.\d+\.\d+\.\d+ - - \[\d{2}/\w{3}/\d{4}", "웹서버 access 로그 내용"),
     (r"<\?php[\s\S]{0,40}",                     "PHP 소스코드 노출"),
     (r"DB_PASSWORD|DB_USERNAME|APP_KEY=",       ".env 설정 노출"),
+    # /proc/self/environ — 프로세스 환경변수 덤프(웹 LFI 시 CGI 변수가 특징적으로 노출)
+    (r"SCRIPT_FILENAME=|DOCUMENT_ROOT=|GATEWAY_INTERFACE=|SERVER_SOFTWARE=|HTTP_USER_AGENT=",
+     "/proc/self/environ (환경변수) 노출"),
+    (r"(?s)\bPATH=/[^\x00\n]{0,120}\x00",       "/proc/self/environ (환경변수) 노출"),
+    # /proc/net/tcp — 커널 연결 테이블(로컬/원격 주소 hex)
+    (r"sl\s+local_address\s+rem_address",       "/proc/net/tcp 내용"),
+    # /proc/self/cmdline — 실행 커맨드라인(널 구분)
+    (r"(?s)/[a-z]+/[a-z0-9._-]+\x00-{1,2}[a-z]", "/proc/self/cmdline 내용"),
 ]
 # 파일 읽기 시도로 보이는 payload 지표 — 카테고리(lfi/xxe)와 무관하게 파일 내용
 # 탐지를 켜기 위한 힌트. 수많은 경로 트래버설 익스플로잇이 'cve'·'sqli' 등으로 들어온다.
