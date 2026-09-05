@@ -98,6 +98,14 @@ def test_javascript_void_bare_path_is_inconclusive():
     assert not any(f["verdict"] == "성공" for f in r["findings"])
 
 
+def test_xss_payload_with_semicolon_is_not_cmdi():
+    """XSS payload 는 ';'(alert(1);) 를 흔히 포함 — cmdi 로 오분류하지 말 것."""
+    from core.analyzer import infer_attack_type, _checked_desc_for
+    for p in ["<script>alert(1);</script>", '"><img src=x onerror=alert(1)>', "<svg/onload=alert(1)>"]:
+        assert infer_attack_type(p, "") == "xss", p
+        assert "명령 실행" not in _checked_desc_for(p, "")   # cmdi 시그니처 혼입 금지
+
+
 def test_get_has_no_method_finding():
     r = analyze_response(200, {}, "<html>ok</html>", 40, url="http://h/p", method="GET")
     assert not any("메소드" in x["name"] for x in r["findings"])

@@ -1742,6 +1742,12 @@ def _checked_desc(category: str) -> str:
 
 # 명령 주입처럼 보이는 요청 지표(GPON dest_host, 셸 메타문자 등)
 _CMDI_HINT = re.compile(r";|\||&&|\$\(|`|%0a|\bsleep\b|\bid\b|whoami|/bin/|dest_host|\bexec\b|\bcmd=", re.I)
+# XSS 강력 지표(스크립트 태그·이벤트 핸들러·위험 스킴). XSS payload 는 ';' 를 흔히 포함해
+# cmdi 로 오분류되기 쉬우므로, 이 지표가 있으면 cmdi 보다 우선한다.
+_XSS_HINT = re.compile(
+    r"<script|<img\b|<svg|<iframe|<body|<details|<marquee|"
+    r"on(?:error|load|mouseover|focus|click|toggle|animationstart)\s*=|"
+    r"alert\s*\(|prompt\s*\(|confirm\s*\(|document\.cookie|javascript:|data:text/html|vbscript:", re.I)
 
 
 # 공격유형 → '검색한 성공 시그니처' 서술
@@ -1752,6 +1758,7 @@ _SIG_DESC = {
     "ssti": "템플릿 계산 결과(예: 49)",
     "sqli": "SQL/DB 에러 · 시간지연 · 참/거짓 차이",
     "ssrf": "클라우드 메타데이터",
+    "xss":  "payload 의 실행 컨텍스트 반사(<script>/onerror 등)",
 }
 
 
@@ -1762,6 +1769,9 @@ def infer_attack_type(probe: str, category: str) -> str:
     probe = probe or ""
     if _FILE_READ_HINT.search(probe):
         return "lfi"
+    # XSS 강력 마커는 cmdi(';' 등)보다 우선 — XSS payload 의 ';' 오분류 방지
+    if _XSS_HINT.search(probe):
+        return "xss"
     if _CMDI_HINT.search(probe):
         return "cmdi"
     if re.search(r"7\s*\*\s*7|\{\{|\$\{|#\{", probe):
@@ -1770,8 +1780,6 @@ def infer_attack_type(probe: str, category: str) -> str:
         return "ssrf"
     if _SQLI_HINT.search(probe):
         return "sqli"
-    if _DANGEROUS_SCHEME.search(probe) or re.search(r"<script|onerror\s*=|onload\s*=|alert\s*\(", probe, re.I):
-        return "xss"
     return (category or "").lower()
 
 
@@ -1783,6 +1791,9 @@ def _checked_desc_for(probe: str, category: str) -> str:
     """
     probe = probe or ""
     cat = (category or "").lower()
+    # XSS 강력 마커가 있으면 XSS 로 확정 서술(payload 의 ';' 가 cmdi 로 오인되지 않도록 최우선)
+    if _XSS_HINT.search(probe):
+        return _SIG_DESC["xss"]
     parts = []
     # payload 가 직접 가리키는 유형(카테고리 라벨보다 우선)
     if _CMDI_HINT.search(probe):
