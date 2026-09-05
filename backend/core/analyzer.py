@@ -1740,8 +1740,13 @@ def _checked_desc(category: str) -> str:
     return _CHECKED_DESC.get((category or "").lower(), _CHECKED_DEFAULT)
 
 
-# 명령 주입처럼 보이는 요청 지표(GPON dest_host, 셸 메타문자 등)
-_CMDI_HINT = re.compile(r";|\||&&|\$\(|`|%0a|\bsleep\b|\bid\b|whoami|/bin/|dest_host|\bexec\b|\bcmd=", re.I)
+# 명령 주입 지표 — 구분자(;|&)만으로는 SQLi(SLEEP·;DROP)·nosql(||)을 오인하므로,
+# '구분자 + 실제 셸 명령' 또는 명령치환($()·백틱)·알려진 지표(dest_host, system() 등)만 인정.
+_CMDI_HINT = re.compile(
+    r"(?:[;&|]|\|\||&&|%0a|%0d)\s*"
+    r"(?:id\b|cat\b|ls\b|dir\b|pwd\b|whoami|uname|sleep\b|ping\b|curl\b|wget\b|nslookup|"
+    r"nc\b|netcat|bash\b|/bin/|/etc/|\bsh\b|cmd\b|powershell|echo\b|type\b|net\s|ipconfig|ifconfig)"
+    r"|\$\([^)]*\)|`[^`]+`|dest_host|\b(?:exec|system|passthru|popen|shell_exec|proc_open)\s*\(", re.I)
 # XSS 강력 지표(스크립트 태그·이벤트 핸들러·위험 스킴). XSS payload 는 ';' 를 흔히 포함해
 # cmdi 로 오분류되기 쉬우므로, 이 지표가 있으면 cmdi 보다 우선한다.
 _XSS_HINT = re.compile(

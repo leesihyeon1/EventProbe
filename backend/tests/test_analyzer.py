@@ -98,6 +98,25 @@ def test_javascript_void_bare_path_is_inconclusive():
     assert not any(f["verdict"] == "성공" for f in r["findings"])
 
 
+def test_attack_type_classification_matrix():
+    """대표 payload 가 올바른 공격 유형으로 분류되는지 전수 검증(유형 간 오분류 방지)."""
+    from core.analyzer import infer_attack_type as f
+    cases = {
+        "sqli": ["' OR '1'='1", "1' UNION SELECT NULL-- -", "1 AND SLEEP(5)-- -",
+                 "admin'-- -", "1'; DROP TABLE users-- -", "1' ORDER BY 5-- -"],
+        "cmdi": [";id", "| id", "$(id)", "`id`", "& whoami", "dest_host=;id;"],
+        "ssti": ["{{7*7}}", "${7*7}", "#{7*7}", "<%= 7*7 %>"],
+        "lfi":  ["../../../../etc/passwd", "/proc/self/environ", "..%2f..%2fetc%2fpasswd",
+                 "....//....//etc/passwd", ";cat /etc/passwd"],   # cat passwd 는 파일내용이 증거 → lfi
+        "ssrf": ["http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:80/", "gopher://127.0.0.1"],
+        "xss":  ["<script>alert(1)</script>", '"><img src=x onerror=alert(1)>',
+                 "<svg/onload=alert(1)>", "javascript:alert(1)"],
+    }
+    for expected, payloads in cases.items():
+        for p in payloads:
+            assert f(p, "") == expected, f"{p!r} → {f(p,'')} (expected {expected})"
+
+
 def test_xss_payload_with_semicolon_is_not_cmdi():
     """XSS payload 는 ';'(alert(1);) 를 흔히 포함 — cmdi 로 오분류하지 말 것."""
     from core.analyzer import infer_attack_type, _checked_desc_for
