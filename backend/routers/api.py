@@ -192,13 +192,16 @@ def _blurred_request(req) -> dict:
     """AI 분석/판정에 넘길 '호스트 제외' 요청 패킷(응답 본문 아님, ai-suggest 와 동일 정책)."""
     parts = urlsplit(req.url or "")
     path = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
+    # SingleRequest 는 header 이름 목록이 아니라 headers dict 를 가진다 — 키에서 뽑아 민감 헤더 제외
+    hdr_names = [h for h in (getattr(req, "headers", None) or {}).keys()
+                 if str(h).lower() not in _SENSITIVE_HDRS]
     return {
         "method": (req.method or "GET").upper(),
         "path": path,
         "payload": req.payload or "",
         "params": req.params or {},
         "body": (req.body or "")[:800],
-        "header_names": [h for h in (req.header_names or []) if h.lower() not in _SENSITIVE_HDRS],
+        "header_names": hdr_names,
     }
 
 
