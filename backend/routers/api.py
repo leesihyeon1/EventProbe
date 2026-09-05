@@ -378,9 +378,10 @@ async def ai_suggest(req: AiSuggestRequest):
     cve_cands = match_cve_payloads(load_payloads(), path, req.params, req.body or "",
                                    req.fingerprint or {}, limit=8)
 
-    # 1-b) RAG 검색 — 인제스트한 공개 문서에서 이 요청에 맞는 실제 페이로드/기법을 top-k 검색
+    # 1-b) RAG 검색 — 인제스트한 공개 문서에서 이 요청에 맞는 실제 페이로드/기법을 top-k 검색.
+    #      (검색 결과는 LLM 생성에만 주입되므로 AI 활성일 때만 조회)
     retrieved = []
-    if rag.has_sources():
+    if ai_enabled() and rag.has_sources():
         fp = req.fingerprint or {}
         rag_q = " ".join(filter(None, [
             re.sub(r"[/?&=]", " ", path),
@@ -389,6 +390,10 @@ async def ai_suggest(req: AiSuggestRequest):
         ]))
         try:
             retrieved = await asyncio.to_thread(rag.search, rag_q, 6)
+            # 관련도 낮은 스니펫은 버려 무관한 요청에 문서가 끼어드는 것을 막는다(상위 대비 40%↑)
+            if retrieved:
+                top = retrieved[0]["score"]
+                retrieved = [r for r in retrieved if r["score"] >= max(0.3, top * 0.4)]
         except Exception:
             retrieved = []
 
@@ -420,6 +425,9 @@ async def ai_suggest(req: AiSuggestRequest):
     summary = ai_res.get("summary") or ""
     if cve_cands:
         summary = (f"로컬 CVE/알려진취약점 {len(cve_cands)}건" + (" · " + summary if summary else "")).strip()
+    if retrieved:
+        titles = ", ".join(sorted({r.get("title", "") for r in retrieved})[:3])
+        summary = (f"참고 문서 {len(retrieved)}개 스니펫 반영({titles})" + (" · " + summary if summary else "")).strip()
     if ai_err and cve_cands:
         summary += f" (AI 보강 실패: {ai_err})"
     test_type = ai_res.get("test_type") or (f"CVE 매칭 {len(cve_cands)}건" if cve_cands else "분석")
@@ -430,6 +438,8 @@ async def ai_suggest(req: AiSuggestRequest):
         "candidates": merged[: len(cve_cands) + count],
         "model": ai_res.get("model", ""),
         "cve_count": len(cve_cands),
+        "rag_used": len(retrieved),
+        "rag_sources": sorted({r.get("title", "") for r in retrieved}) if retrieved else [],
     }
 
 
