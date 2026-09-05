@@ -210,10 +210,13 @@ async def _verdict_retrieved(category: str, outcome: str, findings: list, probe:
     공개 문서라 유출 위험 없음. 관련도 낮은 스니펫은 버린다."""
     if not (ai_enabled() and rag.has_sources()):
         return []
-    names = " ".join(f.get("name", "") for f in (findings or []))
-    # 신호의 'why'(취약 원리 서술) + 실제 요청(path·payload)을 질의에 넣어 매칭 정확도를 높인다.
-    whys = " ".join(str(f.get("why", "")) for f in (findings or []))[:400]
-    rag_q = " ".join(filter(None, [str(probe or ""), str(category or ""), str(outcome or ""), names, whys])).strip()
+    # '미확인'(자동 판정 불가) finding 의 why 는 일반 boilerplate("블라인드/OOB…")라 질의를
+    # 희석시켜 관련 문서를 임계값 아래로 떨어뜨린다 → 실제 신호(성공/미확정/안전)만 질의에 쓴다.
+    specific = [f for f in (findings or []) if f.get("verdict") != "미확인"]
+    names = " ".join(f.get("name", "") for f in specific)
+    whys = " ".join(str(f.get("why", "")) for f in specific)[:400]
+    # 실제 요청(path·payload)과 공격유형을 중심으로 검색(payload 가 가장 강한 신호).
+    rag_q = " ".join(filter(None, [str(probe or ""), str(category or ""), names, whys])).strip()
     if not rag_q:
         return []
     try:
