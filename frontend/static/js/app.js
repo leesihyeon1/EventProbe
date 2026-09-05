@@ -1741,9 +1741,13 @@ function buildRawRequest(req) {
   // new URL() 은 경로의 ..;/ ../ %2e 등을 정규화·디코딩해 익스플로잇 경로를 훼손하므로
   // origin/path/query 를 문자열로 직접 분해해 원문 그대로 표시(실제 전송과 일치).
   let host = '', path = '/';
-  const m = urlStr.match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]+)([^#]*)?/i);
+  // path 는 host 뒤 전체(쿼리 포함). '#' 에서 끊으면 안 된다 — 실제 전송에선 '#' 가
+  // %23 으로 인코딩돼 서버로 가므로(_url_with_params), 프리뷰도 동일하게 표시한다.
+  const m = urlStr.match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]+)(.*)$/i);
   if (m) { host = m[1]; path = m[2] || '/'; }
   else { path = urlStr || '/'; }
+  // 실제 전송과 일치: 리터럴 '#'(프래그먼트)·공백 인코딩
+  path = (path.replace(/#/g, '%23').replace(/ /g, '%20')) || '/';
   // kvParams 병합(백엔드와 동일한 최소 인코딩: @ / : ; + = 등 보존)
   const pairs = Object.entries(req.params || {});
   if (pairs.length) {
