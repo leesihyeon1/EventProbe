@@ -185,15 +185,32 @@ def find_payload_by_id(payload_id: str):
     return None, None
 
 
-async def _verdict_retrieved(category: str, outcome: str, findings: list) -> list:
-    """AI 종합판정용 RAG 검색 — 라벨(공격유형·신호 이름)만으로 조회(응답 본문 미전송).
+_SENSITIVE_HDRS = ("host", "authorization", "cookie", "proxy-authorization")
+
+
+def _blurred_request(req) -> dict:
+    """AI 분석/판정에 넘길 '호스트 제외' 요청 패킷(응답 본문 아님, ai-suggest 와 동일 정책)."""
+    parts = urlsplit(req.url or "")
+    path = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
+    return {
+        "method": (req.method or "GET").upper(),
+        "path": path,
+        "payload": req.payload or "",
+        "params": req.params or {},
+        "body": (req.body or "")[:800],
+        "header_names": [h for h in (req.header_names or []) if h.lower() not in _SENSITIVE_HDRS],
+    }
+
+
+async def _verdict_retrieved(category: str, outcome: str, findings: list, probe: str = "") -> list:
+    """AI 종합판정용 RAG 검색 — 공격유형·신호 이름 + 실제 요청 패킷(호스트 제외)으로 조회.
     공개 문서라 유출 위험 없음. 관련도 낮은 스니펫은 버린다."""
     if not (ai_enabled() and rag.has_sources()):
         return []
     names = " ".join(f.get("name", "") for f in (findings or []))
-    # 신호의 'why'(취약 원리 서술)까지 질의에 넣어 매칭 정확도를 높인다(응답 본문 아님, 유출 없음).
+    # 신호의 'why'(취약 원리 서술) + 실제 요청(path·payload)을 질의에 넣어 매칭 정확도를 높인다.
     whys = " ".join(str(f.get("why", "")) for f in (findings or []))[:400]
-    rag_q = " ".join(filter(None, [str(category or ""), str(outcome or ""), names, whys])).strip()
+    rag_q = " ".join(filter(None, [str(probe or ""), str(category or ""), str(outcome or ""), names, whys])).strip()
     if not rag_q:
         return []
     try:
@@ -240,12 +257,14 @@ async def send_request(req: SingleRequest):
                 _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
                         for f in analysis.get("findings", [])]
                 _atype = analysis.get("attack_type") or req.category
+                _blur = _blurred_request(req)
+                _probe = f"{_blur['path']} {_blur['payload']}"
                 analysis["ai_verdict"] = await ai_verdict({
                     "category": _atype, "status": r["status_code"], "time": r["response_time"],
                     "outcome": analysis.get("attack_outcome"),
-                    "findings": _fnd,
+                    "findings": _fnd, "request": _blur,
                     "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
-                    "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd),
+                    "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd, _probe),
                 })
             return {
                 "status_code": r["status_code"], "headers": r["headers"], "body": r["body"],
@@ -300,12 +319,14 @@ async def send_request(req: SingleRequest):
             _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
                     for f in analysis.get("findings", [])]
             _atype = analysis.get("attack_type") or req.category
+            _blur = _blurred_request(req)
+            _probe = f"{_blur['path']} {_blur['payload']}"
             analysis["ai_verdict"] = await ai_verdict({
                 "category": _atype, "status": response.status_code, "time": round(elapsed, 2),
                 "outcome": analysis.get("attack_outcome"),
-                "findings": _fnd,
+                "findings": _fnd, "request": _blur,
                 "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
-                "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd),
+                "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd, _probe),
             })
 
         return {

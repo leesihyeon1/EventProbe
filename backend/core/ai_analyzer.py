@@ -525,6 +525,11 @@ _VERDICT_SYSTEM = (
     '"reasoning":"주입한 명령의 실행 출력(uid= 등)이 응답에서 확인되지 않아 명령 주입 성공은 미확인입니다(200 일반 페이지). 블라인드일 수 있으니 확증 스캔/OOB 로 재확인하세요. 별개로 CSP 등 보안 헤더 누락이 있습니다.",'
     '"priority":"확증 스캔 또는 OOB(콜백)로 blind 실행 여부 재확인",'
     '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 보완"}\n'
+    "9) '공격_요청'(payload·경로·파라미터·헤더 이름)이 주어지면, 그걸로 이 요청이 어떤 공격을 노리는지 "
+    "구체적으로 식별하고 영향도(성공 시 무엇이 가능한가 — 데이터 유출·원격코드실행·인증우회·계정탈취 등)를 "
+    "reasoning 에 짧게 담는다. 단, 성공/실패 판정(outcome/verdict)은 여전히 '공격_신호'로만 결정한다 — "
+    "요청이 위험해 보인다는 이유만으로 성공으로 단정하지 말 것(신호 없으면 미확인). 요청과 신호가 어긋나면 "
+    "신호를 우선한다.\n"
     "8) RETRIEVED(참고문서) 블록이 있으면 이 공격 유형에 대한 검증된 지식이다. priority(다음 확인 방법)와 "
     "remediation(수정 방안)을 그 문서 내용에 근거해 더 구체적으로 쓴다(예: SSRF 성공 → URL 파서 불일치 확인 "
     "기법을 priority 에 반영). 단, 판정(outcome/verdict)을 뒤집는 근거로는 쓰지 말 것 — 판정은 실제 신호로만 "
@@ -550,15 +555,28 @@ async def ai_verdict(ctx: dict) -> dict | None:
             lines.append(f"{i}) {snip}")
         rag_block = ("RETRIEVED (이 공격 유형 관련 참고문서 발췌 — priority·remediation 근거로만 활용, "
                      "판정은 바꾸지 말 것):\n" + "\n".join(lines) + "\n")
+    # 공격 요청 패킷(호스트 제외) — LLM 이 이 요청이 무슨 공격인지·영향도를 파악하는 근거
+    rq = ctx.get("request") or {}
+    req_block = ""
+    if rq:
+        req_block = (
+            "공격_요청(호스트 제외 — 이 요청이 무엇을 노리는지·영향도 파악용):\n"
+            f"  {rq.get('method', '')} {rq.get('path', '')}\n"
+            f"  payload: {(rq.get('payload') or '(없음)')[:300]}\n"
+            f"  params: {json.dumps(rq.get('params') or {}, ensure_ascii=False)[:300]}\n"
+            f"  body: {(rq.get('body') or '(없음)')[:300]}\n"
+            f"  header_names: {json.dumps(rq.get('header_names') or [], ensure_ascii=False)[:200]}\n"
+        )
     user = (
         f"공격_유형: {ctx.get('category') or '(없음)'}\n"
         f"상태코드: {ctx.get('status')}\n"
         f"응답시간_ms: {ctx.get('time')}\n"
         f"확정_판정: {ctx.get('outcome')}\n"
+        f"{req_block}"
         f"공격_신호(각 항목 verdict=성공/안전/미확정, why=근거): {json.dumps(findings, ensure_ascii=False)}\n"
         f"응답_보안_점검: {json.dumps(alerts, ensure_ascii=False)}\n"
         f"{rag_block}"
-        f"위 신호만 근거로 종합 판정을 JSON 으로 주세요."
+        f"위 요청·신호를 근거로 종합 판정을 JSON 으로 주세요."
     )
     payload = {
         "model": model,
