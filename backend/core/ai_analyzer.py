@@ -25,6 +25,17 @@ def _timeout():
     try: return max(10.0, float(os.getenv("AI_TIMEOUT", "120")))
     except ValueError: return 120.0
 
+def _apply_model_opts(payload: dict) -> dict:
+    """모델별 요청 옵션 보정. nemotron 등 추론형은 chain-of-thought 가 content 대신
+    reasoning_content 로 나오면서 max_tokens 를 잡아먹어 JSON 이 잘린다. 구조화 JSON
+    출력 태스크에서는 사고과정이 불필요하므로 thinking 을 끈다(응답 짧고 안정적).
+    끄고 싶지 않으면 .env 에 AI_THINKING=on."""
+    model = payload.get("model", "")
+    thinking_on = os.getenv("AI_THINKING", "off").strip().lower() in ("1", "true", "yes", "on")
+    if ("nemotron" in model.lower() or "reason" in model.lower()) and not thinking_on:
+        payload["chat_template_kwargs"] = {"thinking": False}
+    return payload
+
 _BODY_LIMIT = 4000   # LLM 에 보낼 응답 본문 최대 길이(토큰/비용 관리)
 
 _SYSTEM_PROMPT = (
@@ -118,7 +129,7 @@ async def ai_analyze(ctx: dict) -> dict | None:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}", "model": model}
         content = r.json()["choices"][0]["message"]["content"]
@@ -165,7 +176,7 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
         content = r.json()["choices"][0]["message"]["content"].strip()
@@ -364,7 +375,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
         # 소형 모델은 간헐적으로 파싱 불가/빈 응답을 냄 → 최대 2회 시도
         for attempt in range(2):
             async with httpx.AsyncClient(timeout=_timeout()) as client:
-                r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+                r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
             if r.status_code != 200:
                 return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
             content = r.json()["choices"][0]["message"]["content"]
@@ -536,7 +547,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}", "model": model}
         content = r.json()["choices"][0]["message"]["content"]
