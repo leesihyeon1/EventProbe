@@ -352,6 +352,19 @@ function parseRequestText(text) {
 }
 
 // 파싱 결과를 메인 요청 폼에 채움
+// 테스트 트래픽 식별용 기본 헤더 — 전체 패킷을 복사해 테스트할 때 '내 요청'을 WAF/IDS
+// 로그에서 구분하기 위한 마커. 기본으로 요청 헤더에 들어가되, 대상이 거부하면 그 행을
+// 삭제하고 보내면 된다(강제 주입 아님, 편집·삭제 가능).
+const TEST_HEADER_KEY = 'ncits_log_test';
+function defaultTestHeaderRow() { return { key: TEST_HEADER_KEY, value: '1' }; }
+function ensureTestHeader(rows) {
+  rows = (rows || []).slice();
+  if (!rows.some(r => (r.key || '').trim().toLowerCase() === TEST_HEADER_KEY)) {
+    rows.push(defaultTestHeaderRow());
+  }
+  return rows;
+}
+
 function fillFromParsed(n) {
   const ms = document.getElementById('methodSelect');
   if (n.method) {
@@ -364,8 +377,8 @@ function fillFromParsed(n) {
   state.kvParams = n.params.length ? n.params : [];
   renderKvEditor('paramsKv', state.kvParams);
 
-  // 헤더는 KV 모드로 강제 후 채움
-  state.kvHeaders = n.headers.length ? n.headers : [];
+  // 헤더는 KV 모드로 강제 후 채움. 붙여넣은 패킷에도 테스트 마커 헤더를 유지(없으면 추가).
+  state.kvHeaders = ensureTestHeader(n.headers.length ? n.headers : []);
   headerMode = 'kv';
   document.getElementById('headersKvWrap').style.display = 'block';
   document.getElementById('headersRawWrap').style.display = 'none';
@@ -401,9 +414,9 @@ function clearRequest() {
   const verCustom = document.getElementById('httpVersionCustom');
   if (verCustom) { verCustom.value = ''; verCustom.style.display = 'none'; }
 
-  // 파라미터/헤더
+  // 파라미터/헤더 (헤더는 테스트 마커만 남긴다)
   state.kvParams = [];
-  state.kvHeaders = [];
+  state.kvHeaders = [defaultTestHeaderRow()];
   renderKvEditor('paramsKv', state.kvParams);
   // 헤더는 KV 모드로 되돌림
   headerMode = 'kv';
@@ -3902,6 +3915,7 @@ function restoreHistory(id) {
 /* ── Init ── */
 document.addEventListener('DOMContentLoaded', () => {
   loadSidebar();
+  state.kvHeaders = ensureTestHeader(state.kvHeaders);   // 기본 테스트 마커 헤더 시드
   renderKvEditor('headersKv', state.kvHeaders);
   renderKvEditor('paramsKv', state.kvParams);
 
