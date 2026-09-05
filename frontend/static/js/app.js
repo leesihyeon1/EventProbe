@@ -3952,10 +3952,11 @@ function looksLikeRequest(text) {
   const first = t.split(/\s+/)[0].toLowerCase().replace(/^\$/, '');
   if (first === 'curl' || first === 'wget') return true;
   const firstLine = t.split('\n')[0].trim();
-  // HTTP 버전이 있으면 확실한 요청. 버전이 없어도 대상이 /path 또는 http(s):// 로
-  // 시작하고 다음 줄에 헤더(:포함)가 있으면 요청으로 인정 (버전 없는 캡처 대응)
-  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP\/\d/i.test(firstLine)) return true;
-  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\/\S*|https?:\/\/\S+)$/i.test(firstLine)) {
+  // HTTP 버전이 있으면 확실한 요청(URI 에 공백이 있어도 무방 — 마지막 토큰이 HTTP/x.x).
+  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+.+\s+HTTP\/\d/i.test(firstLine)) return true;
+  // 버전이 없어도 METHOD + '/path' 또는 'http(s)://' 로 시작하고 다음 줄이 헤더면 요청으로 인정.
+  // URI 에 인코딩 안 된 공백(SQLi 의 ' AND ...', '-- -' 등)이 있어도 인식되도록 $ 앵커/\S* 제거.
+  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\/|https?:\/\/)/i.test(firstLine)) {
     const second = (t.split('\n')[1] || '').trim();
     if (/^[\w-]+:\s*\S/.test(second)) return true;   // 둘째 줄이 헤더면 요청으로 확신
   }
