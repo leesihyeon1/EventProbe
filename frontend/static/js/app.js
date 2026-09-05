@@ -2116,14 +2116,16 @@ function _findingEvidenceBlock(findings) {
   </div>`;
 }
 
-// RAG 참조 문서(맥락) 펼침 블록 — 이 판정/생성에 실제 검색·주입된 문서 발췌를 보여준다.
+// 판정·조치의 '참고 지식(RAG)' 펼침 블록 — 이 응답에서 찾은 탐지 증거가 아니라,
+// 영향도·조치 서술에 반영한 외부 문서 발췌임을 라벨로 분명히 한다.
 function _ragContextBlock(ragCtx, usedCount) {
   const ctx = ragCtx || [];
   if (!usedCount || !ctx.length) return '';
   const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>30 ? s.slice(0,30)+'…' : s; };
   return `
-    <details style="margin-top:8px;background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px">
-      <summary style="font-size:10px;color:var(--purple);cursor:pointer;line-height:1.5">참고 문서 ${usedCount} — ${ctx.map(c => escapeHtml(_shortDoc(c.title)) + (c.loc ? ' ' + escapeHtml(c.loc) : '')).slice(0,3).join(', ')}${ctx.length>3?' 외':''} <span style="color:var(--text-muted)">(펼쳐 근거 맥락 보기)</span></summary>
+    <details style="margin-top:6px;background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px">
+      <summary style="font-size:10px;color:var(--purple);cursor:pointer;line-height:1.5">참고 지식(RAG) ${usedCount} — ${ctx.map(c => escapeHtml(_shortDoc(c.title)) + (c.loc ? ' ' + escapeHtml(c.loc) : '')).slice(0,3).join(', ')}${ctx.length>3?' 외':''} <span style="color:var(--text-muted)">(판정·조치에 반영된 외부 문서 · 펼쳐 보기)</span></summary>
+      <div style="margin-top:4px;font-size:9px;color:var(--text-muted)">※ 이 응답에서 찾은 탐지 증거가 아니라, 영향도·조치 서술을 뒷받침한 외부 참고 문서입니다.</div>
       <div style="margin-top:5px;display:flex;flex-direction:column;gap:5px">
         ${ctx.map(c => `
           <div style="font-size:10px;line-height:1.45;border-top:1px solid rgba(188,140,255,.18);padding-top:4px">
@@ -2157,8 +2159,8 @@ function renderVerdictCard(a, confidenceColor) {
           ${ai.reasoning ? `<div class="detail-item">${escapeHtml(ai.reasoning)}</div>` : ''}
           ${ai.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority)}</div>` : ''}
           ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation)}</div>` : ''}
-          ${_findingEvidenceBlock(a.findings)}
           ${_ragContextBlock(ai.rag_context, ai.rag_used)}
+          ${_findingEvidenceBlock(a.findings)}
         </div>
       </div>`;
   }
