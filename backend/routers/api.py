@@ -191,14 +191,18 @@ async def _verdict_retrieved(category: str, outcome: str, findings: list) -> lis
     if not (ai_enabled() and rag.has_sources()):
         return []
     names = " ".join(f.get("name", "") for f in (findings or []))
-    rag_q = " ".join(filter(None, [str(category or ""), str(outcome or ""), names])).strip()
+    # 신호의 'why'(취약 원리 서술)까지 질의에 넣어 매칭 정확도를 높인다(응답 본문 아님, 유출 없음).
+    whys = " ".join(str(f.get("why", "")) for f in (findings or []))[:400]
+    rag_q = " ".join(filter(None, [str(category or ""), str(outcome or ""), names, whys])).strip()
     if not rag_q:
         return []
     try:
         hits = await asyncio.to_thread(rag.search, rag_q, 4)
         if hits:
+            # 판정 근거는 '강하게 관련된' 문서만 — 약하거나 엉뚱한 스니펫(0.5 미만)은 버린다.
+            # 아무것도 기준을 못 넘으면 참고 문서를 표시하지 않는다(엉뚱한 근거보다 없는 게 낫다).
             top = hits[0]["score"]
-            hits = [h for h in hits if h["score"] >= max(0.3, top * 0.4)]
+            hits = [h for h in hits if h["score"] >= max(0.5, top * 0.6)][:3]
         return hits
     except Exception:
         return []
