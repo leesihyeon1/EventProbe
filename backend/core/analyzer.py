@@ -1740,28 +1740,59 @@ def _checked_desc(category: str) -> str:
 _CMDI_HINT = re.compile(r";|\||&&|\$\(|`|%0a|\bsleep\b|\bid\b|whoami|/bin/|dest_host|\bexec\b|\bcmd=", re.I)
 
 
-def _checked_desc_for(probe: str, category: str) -> str:
-    """요청 내용(payload+URL+본문)으로 공격 유형을 추론해, '응답에서 무엇을 검색했는지' 서술.
+# 공격유형 → '검색한 성공 시그니처' 서술
+_SIG_DESC = {
+    "cmdi": "명령 실행 출력(uid=0(root) 등)",
+    "lfi":  "파일 내용(root:x:0:0 · 환경변수 · 개인키 등)",
+    "xxe":  "파일 내용(root:x:0:0 · 개인키 등)",
+    "ssti": "템플릿 계산 결과(예: 49)",
+    "sqli": "SQL/DB 에러 · 시간지연 · 참/거짓 차이",
+    "ssrf": "클라우드 메타데이터",
+}
 
-    카테고리가 뭉뚱그려진 경우(cve 등) 파일 노출로 오해하지 않도록, 실제 공격 성격에 맞춰
-    검색한 성공 시그니처를 나열한다(예: GPON dest_host → 명령 실행 출력 uid=).
+
+def infer_attack_type(probe: str, category: str) -> str:
+    """payload+URL+본문으로 공격 유형을 추론. payload 가 특정 유형을 명확히 가리키면
+    카테고리 라벨보다 그걸 신뢰한다(라벨이 틀리거나 뭉뚱그려진 cve 인 경우 오분류 방지).
+    예: category=sqli 인데 payload=/proc/self/environ → 파일읽기(lfi)로 인식."""
+    probe = probe or ""
+    if _FILE_READ_HINT.search(probe):
+        return "lfi"
+    if _CMDI_HINT.search(probe):
+        return "cmdi"
+    if re.search(r"7\s*\*\s*7|\{\{|\$\{|#\{", probe):
+        return "ssti"
+    if _SSRF_HINT.search(probe):
+        return "ssrf"
+    if _SQLI_HINT.search(probe):
+        return "sqli"
+    return (category or "").lower()
+
+
+def _checked_desc_for(probe: str, category: str) -> str:
+    """'응답에서 무엇을 검색했는지' 서술 — payload 가 가리키는 유형을 카테고리보다 우선.
+
+    payload 힌트가 하나라도 있으면 그것만 나열(틀린 카테고리가 SQL 등 무관한 시그니처를
+    끼워넣지 않도록). 힌트가 전혀 없을 때만 카테고리 설명으로 폴백.
     """
     probe = probe or ""
     cat = (category or "").lower()
     parts = []
-    if _CMDI_HINT.search(probe) or cat == "cmdi":
-        parts.append("명령 실행 출력(uid=0(root) 등)")
-    if _FILE_READ_HINT.search(probe) or cat in ("lfi", "xxe"):
-        parts.append("파일 내용(root:x:0:0 · 개인키 등)")
+    # payload 가 직접 가리키는 유형(카테고리 라벨보다 우선)
+    if _CMDI_HINT.search(probe):
+        parts.append(_SIG_DESC["cmdi"])
+    if _FILE_READ_HINT.search(probe):
+        parts.append(_SIG_DESC["lfi"])
     if re.search(r"7\s*\*\s*7|\{\{|\$\{|#\{", probe):
-        parts.append("템플릿 계산 결과(예: 49)")
-    if _SQLI_HINT.search(probe) or cat == "sqli":
-        parts.append("SQL/DB 에러 · 시간지연 · 참/거짓 차이")
-    if _SSRF_HINT.search(probe) or cat == "ssrf":
-        parts.append("클라우드 메타데이터")
-    if not parts:
-        parts.append(_checked_desc(cat))
-    return " · ".join(parts)
+        parts.append(_SIG_DESC["ssti"])
+    if _SQLI_HINT.search(probe):
+        parts.append(_SIG_DESC["sqli"])
+    if _SSRF_HINT.search(probe):
+        parts.append(_SIG_DESC["ssrf"])
+    if parts:
+        return " · ".join(parts)
+    # payload 에 유형 힌트가 전혀 없을 때만 카테고리 기반 설명
+    return _SIG_DESC.get(cat, _checked_desc(cat))
 
 
 def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
@@ -2257,11 +2288,15 @@ def analyze_response(
     # 3-상태 명확화: 성공/안전(차단)이 아니고 아무 신호도 없는 '공격 시도'는 '안전'이 아니라
     # '자동 판정 불가(수동 검토 필요)'로 명시한다. (블라인드/OOB/로직/시그니처 없는 파일 등
     # 단일 응답으로 판정 못 하는 유형이 거짓 안심을 주지 않도록.)
+    # payload/URL 로 실제 공격 유형을 추론(카테고리 라벨이 틀릴 수 있음) — 서술·AI 판정에 사용
+    _probe_all = f"{payload or ''} {url or ''} {req_body or ''}"
+    result["attack_type"] = infer_attack_type(_probe_all, category)
+
     is_attack_attempt = bool((payload and payload.strip()) or category)
     has_signal = any(f.get("verdict") in ("성공", "안전", "미확정") for f in findings)
     if (is_attack_attempt and outcome == "inconclusive" and not has_signal
             and not result["sensitive_data"] and not result["error_leaks"]):
-        _mprobe = f"{payload or ''} {url or ''} {req_body or ''}"
+        _mprobe = _probe_all
         _sigs = _checked_desc_for(_mprobe, category)
         _bn = "" if baseline else " · baseline 없음"
         findings.append({

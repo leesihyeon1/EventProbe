@@ -49,6 +49,18 @@ def test_unknown_evidence_matches_attack_type_not_file():
     assert "root:x:0:0" not in ev   # 파일 노출로 오해하지 않음
 
 
+def test_mislabeled_category_uses_payload_attack_type():
+    """category=sqli 라벨이어도 payload 가 파일읽기(/proc/self/environ)면 lfi 로 인식하고
+    미확인 증거에 SQL 시그니처를 끼워넣지 않는다."""
+    r = analyze_response(200, {}, "<html>generic page</html>", 200,
+                         payload="/../../../../proc/self/environ", category="sqli",
+                         url="http://h/x")
+    assert r["attack_type"] == "lfi"
+    ev = next(f["evidence"] for f in r["findings"] if f["verdict"] == "미확인")
+    assert "파일 내용" in ev
+    assert "SQL" not in ev   # 틀린 카테고리의 SQL 시그니처가 섞이지 않음
+
+
 def test_success_signal_has_no_unknown_finding():
     r = analyze_response(200, {}, "root:x:0:0:root", 60,
                          payload="../../etc/passwd", category="lfi")

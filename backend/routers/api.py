@@ -234,12 +234,13 @@ async def send_request(req: SingleRequest):
             if ai_verdict_enabled():
                 _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
                         for f in analysis.get("findings", [])]
+                _atype = analysis.get("attack_type") or req.category
                 analysis["ai_verdict"] = await ai_verdict({
-                    "category": req.category, "status": r["status_code"], "time": r["response_time"],
+                    "category": _atype, "status": r["status_code"], "time": r["response_time"],
                     "outcome": analysis.get("attack_outcome"),
                     "findings": _fnd,
                     "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
-                    "retrieved": await _verdict_retrieved(req.category, analysis.get("attack_outcome"), _fnd),
+                    "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd),
                 })
             return {
                 "status_code": r["status_code"], "headers": r["headers"], "body": r["body"],
@@ -292,12 +293,13 @@ async def send_request(req: SingleRequest):
         if ai_verdict_enabled():
             _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
                     for f in analysis.get("findings", [])]
+            _atype = analysis.get("attack_type") or req.category
             analysis["ai_verdict"] = await ai_verdict({
-                "category": req.category, "status": response.status_code, "time": round(elapsed, 2),
+                "category": _atype, "status": response.status_code, "time": round(elapsed, 2),
                 "outcome": analysis.get("attack_outcome"),
                 "findings": _fnd,
                 "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
-                "retrieved": await _verdict_retrieved(req.category, analysis.get("attack_outcome"), _fnd),
+                "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd),
             })
 
         return {
