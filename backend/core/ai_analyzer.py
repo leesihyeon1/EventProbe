@@ -220,7 +220,8 @@ PAYLOAD BANK (use these exact styles; pick real values, never placeholders):
   path/authbypass: /..;/     ..%2f..%2f     /%2e%2e/     /manager/html/..;/
 
 Output ONLY this JSON (no prose):
-{"test_type":"app/endpoint","summary":"Korean 1 sentence","candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other","location":"param|path|body|header","param":"name or empty for path","payload":"string","why":"Korean short"}]}
+{"test_type":"app/endpoint","summary":"Korean 1 sentence","candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other","location":"param|path|body|header","param":"name or empty for path","payload":"string","why":"Korean short","rag_ref":0}]}
+- "rag_ref": if a candidate was derived from a numbered RETRIEVED snippet (shown in the user message), set it to that number; otherwise 0 or omit. Do NOT invent a number when no RETRIEVED block is present.
 
 EXAMPLE for POST with body {"q":"test"} (param q exists):
 {"test_type":"검색 파라미터 q","summary":"검색 파라미터 q에 대한 인젝션 점검","candidates":[{"category":"sqli","location":"body","param":"q","payload":"' OR '1'='1","why":"불린 기반 SQL 인젝션"},{"category":"xss","location":"body","param":"q","payload":"<script>alert(1)</script>","why":"반사형 XSS"},{"category":"cmdi","location":"body","param":"q","payload":";id","why":"OS 명령 주입"},{"category":"ssti","location":"body","param":"q","payload":"{{7*7}}","why":"템플릿 평가 결과 49 확인"}]}'''
@@ -342,7 +343,8 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
             snip = re.sub(r"\s+", " ", str(r.get("text", "")))[:400]
             lines.append(f"{i}) [{r.get('title', '')}{(' ' + r.get('loc', '')) if r.get('loc') else ''}] {snip}")
         rag_block = ("RETRIEVED (인제스트한 참고문서에서 이 요청에 적합. 여기 나온 실제 페이로드/파라미터/"
-                     "기법을 최우선으로 이 요청에 맞게 구체화하라. 문서에 없는 파라미터는 지어내지 말 것):\n"
+                     "기법을 최우선으로 이 요청에 맞게 구체화하라. 문서에 없는 파라미터는 지어내지 말 것. "
+                     "어떤 후보를 아래 항목 중 하나를 근거로 만들었으면 그 후보 JSON 에 \"rag_ref\": <번호> 를 넣어라):\n"
                      + "\n".join(lines) + "\n\n")
     user = (
         f"method: {method}\n"
@@ -416,12 +418,22 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
                 if key in seen:      # 중복 제거
                     continue
                 seen.add(key)
+                # RAG 근거 매핑: 모델이 준 rag_ref(1-based) → 참조 문서 제목/위치
+                rag_source = ""
+                try:
+                    ridx = int(c.get("rag_ref") or 0)
+                except (TypeError, ValueError):
+                    ridx = 0
+                if retrieved and 1 <= ridx <= len(retrieved[:6]):
+                    rr = retrieved[ridx - 1]
+                    rag_source = str(rr.get("title", "")) + (f" {rr.get('loc')}" if rr.get("loc") else "")
                 norm.append({
                     "category": _norm_category(c.get("category", ""), payload_str),
                     "param": param,
                     "location": loc,
                     "payload": payload_str,
                     "why": str(c.get("why", "")),
+                    "rag_source": rag_source.strip(),
                 })
 
             # 카테고리 편중 방지 — 한 카테고리가 목록을 도배하지 않도록 카테고리당 최대 3개.

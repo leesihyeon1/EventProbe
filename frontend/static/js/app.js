@@ -1298,9 +1298,24 @@ function aiCandCard(c, idx) {
           ${tag}${methodTag}<span style="color:${isCve ? 'var(--text-secondary)' : 'var(--accent)'}">${head}</span>
         </div>
         ${payloadLine}
-        ${c.why ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>` : (ref ? `<div style="margin-top:2px">${ref}</div>` : '')}
+        ${_aiCandDesc(c, isCve, ref)}
       </div>
     </div>`;
+}
+
+// 후보 설명 줄: AI 생성은 'RAG 근거'만(뻔한 why 설명 생략), 결과기반/CVE 는 기존 why/참조 유지
+function _aiCandDesc(c, isCve, ref) {
+  const isAi = !isCve && c.source !== 'followup';
+  if (c.rag_source) {
+    // 파일명이 길어 카드를 넘치지 않도록 말줄임 + 전체는 툴팁으로
+    return `<div title="RAG 참조: ${escapeHtml(c.rag_source)}" style="font-size:10px;color:var(--purple);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">근거: ${escapeHtml(c.rag_source)} ${ref}</div>`;
+  }
+  if (isAi) {   // RAG 근거 없는 순수 AI 후보는 설명 생략(요청 사항)
+    return ref ? `<div style="margin-top:2px">${ref}</div>` : '';
+  }
+  return c.why
+    ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escapeHtml(c.why)} ${ref}</div>`
+    : (ref ? `<div style="margin-top:2px">${ref}</div>` : '');
 }
 
 function renderAiCandidates(res) {
