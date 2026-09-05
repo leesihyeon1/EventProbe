@@ -1976,6 +1976,23 @@ function renderAttackCard(a) {
     </div>`;
 }
 
+// 보안 Alert 카드처럼, findings 의 '실제 매칭 증거'를 판정 카드에 표시
+function _findingEvidenceBlock(findings) {
+  const V = { '성공':'tag-red', '차단':'tag-green', '안전':'tag-green', '미확정':'tag-blue', '미확인':'tag-orange' };
+  const evs = (findings || []).filter(f => f && f.evidence);
+  if (!evs.length) return '';
+  return `<div style="margin-top:8px">
+    <div class="alert-section-label">탐지된 증거 <span class="evidence-hint">(응답에서 검색해 확인)</span></div>
+    ${evs.map(f => `<div style="margin:4px 0">
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+        <span class="tag ${V[f.verdict] || 'tag-blue'}" style="font-size:9px">${escapeHtml(f.verdict || '')}</span>
+        <span style="font-size:10px;color:var(--text-secondary)">${escapeHtml(f.name || '')}</span>
+      </div>
+      <div class="attack-evidence">${escapeHtml(String(f.evidence))}</div>
+    </div>`).join('')}
+  </div>`;
+}
+
 // 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
 function renderVerdictCard(a, confidenceColor) {
   const ai = a.ai_verdict;
@@ -1999,6 +2016,7 @@ function renderVerdictCard(a, confidenceColor) {
           ${ai.reasoning ? `<div class="detail-item">${escapeHtml(ai.reasoning)}</div>` : ''}
           ${ai.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority)}</div>` : ''}
           ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation)}</div>` : ''}
+          ${_findingEvidenceBlock(a.findings)}
         </div>
       </div>`;
   }
@@ -2019,6 +2037,7 @@ function renderVerdictCard(a, confidenceColor) {
           ${riskBadge(a.risk_level)}
         </div>
         ${aiErr}
+        ${_findingEvidenceBlock(a.findings)}
       </div>
     </div>`;
 }
