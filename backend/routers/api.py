@@ -185,6 +185,25 @@ def find_payload_by_id(payload_id: str):
     return None, None
 
 
+async def _verdict_retrieved(category: str, outcome: str, findings: list) -> list:
+    """AI 종합판정용 RAG 검색 — 라벨(공격유형·신호 이름)만으로 조회(응답 본문 미전송).
+    공개 문서라 유출 위험 없음. 관련도 낮은 스니펫은 버린다."""
+    if not (ai_enabled() and rag.has_sources()):
+        return []
+    names = " ".join(f.get("name", "") for f in (findings or []))
+    rag_q = " ".join(filter(None, [str(category or ""), str(outcome or ""), names])).strip()
+    if not rag_q:
+        return []
+    try:
+        hits = await asyncio.to_thread(rag.search, rag_q, 4)
+        if hits:
+            top = hits[0]["score"]
+            hits = [h for h in hits if h["score"] >= max(0.3, top * 0.4)]
+        return hits
+    except Exception:
+        return []
+
+
 # ── 단일 요청 전송 ──────────────────────────────────────────
 @router.post("/request")
 async def send_request(req: SingleRequest):
@@ -213,12 +232,14 @@ async def send_request(req: SingleRequest):
                     "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
                 })
             if ai_verdict_enabled():
+                _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
+                        for f in analysis.get("findings", [])]
                 analysis["ai_verdict"] = await ai_verdict({
                     "category": req.category, "status": r["status_code"], "time": r["response_time"],
                     "outcome": analysis.get("attack_outcome"),
-                    "findings": [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
-                                 for f in analysis.get("findings", [])],
+                    "findings": _fnd,
                     "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
+                    "retrieved": await _verdict_retrieved(req.category, analysis.get("attack_outcome"), _fnd),
                 })
             return {
                 "status_code": r["status_code"], "headers": r["headers"], "body": r["body"],
@@ -269,12 +290,14 @@ async def send_request(req: SingleRequest):
 
         # AI 종합 판정 — 라벨(판정/신호 이름·상태·시간)만 전송, 대상 응답 데이터 미전송(유출 없음)
         if ai_verdict_enabled():
+            _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
+                    for f in analysis.get("findings", [])]
             analysis["ai_verdict"] = await ai_verdict({
                 "category": req.category, "status": response.status_code, "time": round(elapsed, 2),
                 "outcome": analysis.get("attack_outcome"),
-                "findings": [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
-                             for f in analysis.get("findings", [])],
+                "findings": _fnd,
                 "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
+                "retrieved": await _verdict_retrieved(req.category, analysis.get("attack_outcome"), _fnd),
             })
 
         return {

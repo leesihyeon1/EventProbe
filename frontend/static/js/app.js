@@ -2091,7 +2091,7 @@ function renderVerdictCard(a, confidenceColor) {
     return `
       <div class="analysis-card" data-card-id="verdict" style="border-color:rgba(188,140,255,.35)">
         <div class="analysis-card-header">판정 결과
-          <span style="margin-left:auto;font-size:9px;color:var(--purple);font-weight:400">AI · ${escapeHtml(ai.model || '')}</span>
+          <span style="margin-left:auto;font-size:9px;color:var(--purple);font-weight:400">${ai.rag_used ? '참고문서 ' + ai.rag_used + '개 반영 · ' : ''}AI · ${escapeHtml(ai.model || '')}</span>
         </div>
         <div class="analysis-card-body">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">

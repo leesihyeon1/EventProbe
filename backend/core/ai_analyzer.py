@@ -488,7 +488,11 @@ _VERDICT_SYSTEM = (
     '{"outcome":"inconclusive","severity":"low","confidence":75,'
     '"reasoning":"주입한 명령의 실행 출력(uid= 등)이 응답에서 확인되지 않아 명령 주입 성공은 미확인입니다(200 일반 페이지). 블라인드일 수 있으니 확증 스캔/OOB 로 재확인하세요. 별개로 CSP 등 보안 헤더 누락이 있습니다.",'
     '"priority":"확증 스캔 또는 OOB(콜백)로 blind 실행 여부 재확인",'
-    '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 보완"}'
+    '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 보완"}\n'
+    "8) RETRIEVED(참고문서) 블록이 있으면 이 공격 유형에 대한 검증된 지식이다. priority(다음 확인 방법)와 "
+    "remediation(수정 방안)을 그 문서 내용에 근거해 더 구체적으로 쓴다(예: SSRF 성공 → URL 파서 불일치 확인 "
+    "기법을 priority 에 반영). 단, 판정(outcome/verdict)을 뒤집는 근거로는 쓰지 말 것 — 판정은 실제 신호로만 "
+    "결정한다. 문서에 없는 내용을 지어내거나 문서 제목/페이지를 그대로 인용하지 말고, 내용을 녹여 서술한다."
 )
 
 
@@ -500,6 +504,16 @@ async def ai_verdict(ctx: dict) -> dict | None:
     model, base_url = _model(), _base_url()
     findings = ctx.get("findings") or []
     alerts = ctx.get("alerts") or []
+    # RAG 검색 스니펫(있으면) — priority/remediation 을 문서 지식에 근거해 구체화(판정은 안 바꿈)
+    rag_block = ""
+    retrieved = ctx.get("retrieved") or []
+    if retrieved:
+        lines = []
+        for i, r in enumerate(retrieved[:4], 1):
+            snip = re.sub(r"\s+", " ", str(r.get("text", "")))[:400]
+            lines.append(f"{i}) {snip}")
+        rag_block = ("RETRIEVED (이 공격 유형 관련 참고문서 발췌 — priority·remediation 근거로만 활용, "
+                     "판정은 바꾸지 말 것):\n" + "\n".join(lines) + "\n")
     user = (
         f"공격_유형: {ctx.get('category') or '(없음)'}\n"
         f"상태코드: {ctx.get('status')}\n"
@@ -507,6 +521,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
         f"확정_판정: {ctx.get('outcome')}\n"
         f"공격_신호(각 항목 verdict=성공/안전/미확정, why=근거): {json.dumps(findings, ensure_ascii=False)}\n"
         f"응답_보안_점검: {json.dumps(alerts, ensure_ascii=False)}\n"
+        f"{rag_block}"
         f"위 신호만 근거로 종합 판정을 JSON 으로 주세요."
     )
     payload = {
@@ -516,7 +531,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
-        "max_tokens": 400,
+        "max_tokens": 800,   # 추론형 모델(nemotron)은 서술이 길어 400 이면 JSON 이 잘림
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
@@ -530,6 +545,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
         if ctx.get("outcome"):
             parsed["outcome"] = ctx["outcome"]
         parsed["model"] = model
+        parsed["rag_used"] = len(retrieved)   # 참고문서 반영 개수(UI 표시용)
         return parsed
     except httpx.TimeoutException:
         return {"error": "AI 판정 시간 초과", "model": model}
