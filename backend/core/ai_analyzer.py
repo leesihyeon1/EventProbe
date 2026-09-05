@@ -293,6 +293,12 @@ def _is_placeholder_payload(payload: str) -> bool:
 _KNOWN_CATS = {"sqli", "xss", "lfi", "ssrf", "cmdi", "ssti",
                "redirect", "idor", "nosql", "authbypass", "other"}
 
+# 민감 파일/VCS/설정/시크릿 직접 접근 — 정보 노출(파일읽기) 계열. authbypass 로 오분류되기 쉬워
+# 라벨보다 우선 적용한다(예: /.git/config, /.env, wp-config.php).
+_FILE_ACCESS = re.compile(
+    r"\.git[/%]|\.svn/|\.hg/|\.bzr/|\.env\b|wp-config\.php|web\.config|\.htaccess|/WEB-INF|"
+    r"/etc/passwd|/etc/shadow|/proc/self|id_rsa|\.(?:bak|old|swp|save|orig)\b|\.DS_Store", re.I)
+
 
 def _infer_category(payload: str) -> str:
     """모델이 category 를 스키마 문자열('sqli|xss|...')로 뱉거나 빠뜨린 경우 payload 로 추론."""
@@ -307,6 +313,8 @@ def _infer_category(payload: str) -> str:
         return "sqli"
     if any(t in p for t in ("169.254.169.254", "file://", "http://127.", "http://localhost", "gopher://", "dict://")):
         return "ssrf"
+    if _FILE_ACCESS.search(payload or ""):        # 민감 파일 직접 접근(.git/.env 등) → 파일읽기
+        return "lfi"
     if "..;/" in p or "%2e%2e" in p or "..%2f" in p:
         return "authbypass"
     if any(t in p for t in ("../", "..\\", "/etc/passwd", "%00", "..//")):
@@ -320,6 +328,9 @@ def _infer_category(payload: str) -> str:
 
 def _norm_category(cat: str, payload: str) -> str:
     c = (cat or "").strip().lower()
+    # 민감 파일/VCS 접근이면 모델 라벨(authbypass 등)이 틀려도 파일읽기(lfi)로 교정
+    if _FILE_ACCESS.search(payload or ""):
+        return "lfi"
     return c if c in _KNOWN_CATS else _infer_category(payload)
 
 

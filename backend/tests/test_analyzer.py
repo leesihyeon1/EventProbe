@@ -61,6 +61,14 @@ def test_mislabeled_category_uses_payload_attack_type():
     assert "SQL" not in ev   # 틀린 카테고리의 SQL 시그니처가 섞이지 않음
 
 
+def test_git_config_access_is_file_read_not_authbypass():
+    """/.git/config 직접 접근은 정보 노출(파일읽기)로 인식 — authbypass 로 오분류하지 않음."""
+    from core.analyzer import infer_attack_type
+    assert infer_attack_type("/site/.git/config", "authbypass") == "lfi"
+    assert infer_attack_type("/site/.git/HEAD", "authbypass") == "lfi"
+    assert infer_attack_type("/.env", "") == "lfi"
+
+
 def test_success_signal_has_no_unknown_finding():
     r = analyze_response(200, {}, "root:x:0:0:root", 60,
                          payload="../../etc/passwd", category="lfi")

@@ -1666,6 +1666,8 @@ _FILE_READ_HINT = re.compile(
     r"%2f|%5c|%252f|%255c|"                        # 인코딩된 슬래시/백슬래시
     r"/etc/|etc%2f|/proc/|windows[\\/]|/windows/system32|win\.ini|boot\.ini|"
     r"passwd|shadow|/hosts\b|access\.log|/environ\b|/cmdline\b|"
+    r"\.git[/%]|\.svn/|\.hg/|\.bzr/|\.env\b|wp-config\.php|web\.config|"  # VCS·설정·시크릿 파일 직접 접근
+    r"\.htaccess|/WEB-INF|id_rsa|\.(?:bak|old|swp|save|orig)\b|\.DS_Store|"
     r"file://|LOAD_FILE|pg_read_file|xp_cmdshell",
     re.I,
 )
