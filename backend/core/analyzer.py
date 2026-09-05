@@ -1700,19 +1700,40 @@ _SSRF_MARKERS = [
 # 민감 파일 탐색 프로브: (요청 payload 의 파일 지표, 노출 확증용 본문 시그니처, 파일 라벨)
 # 상태코드가 아니라 '응답 본문에 실제 파일 내용이 있는가'로 노출을 판정하기 위한 표.
 # 200 응답이라도 본문이 일반 페이지/오류 페이지/SPA 껍데기면 시그니처가 없어 '미노출'로 판정된다.
+# (payload 지표, 노출 확증 정규식, 라벨, 응답에서 검색한 시그니처 설명)
 _SENSITIVE_FILE_PROBES = [
-    (r"\.git/config",  r"repositoryformatversion|\[remote\s+\"|\[branch\s+\"", "Git 설정(.git/config)"),
-    (r"\.git/HEAD",    r"^\s*ref:\s*refs/heads/",                              "Git HEAD(.git/HEAD)"),
-    (r"\.env(?![a-z])", r"(?m)^[A-Z][A-Z0-9_]{2,}\s*=\S",                      "환경파일(.env)"),
-    (r"wp-config\.php", r"DB_PASSWORD|DB_NAME|AUTH_KEY|define\(\s*['\"]DB_",   "WordPress wp-config.php"),
-    (r"web\.config",   r"<configuration[\s>]|<system\.web",                    "IIS web.config"),
-    (r"\.htaccess",    r"RewriteEngine|RewriteRule|AuthType|Require\s",        ".htaccess"),
-    (r"id_rsa",        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY",             "SSH 개인키(id_rsa)"),
-    (r"\.DS_Store",    r"Bud1",                                                ".DS_Store"),
-    (r"phpinfo",       r"<title>phpinfo\(\)|>PHP Version\s*<",                 "phpinfo()"),
+    (r"\.git/config",  r"repositoryformatversion|\[remote\s+\"|\[branch\s+\"", "Git 설정(.git/config)", "repositoryformatversion / [remote \"…\"]"),
+    (r"\.git/HEAD",    r"^\s*ref:\s*refs/heads/",                              "Git HEAD(.git/HEAD)", "ref: refs/heads/…"),
+    (r"\.env(?![a-z])", r"(?m)^[A-Z][A-Z0-9_]{2,}\s*=\S",                      "환경파일(.env)", "KEY=값 형태의 환경변수 줄"),
+    (r"wp-config\.php", r"DB_PASSWORD|DB_NAME|AUTH_KEY|define\(\s*['\"]DB_",   "WordPress wp-config.php", "DB_PASSWORD / define('DB_…')"),
+    (r"web\.config",   r"<configuration[\s>]|<system\.web",                    "IIS web.config", "<configuration> / <system.web>"),
+    (r"\.htaccess",    r"RewriteEngine|RewriteRule|AuthType|Require\s",        ".htaccess", "RewriteEngine / AuthType"),
+    (r"id_rsa",        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY",             "SSH 개인키(id_rsa)", "BEGIN … PRIVATE KEY"),
+    (r"\.DS_Store",    r"Bud1",                                                ".DS_Store", "Bud1 매직바이트"),
+    (r"phpinfo",       r"<title>phpinfo\(\)|>PHP Version\s*<",                 "phpinfo()", "<title>phpinfo() / PHP Version"),
     (r"/actuator/(?:env|configprops|heapdump|gateway)",
-     r'"propertySources"|"activeProfiles"|"systemProperties"|"predicate"|"route_id"', "Spring Actuator"),
+     r'"propertySources"|"activeProfiles"|"systemProperties"|"predicate"|"route_id"', "Spring Actuator",
+     "\"propertySources\" / \"activeProfiles\""),
 ]
+
+# 카테고리별 '응답에서 검색한 성공 시그니처' 사람용 설명(미확인 증거에 사용).
+_CHECKED_DESC = {
+    "lfi":  "root:x:0:0(passwd) · shadow 해시 · BEGIN PRIVATE KEY · win.ini · /proc 환경변수",
+    "xxe":  "root:x:0:0(passwd) · 파일 내용 · BEGIN PRIVATE KEY",
+    "cmdi": "uid=0(root) gid=(id 출력) · Microsoft Windows [Version(cmd 출력)",
+    "ssrf": "클라우드 메타데이터(ami-id · iam/security-credentials · computeMetadata)",
+    "ssti": "표현식 계산 결과(예: 7*7=49)",
+    "sqli": "SQL/DB 에러(문법 오류 · EXTRACTVALUE 마커) · 시간지연 · 참/거짓 차이",
+    "xss":  "payload 의 실행 컨텍스트 반사",
+    "redirect": "외부 도메인으로의 3xx Location",
+    "nosql": "참/거짓 응답 차이 · $where 평가",
+    "cve":  "root:x:0:0 · uid= · 개인키 · 소스/설정 파일 내용",
+}
+_CHECKED_DEFAULT = "root:x:0:0 · uid=0(root) · 개인키 · 에러/메타데이터 시그니처"
+
+
+def _checked_desc(category: str) -> str:
+    return _CHECKED_DESC.get((category or "").lower(), _CHECKED_DEFAULT)
 
 
 def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
@@ -1724,13 +1745,13 @@ def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
       - {"exposed": False, ...}: 파일을 요청했으나 내용이 없음 → 미노출(200이어도 안전)
     """
     p = payload or ""
-    for path_re, sig_re, label in _SENSITIVE_FILE_PROBES:
+    for path_re, sig_re, label, checked in _SENSITIVE_FILE_PROBES:
         if re.search(path_re, p, re.I):
             m = re.search(sig_re, body or "", re.I)
             if m:
-                return {"targeted": label, "exposed": True,
+                return {"targeted": label, "exposed": True, "checked": checked,
                         "evidence": _clip_evidence(m.group(0), 120)}
-            return {"targeted": label, "exposed": False, "evidence": ""}
+            return {"targeted": label, "exposed": False, "checked": checked, "evidence": ""}
     return None
 
 # ── 클라이언트측(client-side) 취약점 탐지용 ──────────────────────────
@@ -2000,8 +2021,8 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
                          "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
                                 " (200 응답은 일반 페이지·오류 페이지·SPA 껍데기일 수 있음)",
-                         "evidence": f"HTTP {status_code} · 응답 {len(body or '')}B — "
-                                     f"{sf['targeted']} 시그니처 미검출"})
+                         "evidence": f"응답에서 {sf['targeted']} 시그니처({sf.get('checked','')})를 "
+                                     f"검색 → 없음 (HTTP {status_code} · {len(body or '')}B)"})
 
     # ②-b 클라이언트측(client-side) 취약점 신호
     # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
@@ -2217,9 +2238,10 @@ def analyze_response(
             "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화 등)를 "
                    "찾지 못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. "
                    "응답 본문을 직접 확인하고, 확증 스캔 또는 baseline 비교로 검증하세요.",
-            "evidence": f"HTTP {status_code} · 응답 {len(body)}B · {response_time:.0f}ms — "
-                        f"반사·에러·마커·시간지연 신호 없음"
-                        + ("" if baseline else " · baseline 없음"),
+            "evidence": f"응답에서 성공 시그니처 [{_checked_desc(category)}]를 검색 → 미검출; "
+                        f"반사·시간지연·baseline 변화도 없음 "
+                        f"(HTTP {status_code} · {len(body)}B · {response_time:.0f}ms"
+                        + ("" if baseline else " · baseline 없음") + ")",
         })
 
     result["findings"] = findings
