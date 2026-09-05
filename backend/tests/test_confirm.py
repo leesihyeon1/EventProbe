@@ -354,3 +354,21 @@ def test_decide_ignores_failed_probes():
     results = [_r("baseline"), _r("time0", status=0, time_ms=0), _r("time5", status=0, time_ms=0)]
     d = confirm.decide("sqli", results)
     assert not d["confirmed"]
+
+
+def test_decide_method_confirms_put_upload():
+    from core.confirm import decide_method
+    m = "EVPROBE-deadbeef"
+    t = decide_method({"Allow": "GET, PUT, DELETE, OPTIONS"}, 201, 200, "x " + m + " y", m, del_status=204)
+    names = [x["name"] for x in t]
+    assert any("PUT→GET" in n for n in names)          # 되읽기 확증
+    assert any("위험 HTTP 메소드" in n for n in names)   # OPTIONS 열거
+
+
+def test_decide_method_no_false_confirm():
+    from core.confirm import decide_method
+    m = "EVPROBE-deadbeef"
+    # PUT 수락됐지만 GET 에서 마커 미검출 → 확증 아님
+    assert decide_method({"Allow": "GET, POST"}, 200, 404, "", m) == []
+    # 안전한 메소드만 + 업로드 없음 → 빈 목록
+    assert decide_method({"Allow": "GET, HEAD, POST, OPTIONS"}, None, None, "", m) == []

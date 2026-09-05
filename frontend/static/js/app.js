@@ -970,11 +970,15 @@ function _confirmBaseValue(location, param) {
   return (cur && cur === payload) ? '' : cur;
 }
 
+const _METHOD_PROBE_TRIGGERS = ['PUT','DELETE','PATCH','PROPFIND','PROPPATCH','MKCOL','COPY','MOVE','LOCK','UNLOCK','TRACE'];
+
 async function confirmScan() {
   const cat = state.selectedCategory?.id || '';
-  if (!cat) { toast('먼저 페이로드를 선택하세요', 'error'); return; }
   const req = _currentRequestForm();
   if (!req.url) { toast('요청 URL이 없습니다', 'error'); return; }
+  // 쓰기/위험 메소드면 페이로드(카테고리) 없이도 메소드 확증(OPTIONS·PUT→GET)을 돌린다.
+  const methodProbe = _METHOD_PROBE_TRIGGERS.includes((req.method || 'GET').toUpperCase());
+  if (!cat && !methodProbe) { toast('먼저 페이로드를 선택하세요 (또는 PUT/DELETE 등 쓰기 메소드로 확증)', 'error'); return; }
 
   const target = document.getElementById('injectTarget').value;
   const location = _confirmLocation(target);

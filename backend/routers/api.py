@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
-import sys, os
+import sys, os, secrets
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary
 from urllib.parse import urlsplit, quote
@@ -663,6 +663,75 @@ async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: l
     return results, probes_out
 
 
+_METHOD_PROBE_TRIGGERS = {"PUT", "DELETE", "PATCH", "PROPFIND", "PROPPATCH",
+                          "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "TRACE"}
+
+
+async def _run_method_probes(req: "ConfirmRequest", headers_base: dict):
+    """메소드 확증: OPTIONS 로 허용 메소드 열거 + 고유 마커 파일을 PUT→GET 되읽기로
+    임의 파일 쓰기를 확증한다. 업로드한 테스트 파일은 마지막에 DELETE 로 정리한다.
+    (대상은 요청 경로와 같은 디렉터리의 새 고유 파일명 — 기존 파일을 덮어쓰지 않음.)"""
+    parts = urlsplit(req.url)
+    base = f"{parts.scheme}://{parts.netloc}"
+    dirpath = parts.path.rsplit("/", 1)[0] if "/" in (parts.path or "") else ""
+    put_path = f"{dirpath}/evtprobe_{secrets.token_hex(4)}.txt"
+    put_url = base + put_path
+    marker = "EVPROBE-" + secrets.token_hex(6)
+    opt_url = _url_with_params(req.url, req.params)
+
+    res, probes = {}, []
+
+    async def _send(client, method, url, **kw):
+        try:
+            start = time.time()
+            r = await client.request(method, url, timeout=req.timeout, **kw)
+            return r, (time.time() - start) * 1000
+        except Exception as e:
+            return e, 0.0
+
+    async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        # 1) OPTIONS — 허용 메소드 열거(비침습)
+        r, ms = await _send(client, "OPTIONS", opt_url, headers=dict(headers_base))
+        if isinstance(r, httpx.Response):
+            res["options_headers"] = dict(r.headers); allow = r.headers.get("allow", "") or r.headers.get("public", "")
+            probes.append({"role": "method:OPTIONS", "label": f"OPTIONS 허용 메소드{(' — Allow: ' + allow) if allow else ''}",
+                           "value": parts.path or "/", "status": r.status_code, "time_ms": round(ms), "len": len(r.text)})
+        else:
+            probes.append({"role": "method:OPTIONS", "label": "OPTIONS", "value": parts.path or "/",
+                           "status": 0, "time_ms": 0, "error": str(r)[:120]})
+
+        # 2) PUT 고유 마커 파일 업로드
+        r, ms = await _send(client, "PUT", put_url, headers={**headers_base, "Content-Type": "text/plain"},
+                            content=(marker + "\n").encode())
+        if isinstance(r, httpx.Response):
+            res["put_status"] = r.status_code
+            probes.append({"role": "method:PUT", "label": f"PUT 마커 파일 업로드 ({put_path})",
+                           "value": marker, "status": r.status_code, "time_ms": round(ms), "len": len(r.text)})
+        else:
+            probes.append({"role": "method:PUT", "label": "PUT 업로드", "value": marker,
+                           "status": 0, "time_ms": 0, "error": str(r)[:120]})
+
+        # 3) GET 되읽기 — 마커가 그대로 오면 실제 파일 쓰기 확증
+        if res.get("put_status") in (200, 201, 204):
+            r, ms = await _send(client, "GET", put_url, headers=dict(headers_base))
+            if isinstance(r, httpx.Response):
+                res["get_status"] = r.status_code; res["get_body"] = r.text[:20000]
+                hit = marker in res["get_body"]
+                probes.append({"role": "method:GET", "label": "업로드 파일 되읽기" + (" — 마커 확인" if hit else " — 마커 없음"),
+                               "value": put_path, "status": r.status_code, "time_ms": round(ms), "len": len(r.text)})
+            # 4) 정리 — 업로드한 테스트 파일 DELETE(best-effort)
+            r, ms = await _send(client, "DELETE", put_url, headers=dict(headers_base))
+            if isinstance(r, httpx.Response):
+                res["del_status"] = r.status_code
+                probes.append({"role": "method:DELETE", "label": "테스트 파일 정리(DELETE)",
+                               "value": put_path, "status": r.status_code, "time_ms": round(ms), "len": len(r.text)})
+
+    techniques = confirm_scan.decide_method(
+        res.get("options_headers"), res.get("put_status"), res.get("get_status"),
+        res.get("get_body", ""), marker, res.get("del_status"))
+    return techniques, probes
+
+
 @router.post("/confirm-scan")
 async def confirm_scan_endpoint(req: ConfirmRequest):
     """대상 파라미터에 오라클 프로브 세트를 순차 전송해 취약 여부를 확증한다.
@@ -693,6 +762,13 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         techniques += confirm_scan.decide("auth", results)["techniques"]
         all_probes += [{**pp, "role": "auth:" + pp["role"]} for pp in probes]
         ran.append("인증우회")
+
+    # 3) 메소드 확증 — 쓰기/위험 메소드 요청이면 OPTIONS 열거 + PUT→GET 되읽기로 확증.
+    if (req.method or "").upper() in _METHOD_PROBE_TRIGGERS:
+        mtech, mprobes = await _run_method_probes(req, sent_headers_base)
+        techniques += mtech
+        all_probes += mprobes
+        ran.append("메소드")
 
     if not ran:
         return {

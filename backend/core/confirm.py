@@ -69,6 +69,42 @@ _SQL_ERROR_RE = re.compile("|".join([
 ]), re.I)
 
 
+# HTTP 메소드 확증에서 '위험'으로 보는 메소드
+_DANGEROUS_HTTP_METHODS = {"PUT", "DELETE", "PATCH", "CONNECT", "TRACE",
+                           "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE",
+                           "LOCK", "UNLOCK", "SEARCH"}
+
+
+def decide_method(options_headers: Optional[dict], put_status, get_status,
+                  get_body: str, marker: str, del_status=None) -> list[dict]:
+    """메소드 프로브(OPTIONS 열거 + PUT→GET 되읽기) 결과를 확증 판정.
+    techniques 는 '확증된' 항목만 담는다(모호한 경우는 프로브 표로 확인)."""
+    techniques: list[dict] = []
+
+    # OPTIONS — Allow/Public 헤더로 허용 메소드 열거, 위험 메소드 노출 확증
+    allow = ""
+    for k, v in (options_headers or {}).items():
+        if str(k).lower() in ("allow", "public"):
+            allow = (allow + "," + str(v)) if allow else str(v)
+    if allow:
+        methods = sorted({m.strip().upper() for m in allow.split(",") if m.strip()})
+        dangerous = [m for m in methods if m in _DANGEROUS_HTTP_METHODS]
+        if dangerous:
+            techniques.append({
+                "name": "위험 HTTP 메소드 노출 (OPTIONS)",
+                "evidence": f"Allow: {', '.join(methods)} → 위험 메소드 {', '.join(dangerous)} 허용",
+            })
+
+    # PUT → GET 되읽기 — 업로드한 고유 마커가 그대로 돌아오면 '임의 파일 쓰기' 확증
+    if put_status in (200, 201, 204) and get_status == 200 and marker and marker in (get_body or ""):
+        ev = f"PUT {put_status} 후 GET 200 응답에 업로드 마커가 그대로 존재 → 서버에 파일이 실제로 기록됨(임의 파일 쓰기)"
+        if del_status is not None:
+            ev += f"; 정리 DELETE={del_status}"
+        techniques.append({"name": "임의 파일 업로드 확증 (PUT→GET)", "evidence": ev})
+
+    return techniques
+
+
 def _norm_cat(category: str) -> str:
     """카테고리 별칭 정규화 — IDOR 페이로드는 'business' 카테고리로 들어온다."""
     c = (category or "").lower()
