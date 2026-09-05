@@ -34,29 +34,36 @@ _ESCALATION_HINTS = (
 
 
 def hot_families(signals: dict) -> list:
-    """신호 라벨에서 '뜨거운' 공격 계열(family) 목록을 도출."""
+    """검증 '근거'에서 승격할 공격 계열(family)을 도출 — 근거 없으면 빈 목록.
+
+    근거로 인정하는 것: (1) 실제 취약 신호(finding_names — 성공 판정/누출 라벨만 상위에서
+    전달됨) 가 매핑되는 계열, (2) 공격이 성공(attack_outcome=success)했다면 시도한 카테고리.
+    단지 '그 카테고리를 시도했다'는 사실만으로는(차단·판정불가) 승격하지 않는다 —
+    이래야 결과와 무관한 무의미한 페이로드 덤프를 막는다."""
     fams, seen = [], set()
 
     def add(f):
         if f and f not in seen:
             seen.add(f); fams.append(f)
 
+    outcome = (signals.get("attack_outcome") or "").strip().lower()
     cat = (signals.get("category") or "").strip().lower()
-    if cat:
-        add(cat)
 
-    names = []
-    names += [str(x) for x in (signals.get("finding_names") or [])]
-    names += [str(x) for x in (signals.get("alert_names") or [])]
+    # finding_names 는 상위(프런트/호출자)에서 '성공/누출' 등 실제 근거 라벨만 넘어온다.
+    names = [str(x) for x in (signals.get("finding_names") or [])]
     blob = " ".join(names).lower()
 
     for kws, fam in _FAMILY_KEYWORDS:
         if any(k in blob for k in kws):
             add(fam)
 
-    # 시간 지연 신호 → blind sqli/cmdi 로 승격
-    if "시간 지연" in blob or "time" in blob or "지연" in blob:
+    # 시간 지연 근거 → blind sqli/cmdi 로 승격
+    if "시간 지연" in blob or "sleep" in blob or "지연" in blob:
         add("sqli"); add("cmdi")
+
+    # 공격이 실제로 성공했다면 시도한 카테고리 자체가 근거 → 그 계열 승격(익스플로잇 심화)
+    if outcome == "success" and cat:
+        add(cat)
 
     return fams
 

@@ -495,6 +495,7 @@ async def followup_suggest(req: FollowupRequest):
         "category": req.category,
         "finding_names": req.finding_names,
         "alert_names": req.alert_names,
+        "attack_outcome": req.attack_outcome,
     })
 
     # 1) 로컬 승격 페이로드 (신호 → 카테고리, 고급 변형 우선)
@@ -503,9 +504,11 @@ async def followup_suggest(req: FollowupRequest):
     # 2) 기술스택 지문 기반 CVE 매칭 (기능1 재사용)
     cve = match_cve_payloads(data, path, req.params, req.body or "", req.fingerprint or {}, limit=6)
 
-    # 3) AI 라벨-only 보강 (선택) — 계열/판정/탐지기술 이름만 전송(응답 데이터 미전송)
+    # 3) AI 라벨-only 보강 (선택) — 계열/판정/탐지기술 이름만 전송(응답 데이터 미전송).
+    #    근거(승격 계열) 또는 성공 판정이 있을 때만 — 근거 없이 일반 후보를 쏟아내지 않는다.
     ai_res = {}
-    if req.use_ai and ai_enabled():
+    has_evidence = bool(families) or (req.attack_outcome or "").strip().lower() == "success"
+    if req.use_ai and ai_enabled() and has_evidence:
         fp = req.fingerprint or {}
         tech = ", ".join(x for x in [fp.get("server"), fp.get("powered_by")] if x)
         hint = "; ".join(filter(None, [
@@ -530,7 +533,10 @@ async def followup_suggest(req: FollowupRequest):
         merged.append(c)
 
     if not merged:
-        return {"error": "후속 후보를 만들지 못했습니다 — 취약 신호가 약하거나 저장소에 매칭이 없습니다."}
+        if not has_evidence:
+            return {"error": "직접적인 취약 신호가 없어 승격 후보를 만들지 않았습니다 — "
+                             "먼저 '확증 스캔'으로 취약 여부를 확정한 뒤 다시 시도하세요."}
+        return {"error": "후속 후보를 만들지 못했습니다 — 저장소에 매칭되는 승격 페이로드가 없습니다."}
 
     seg = []
     if families:

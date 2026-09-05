@@ -1097,9 +1097,11 @@ function _followupRequestBody(req) {
   const a = state.lastResult.analysis;
   const rq = state.lastResult._req || {};
 
-  const findingNames = (a.findings || []).map(f => f.name).filter(Boolean);
+  // '근거'만 전달 — 실제 취약을 가리키는 신호(성공 판정 finding + 누출)만. 미확인/안전 신호는
+  // 승격 근거가 아니므로 제외(결과와 무관한 페이로드 덤프 방지).
+  const findingNames = (a.findings || []).filter(f => f.verdict === '성공').map(f => f.name).filter(Boolean);
   const alertNames   = (a.alerts   || []).map(x => x.name).filter(Boolean);
-  // error_leaks/sensitive_data 는 증거 문자열을 포함하므로 원문 대신 '유형 라벨'만 추가
+  // error_leaks/sensitive_data 는 증거 문자열을 포함하므로 원문 대신 '유형 라벨'만 추가(이것도 근거)
   if ((a.error_leaks || []).length) {
     findingNames.push('에러 정보 누출');
     if ((a.error_leaks || []).some(s => /sql|mysql|mssql|ora-|postgre|sqlite/i.test(String(s)))) findingNames.push('SQL 에러 노출');
