@@ -429,8 +429,8 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
                 if key in seen:      # 중복 제거
                     continue
                 seen.add(key)
-                # RAG 근거 매핑: 모델이 준 rag_ref(1-based) → 참조 문서 제목/위치
-                rag_source = ""
+                # RAG 근거 매핑: 모델이 준 rag_ref(1-based) → 참조 문서 제목/위치 + 발췌(맥락)
+                rag_source, rag_excerpt = "", ""
                 try:
                     ridx = int(c.get("rag_ref") or 0)
                 except (TypeError, ValueError):
@@ -438,6 +438,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
                 if retrieved and 1 <= ridx <= len(retrieved[:6]):
                     rr = retrieved[ridx - 1]
                     rag_source = str(rr.get("title", "")) + (f" {rr.get('loc')}" if rr.get("loc") else "")
+                    rag_excerpt = re.sub(r"\s+", " ", str(rr.get("text", ""))).strip()[:220]
                 norm.append({
                     "category": _norm_category(c.get("category", ""), payload_str),
                     "param": param,
@@ -445,6 +446,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
                     "payload": payload_str,
                     "why": str(c.get("why", "")),
                     "rag_source": rag_source.strip(),
+                    "rag_excerpt": rag_excerpt,
                 })
 
             # 카테고리 편중 방지 — 한 카테고리가 목록을 도배하지 않도록 카테고리당 최대 3개.

@@ -1309,8 +1309,9 @@ function aiCandCard(c, idx) {
 function _aiCandDesc(c, isCve, ref) {
   const isAi = !isCve && c.source !== 'followup';
   if (c.rag_source) {
-    // 파일명이 길어 카드를 넘치지 않도록 말줄임 + 전체는 툴팁으로
-    return `<div title="RAG 참조: ${escapeHtml(c.rag_source)}" style="font-size:10px;color:var(--purple);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">근거: ${escapeHtml(c.rag_source)} ${ref}</div>`;
+    // 파일명·발췌를 툴팁으로(마우스 오버 시 실제 매칭된 맥락 확인), 줄은 말줄임
+    const tip = 'RAG 참조: ' + c.rag_source + (c.rag_excerpt ? '\n\n' + c.rag_excerpt : '');
+    return `<div title="${escapeHtml(tip)}" style="font-size:10px;color:var(--purple);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">근거: ${escapeHtml(c.rag_source)} ${ref}</div>`;
   }
   if (isAi) {   // RAG 근거 없는 순수 AI 후보는 설명 생략(요청 사항)
     return ref ? `<div style="margin-top:2px">${ref}</div>` : '';
@@ -1342,13 +1343,20 @@ function renderAiCandidates(res) {
   const hiddenAiCount = (state.hideAiWhenCve && strong && !state._forceShowAi && aiGroup) ? aiGroup.items.length : 0;
   if (hiddenAiCount) groups = groups.filter(g => g.label !== 'AI 생성');
 
-  // 이번 생성이 실제로 참조한 RAG 문서(모델이 개별 인용을 안 해도 항상 표시) — '뭘 참조했나' 가시화
-  const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>34 ? s.slice(0,34)+'…' : s; };
-  const ragTitles = (res.rag_sources || []).map(_shortDoc);
-  const ragNote = (res.rag_used && ragTitles.length) ? `
-    <div title="이번 AI 생성에 근거로 검색·주입된 문서" style="font-size:10px;color:var(--purple);background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px;margin-bottom:6px;line-height:1.5">
-      참조 문서 ${res.rag_used} — ${ragTitles.map(escapeHtml).join(', ')}
-    </div>` : '';
+  // 이번 생성이 실제로 검색·주입한 RAG 스니펫(맥락)을 펼쳐볼 수 있게 표시 — 매칭 타당성 확인용
+  const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>30 ? s.slice(0,30)+'…' : s; };
+  const ragCtx = res.rag_context || [];
+  const ragNote = (res.rag_used && ragCtx.length) ? `
+    <details style="margin-bottom:6px;background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px">
+      <summary style="font-size:10px;color:var(--purple);cursor:pointer;line-height:1.5">참조 문서 ${res.rag_used} — ${ragCtx.map(c => escapeHtml(_shortDoc(c.title)) + (c.loc ? ' ' + escapeHtml(c.loc) : '')).slice(0,3).join(', ')}${ragCtx.length>3 ? ' 외' : ''} <span style="color:var(--text-muted)">(펼쳐 맥락 보기)</span></summary>
+      <div style="margin-top:5px;display:flex;flex-direction:column;gap:5px">
+        ${ragCtx.map(c => `
+          <div style="font-size:10px;line-height:1.45;border-top:1px solid rgba(188,140,255,.18);padding-top:4px">
+            <div style="color:var(--purple)">${escapeHtml(_shortDoc(c.title))}${c.loc ? ' · ' + escapeHtml(c.loc) : ''}${(c.score!=null) ? ' <span style="color:var(--text-muted)">(관련도 ' + escapeHtml(String(c.score)) + ')</span>' : ''}</div>
+            <div style="color:var(--text-secondary)">${escapeHtml(c.excerpt || '')}</div>
+          </div>`).join('')}
+      </div>
+    </details>` : '';
 
   listEl.innerHTML = ragNote + groups.map(g => `
     <div class="sidebar-group open">

@@ -465,6 +465,13 @@ async def ai_suggest(req: AiSuggestRequest):
         "cve_count": len(cve_cands),
         "rag_used": len(retrieved),
         "rag_sources": sorted({r.get("title", "") for r in retrieved}) if retrieved else [],
+        # 실제 검색·주입된 스니펫(맥락) — 사용자가 매칭이 타당한지 눈으로 확인
+        "rag_context": [
+            {"title": r.get("title", ""), "loc": r.get("loc", ""),
+             "score": r.get("score"),
+             "excerpt": re.sub(r"\s+", " ", str(r.get("text", ""))).strip()[:240]}
+            for r in retrieved[:6]
+        ],
     }
 
 
