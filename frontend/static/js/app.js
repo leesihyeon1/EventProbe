@@ -1014,7 +1014,7 @@ function renderConfirmResult(res, param) {
   card.setAttribute('data-card-id', 'confirm');
   card.style.borderColor = res.confirmed ? 'rgba(248,81,73,.5)' : 'rgba(63,185,80,.35)';
   card.innerHTML = `
-    <div class="analysis-card-header">🎯 확증 스캔 — ${escapeHtml(res.category)} · ${escapeHtml(param)} <span style="margin-left:auto;font-size:9px;color:var(--text-muted);font-weight:400">${res.probes_sent}발</span></div>
+    <div class="analysis-card-header">확증 스캔 — ${escapeHtml(res.category)} · ${escapeHtml(param)} <span style="margin-left:auto;font-size:9px;color:var(--text-muted);font-weight:400">${res.probes_sent}발</span></div>
     <div class="analysis-card-body">
       ${res.confirmed
         ? `<div style="margin-bottom:6px">${techRows}</div>`
@@ -2192,7 +2192,7 @@ function renderCaptured() {
   box.innerHTML = `
     <div style="font-size:11px;color:var(--success);font-weight:600;margin-bottom:4px">🎥 실제 호출된 API ${list.length}개 (헤드리스 캡처 · 파라미터 포함)</div>
     <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:6px">${rows}</div>
-    <div style="font-size:10px;color:var(--text-muted);margin-top:5px">🎯 = 주입 후보 · 행 클릭 → 실제 요청 그대로 폼에 로드 → 🎯 확증 스캔</div>`;
+    <div style="font-size:10px;color:var(--text-muted);margin-top:5px">🎯 = 주입 후보 · 행 클릭 → 실제 요청 그대로 폼에 로드 → 확증 스캔</div>`;
 }
 
 function pickCaptured(i) {
