@@ -282,10 +282,17 @@ function parseRawHttp(raw) {
   const body = sep === -1 ? '' : text.slice(sep + 2);
   const lines = head.split('\n');
   const reqLine = (lines.shift() || '').trim();
-  // HTTP 버전은 선택적으로 처리 — 캡처/복사된 패킷은 "GET /path" 처럼 버전이 없는 경우가 많다
-  const m = reqLine.match(/^([A-Z]+)\s+(\S+)(?:\s+(HTTP\/[\d.]+))?$/i);
+  // 요청 라인: METHOD URI [HTTP/x.x]. URI 에 인코딩 안 된 공백(SQLi 페이로드의 ' AND ...',
+  // '-- -' 등)이 있거나 HTTP 버전이 없을 수 있으므로, 첫 토큰=메서드 / 마지막 토큰이
+  // HTTP/x.x 면 버전 / 그 사이 전체(공백 포함)=URI 로 파싱한다(\S+ 로는 공백에서 끊긴다).
   let method = 'GET', target = '/';
-  if (m) { method = m[1].toUpperCase(); target = m[2]; if (m[3]) state._importedHttpVersion = m[3]; }
+  const tokens = reqLine.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 2 && /^[A-Za-z]+$/.test(tokens[0])) {
+    method = tokens[0].toUpperCase();
+    let end = tokens.length;
+    if (/^HTTP\/[\d.]+$/i.test(tokens[end - 1])) { state._importedHttpVersion = tokens[end - 1]; end -= 1; }
+    target = tokens.slice(1, end).join(' ') || '/';
+  }
   const headerLines = lines.map(l => l.trim()).filter(l => l && l.includes(':'));
   const hostLine = headerLines.find(h => /^host:/i.test(h));
   const host = hostLine ? hostLine.slice(hostLine.indexOf(':') + 1).trim() : '';
