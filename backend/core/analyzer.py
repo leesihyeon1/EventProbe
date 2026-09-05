@@ -2000,7 +2000,8 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
                          "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
                                 " (200 응답은 일반 페이지·오류 페이지·SPA 껍데기일 수 있음)",
-                         "evidence": ""})
+                         "evidence": f"HTTP {status_code} · 응답 {len(body or '')}B — "
+                                     f"{sf['targeted']} 시그니처 미검출"})
 
     # ②-b 클라이언트측(client-side) 취약점 신호
     # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
@@ -2216,7 +2217,9 @@ def analyze_response(
             "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화 등)를 "
                    "찾지 못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. "
                    "응답 본문을 직접 확인하고, 확증 스캔 또는 baseline 비교로 검증하세요.",
-            "evidence": "",
+            "evidence": f"HTTP {status_code} · 응답 {len(body)}B · {response_time:.0f}ms — "
+                        f"반사·에러·마커·시간지연 신호 없음"
+                        + ("" if baseline else " · baseline 없음"),
         })
 
     result["findings"] = findings
