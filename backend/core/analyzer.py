@@ -2203,6 +2203,22 @@ def analyze_response(
     )
     result["reflection"] = _detect_reflection(body, payload)
     result["spa_shell"] = _detect_spa_shell(body, headers_lower)
+
+    # 3-상태 명확화: 성공/안전(차단)이 아니고 아무 신호도 없는 '공격 시도'는 '안전'이 아니라
+    # '자동 판정 불가(수동 검토 필요)'로 명시한다. (블라인드/OOB/로직/시그니처 없는 파일 등
+    # 단일 응답으로 판정 못 하는 유형이 거짓 안심을 주지 않도록.)
+    is_attack_attempt = bool((payload and payload.strip()) or category)
+    has_signal = any(f.get("verdict") in ("성공", "안전", "미확정") for f in findings)
+    if (is_attack_attempt and outcome == "inconclusive" and not has_signal
+            and not result["sensitive_data"] and not result["error_leaks"]):
+        findings.append({
+            "name": "자동 판정 불가 — 수동 확인 필요", "verdict": "미확인", "confidence": 30,
+            "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화 등)를 "
+                   "찾지 못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. "
+                   "응답 본문을 직접 확인하고, 확증 스캔 또는 baseline 비교로 검증하세요.",
+            "evidence": "",
+        })
+
     result["findings"] = findings
     result["attack_outcome"] = outcome
     result["attack_confidence"] = aconf

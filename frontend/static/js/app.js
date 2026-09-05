@@ -1941,7 +1941,7 @@ function renderAttackCard(a) {
     inconclusive: ['미확정',      'tag-blue',  'var(--border)'],
   };
   const [label, cls, border] = OUT[a.attack_outcome] || ['분석', 'tag-blue', 'var(--border)'];
-  const V = { '성공': 'tag-red', '차단': 'tag-green', '안전': 'tag-green', '미확정': 'tag-blue' };
+  const V = { '성공': 'tag-red', '차단': 'tag-green', '안전': 'tag-green', '미확정': 'tag-blue', '미확인': 'tag-orange' };
 
   const rows = findings.map(f => {
     let ev = escapeHtml(String(f.evidence || ''));

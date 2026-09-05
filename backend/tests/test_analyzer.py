@@ -30,6 +30,32 @@ def test_cmdi_unblocked_no_evidence_is_low():
     assert r["attack_outcome"] == "inconclusive"
 
 
+def test_no_signal_attack_is_marked_unknown_not_safe():
+    """신호가 전혀 없는 공격 시도는 '안전'이 아니라 '미확인(수동 확인 필요)'로 명시."""
+    r = analyze_response(200, {}, "<html>normal page</html>", 60,
+                         payload="{{7*7}}", category="ssti")
+    assert r["attack_outcome"] == "inconclusive"
+    assert any(f["verdict"] == "미확인" for f in r["findings"])
+
+
+def test_success_signal_has_no_unknown_finding():
+    r = analyze_response(200, {}, "root:x:0:0:root", 60,
+                         payload="../../etc/passwd", category="lfi")
+    assert not any(f["verdict"] == "미확인" for f in r["findings"])
+
+
+def test_safe_signal_has_no_unknown_finding():
+    r = analyze_response(200, {}, "<html>app</html>", 60,
+                         payload="/.git/config", category="cve", url="http://h/.git/config")
+    assert not any(f["verdict"] == "미확인" for f in r["findings"])
+
+
+def test_non_attack_request_has_no_unknown_finding():
+    """payload·category 없는 일반 요청은 '미확인' 신호를 붙이지 않는다."""
+    r = analyze_response(200, {}, "<html>home</html>", 60, payload="", category="")
+    assert not any(f["verdict"] == "미확인" for f in r["findings"])
+
+
 def test_reflection_without_success_is_medium():
     """특수문자 없는 값이 그대로 반사되면(미확정 신호) low 가 아니라 medium 이다."""
     r = analyze_response(200, {}, "<div>검색어: harmless_marker_123 결과없음</div>", 100,
@@ -205,7 +231,8 @@ def test_unrelated_path_is_not_a_sensitive_file_probe():
     r = analyze_response(200, {}, "<html>ok</html>", 80,
                          payload="/api/environment", category="cve")
     assert r["risk_level"] == "low"
-    assert r["findings"] == []
+    # .env 로 오탐(민감 파일/파일 읽기)하지 않아야 한다(미확인 신호는 무방).
+    assert not any(("민감 파일" in f["name"]) or ("파일 읽기" in f["name"]) for f in r["findings"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
