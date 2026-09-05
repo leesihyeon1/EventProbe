@@ -83,6 +83,21 @@ def test_put_denied_405_is_safe():
     assert any(x["verdict"] == "안전" and "PUT" in x["name"] for x in r["findings"])
 
 
+def test_javascript_scheme_redirect_is_xss():
+    """Location 이 javascript: 스킴으로 나가는 오픈리다이렉트는 XSS 성공으로 탐지."""
+    r = analyze_response(302, {"location": "javascript:alert(1)"}, "", 40,
+                         url="http://h/go?redirect=javascript:alert(1)", category="redirect")
+    assert r["attack_outcome"] == "success"
+    assert any("스킴" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+
+
+def test_javascript_void_bare_path_is_inconclusive():
+    """javascript:void(0) 를 경로로 보내 404 면 실제 신호 없음 → 미확인(허위 성공 금지)."""
+    r = analyze_response(404, {"server": "Apache"}, "not found", 40,
+                         url="http://h/javascript:void(0)", category="")
+    assert not any(f["verdict"] == "성공" for f in r["findings"])
+
+
 def test_get_has_no_method_finding():
     r = analyze_response(200, {}, "<html>ok</html>", 40, url="http://h/p", method="GET")
     assert not any("메소드" in x["name"] for x in r["findings"])

@@ -1685,6 +1685,8 @@ _SQLI_HINT = re.compile(
     r"'--|\"--|--\s|/\*.*\*/", re.I)
 _REDIRECT_HINT = re.compile(
     r"redirect|url=|next=|returnurl|return_to|dest=|goto=|callback=|//[a-z0-9.-]+\.", re.I)
+# XSS/오픈리다이렉트로 이어지는 위험 URI 스킴(링크 href·Location 에 들어가면 스크립트 실행)
+_DANGEROUS_SCHEME = re.compile(r"(?i)(?:javascript|data|vbscript)\s*:")
 
 # 명령 실행 출력 마커 (Command Injection)
 _CMD_OUTPUT_MARKERS = [
@@ -1768,6 +1770,8 @@ def infer_attack_type(probe: str, category: str) -> str:
         return "ssrf"
     if _SQLI_HINT.search(probe):
         return "sqli"
+    if _DANGEROUS_SCHEME.search(probe) or re.search(r"<script|onerror\s*=|onload\s*=|alert\s*\(", probe, re.I):
+        return "xss"
     return (category or "").lower()
 
 
@@ -2135,11 +2139,16 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # 외부 리다이렉트 — 3xx Location 이 외부로 나가면 오픈 리다이렉트 성공. 리다이렉트처럼
     # 보이는 요청일 때만(정상 SSO 리다이렉트 오탐 억제).
-    if category == "redirect" or _REDIRECT_HINT.search(probe):
+    if category == "redirect" or _REDIRECT_HINT.search(probe) or _DANGEROUS_SCHEME.search(probe):
         loc = headers_lower.get("location", "")
         if status_code in (301, 302, 303, 307, 308) and re.search(r"^https?://|^//", loc):
             findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
                              "why": f"Location 헤더가 외부로 이동: {loc[:80]}", "evidence": loc[:120]})
+        # 위험 스킴 리다이렉트 — Location 이 javascript:/data:/vbscript: 로 나가면 XSS 로 이어짐
+        elif status_code in (301, 302, 303, 307, 308) and _DANGEROUS_SCHEME.match(loc.strip()):
+            findings.append({"name": "위험 스킴 리다이렉트(XSS)", "verdict": "성공", "confidence": 85,
+                             "why": f"Location 헤더가 위험 스킴으로 이동 → 클릭 시 스크립트 실행(XSS): {loc[:80]}",
+                             "evidence": loc[:120]})
 
     # ②-c 민감 파일 노출 — 상태코드가 아니라 '실제 파일 내용'으로 노출/미노출을 판정.
     #     (카테고리 무관: .git/config·.env 등은 cve/path 프로브로 들어온다)
