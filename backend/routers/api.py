@@ -19,6 +19,10 @@ from urllib.parse import urlsplit, quote
 _QUERY_SAFE = "@:/;+,=!$()*~-._'"
 
 def _url_with_params(url: str, params: dict) -> str:
+    # '#' 은 프래그먼트라 서버로 전송되지 않고, 공백은 URL 을 깨뜨린다. payload(OGNL/Struts
+    # 의 #, SQLi 의 공백 등)로 들어온 리터럴을 인코딩해 그대로 전송되게 한다(보안 테스트에선
+    # 실제 프래그먼트가 불필요). %23 은 '#' 를 포함하지 않으므로 이중 인코딩되지 않는다.
+    url = (url or "").replace("#", "%23").replace(" ", "%20")
     if not params:
         return url
     q = "&".join(

@@ -838,7 +838,10 @@ function injectPayload() {
     }
     const base = state.injectUrlBase;
     const pos  = Math.min(state.injectUrlPos ?? base.length, base.length);
-    urlInput.value = base.slice(0, pos) + payload + base.slice(pos);
+    // URL 에 리터럴로 들어가면 안 되는 문자 인코딩: '#'(프래그먼트→서버 미전송)·공백.
+    // OGNL/Struts payload 의 #, SQLi 의 공백이 URL 에서 잘리지 않게 한다.
+    const urlSafe = payload.replace(/#/g, '%23').replace(/ /g, '%20');
+    urlInput.value = base.slice(0, pos) + urlSafe + base.slice(pos);
     state.injectUrlLast = urlInput.value;   // 다음 삽입 때 '우리가 만든 값인지' 판별용
     toast('URL 기준값에 삽입됨 (누적 방지)', 'success');
 
