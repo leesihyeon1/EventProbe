@@ -95,6 +95,32 @@ def test_sqli_boolean_confirmed_by_status_diff():
     assert any("불린 기반" in t["name"] for t in d["techniques"])
 
 
+def test_sqli_error_based_confirmed_by_marker():
+    """EXTRACTVALUE 로 넣은 hex 마커가 DB 에러로 평문 반환되면 error-based 확증."""
+    body = "XPATH syntax error: '~" + confirm._SQL_ERR_MARKER + "~'"
+    results = [_r("baseline", body="normal"), _r("err", body=body)]
+    d = confirm.decide("sqli", results)
+    assert d["confirmed"]
+    assert any("에러 기반" in t["name"] for t in d["techniques"])
+
+
+def test_sqli_error_based_confirmed_by_db_error():
+    """대조엔 없던 SQL 에러가 주입 시 발생하면 error-based 확증."""
+    results = [_r("baseline", body="normal page"),
+               _r("errn", body="You have an error in your SQL syntax near line 1")]
+    d = confirm.decide("sqli", results)
+    assert d["confirmed"]
+
+
+def test_sqli_error_based_not_confirmed_when_baseline_already_errors():
+    """항상 SQL 에러를 뱉는 페이지는 error-based 로 오확증하지 않는다."""
+    err = "You have an error in your SQL syntax"
+    results = [_r("baseline", body=err), _r("err", body=err)]
+    # 시간/불린 신호도 없음
+    d = confirm.decide("sqli", results)
+    assert not any("에러 기반" in t["name"] for t in d["techniques"])
+
+
 def test_sqli_clean_target_not_confirmed():
     """참/거짓 응답이 동일하고 지연도 없으면 확증되지 않아야 한다(오탐 방지)."""
     results = [
