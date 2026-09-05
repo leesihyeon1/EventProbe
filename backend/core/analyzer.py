@@ -4,7 +4,7 @@
 import ast
 import re
 from typing import Optional
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 
 def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
@@ -1982,8 +1982,76 @@ def _extract_sleep_seconds(payload: str) -> Optional[int]:
     return None
 
 
+# ── HTTP 메소드 기반 오라클(PUT 업로드·DELETE 삭제·WebDAV·TRACE) ────────────────
+# 쓰기/삭제 메소드가 2xx 로 응답되면 그 자체가 성공 신호다(임의 파일 쓰기/삭제 = 심각).
+_WEBDAV_METHODS = {"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "SEARCH"}
+# 쓰기 가능한 정적 파일처럼 보이는 경로(REST API의 PUT/DELETE 오탐을 줄이기 위한 확장자)
+_STATIC_FILE_EXT = re.compile(
+    r"\.(?:txt|html?|shtml|php\d?|phtml|jsp|jspx|asp|aspx|ashx|cer|cfm|pl|cgi|sh|bak|"
+    r"config|cfg|ini|xml|svg|gif|jpe?g|png|js|css|jar|war|zip|bin|dat)(?:$|[?#])", re.I)
+
+
+def _looks_static_file(path: str) -> bool:
+    return bool(_STATIC_FILE_EXT.search(path or ""))
+
+
+def _method_findings(method: str, status_code: int, url: str, body: str) -> list:
+    """위험 HTTP 메소드의 응답으로 성공/활성 여부를 판정."""
+    m = (method or "").upper().strip()
+    if not m or m in ("GET", "POST", "HEAD"):
+        return []
+    parts = urlsplit(url or "")
+    path = parts.path or (url or "")
+    ok2xx = status_code in (200, 201, 204)
+    denied = status_code in (403, 405, 501)   # 메소드 거부(양호)
+    out = []
+
+    if m == "PUT" and ok2xx:
+        static = _looks_static_file(path)
+        strong = status_code == 201 or static
+        out.append({
+            "name": "PUT 메소드 파일 업로드 허용", "verdict": "성공" if strong else "미확정",
+            "confidence": 90 if status_code == 201 else (85 if static else 70),
+            "why": ("PUT 요청이 " + str(status_code) + " 로 수락됨 → 서버에 임의 파일 쓰기가 허용됩니다"
+                    "(WebDAV/PUT 활성). 웹셸(.jsp/.php 등) 업로드로 원격 코드 실행까지 이어질 수 있는 심각 취약점."
+                    + ("" if strong else " REST API의 정상 PUT일 수 있으니 업로드 경로를 GET 하여 실제 생성 여부 확인 필요.")),
+            "evidence": "PUT " + path + " → HTTP " + str(status_code)
+                        + (" (201 Created)" if status_code == 201 else "") + "; 업로드 경로 GET 으로 파일 내용 확인 권장",
+        })
+    elif m == "DELETE" and status_code in (200, 202, 204):
+        out.append({
+            "name": "DELETE 메소드 리소스 삭제 허용", "verdict": "미확정", "confidence": 72,
+            "why": "DELETE 요청이 " + str(status_code) + " 로 수락됨 → 임의 리소스 삭제가 가능할 수 있습니다. "
+                   "대상 경로를 GET 하여 실제 삭제(404 전환) 여부를 확인하세요.",
+            "evidence": "DELETE " + path + " → HTTP " + str(status_code),
+        })
+    elif m == "TRACE" and status_code == 200:
+        echoed = "trace" in (body or "").lower() or "user-agent" in (body or "").lower()
+        out.append({
+            "name": "TRACE 메소드 활성(XST 가능)", "verdict": "성공" if echoed else "미확정",
+            "confidence": 80 if echoed else 60,
+            "why": "TRACE 가 200 으로 응답" + ("되고 요청이 그대로 반향됨 → Cross-Site Tracing 으로 "
+                   "HttpOnly 쿠키·인증 헤더 탈취 가능." if echoed else " — TRACE 활성(XST 가능성). 응답 반향 확인 필요."),
+            "evidence": "TRACE → HTTP 200" + ("; 응답에 요청 반향 확인" if echoed else ""),
+        })
+    elif m in _WEBDAV_METHODS and status_code < 400 and status_code not in (301, 302, 304):
+        out.append({
+            "name": "WebDAV 메소드 활성(" + m + ")", "verdict": "성공", "confidence": 82,
+            "why": m + " 메소드가 " + str(status_code) + " 로 응답됨 → WebDAV 가 활성화되어 있습니다. "
+                   "디렉터리 열람·파일 쓰기/이동 등 인증 우회 공격 표면이 노출됩니다.",
+            "evidence": m + " " + path + " → HTTP " + str(status_code),
+        })
+    elif m in ("PUT", "DELETE") and denied:
+        out.append({
+            "name": m + " 메소드 거부됨", "verdict": "안전", "confidence": 70,
+            "why": m + " 요청이 " + str(status_code) + " 로 거부됨 → 쓰기/삭제 메소드가 제한되어 있습니다(양호).",
+            "evidence": m + " " + path + " → HTTP " + str(status_code),
+        })
+    return out
+
+
 def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline,
-                    url=None, req_body=None):
+                    url=None, req_body=None, method=None):
     """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환.
 
     payload/카테고리에만 의존하지 않고, 요청 전체(payload+URL+본문)를 프로브로 삼아
@@ -2000,6 +2068,9 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     except Exception:
         probe = _raw_probe
     file_probe = probe
+
+    # ⓪ HTTP 메소드 오라클 — PUT 업로드·DELETE 삭제·WebDAV·TRACE (2xx 자체가 성공 신호)
+    findings.extend(_method_findings(method, status_code, url, body))
 
     # ① payload 반사 (클라이언트측 XSS 실행 컨텍스트 정밀 판정 포함)
     refl = _detect_reflection(body or "", payload)
@@ -2173,6 +2244,7 @@ def analyze_response(
     baseline: Optional[dict] = None,
     url: Optional[str] = None,
     req_body: Optional[str] = None,
+    method: Optional[str] = None,
 ) -> dict:
     """HTTP 응답을 분석하여 보안 판정 결과 반환.
 
@@ -2282,7 +2354,7 @@ def analyze_response(
     # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반.
     #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
-        status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body
+        status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body, method
     )
     result["reflection"] = _detect_reflection(body, payload)
     result["spa_shell"] = _detect_spa_shell(body, headers_lower)

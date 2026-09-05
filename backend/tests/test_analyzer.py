@@ -69,6 +69,25 @@ def test_git_config_access_is_file_read_not_authbypass():
     assert infer_attack_type("/.env", "") == "lfi"
 
 
+def test_put_upload_2xx_is_success_not_unknown():
+    """PUT 으로 파일 올려 2xx 면 임의 파일 쓰기 성공 — '미확인'이 아니라 취약."""
+    r = analyze_response(200, {}, "OK", 40, url="http://h/test22.txt", method="PUT")
+    assert r["attack_outcome"] == "success"
+    f = next(x for x in r["findings"] if "PUT" in x["name"])
+    assert f["verdict"] == "성공"
+    assert not any(x["verdict"] == "미확인" for x in r["findings"])
+
+
+def test_put_denied_405_is_safe():
+    r = analyze_response(405, {}, "", 40, url="http://h/x.txt", method="PUT")
+    assert any(x["verdict"] == "안전" and "PUT" in x["name"] for x in r["findings"])
+
+
+def test_get_has_no_method_finding():
+    r = analyze_response(200, {}, "<html>ok</html>", 40, url="http://h/p", method="GET")
+    assert not any("메소드" in x["name"] for x in r["findings"])
+
+
 def test_success_signal_has_no_unknown_finding():
     r = analyze_response(200, {}, "root:x:0:0:root", 60,
                          payload="../../etc/passwd", category="lfi")
