@@ -1004,6 +1004,7 @@ function renderConfirmResult(res, param) {
       <td style="padding:2px 8px 2px 0;color:var(--text-secondary)">${escapeHtml(p.label)}</td>
       <td style="padding:2px 8px 2px 0">${st}</td>
       <td style="padding:2px 8px 2px 0;color:var(--text-muted)">${p.time_ms}ms</td>
+      <td style="padding:2px 8px 2px 0;color:var(--text-muted)">${p.len != null ? p.len + 'B' : '-'}</td>
       <td style="padding:2px 0;color:var(--text-muted);font-family:var(--font-mono);font-size:10px;word-break:break-all;white-space:normal" title="${escapeHtml(String(p.value))}">${escapeHtml(_ellipsisMid(p.value, 90))}</td>
     </tr>`;
   }).join('');
@@ -1021,7 +1022,7 @@ function renderConfirmResult(res, param) {
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
         <thead><tr style="color:var(--text-muted);font-size:10px">
           <th style="text-align:left;padding:2px 8px 4px 0">프로브</th><th style="text-align:left;padding:2px 8px 4px 0">상태</th>
-          <th style="text-align:left;padding:2px 8px 4px 0">시간</th><th style="text-align:left;padding:2px 0 4px 0">값</th>
+          <th style="text-align:left;padding:2px 8px 4px 0">시간</th><th style="text-align:left;padding:2px 8px 4px 0">크기</th><th style="text-align:left;padding:2px 0 4px 0">값</th>
         </tr></thead>
         <tbody>${probeRows}</tbody>
       </table>

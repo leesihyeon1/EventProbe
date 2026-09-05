@@ -582,6 +582,7 @@ async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: l
                 probes_out.append({
                     "role": p["role"], "label": p["label"], "value": p["value"],
                     "status": resp.status_code, "time_ms": round(elapsed),
+                    "len": len(resp.text),   # 응답 크기 — 불린 기반 길이차를 표에서 눈으로 비교
                 })
             except httpx.TimeoutException:
                 results.append({"role": p["role"], "status": 0, "time_ms": float(req.timeout) * 1000,
