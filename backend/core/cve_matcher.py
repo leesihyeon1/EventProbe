@@ -15,11 +15,26 @@ applies_to 스키마(모두 선택):
   body_keywords : [str]  응답 본문 키워드(지문 있을 때, 약)
   always        : bool   항상 후보에 포함(약 — 특정 매칭 뒤에 채움)
 """
+import re
 from typing import Optional
 
 
 def _any_in(needles, haystack: str) -> bool:
     return any(n.lower() in haystack for n in (needles or []))
+
+
+def _is_specific_path(needle: str) -> bool:
+    """경로 조각이 '특정 자산/엔드포인트'를 가리킬 만큼 구체적인가.
+    파일 확장자(.do·.sh·.cgi), 너무 짧은 조각(/env·/rpc), 인코딩 조각(%5c..·.%2e)은
+    아무 URL 에나 부분일치하므로 비특정으로 본다(오탐의 주원인)."""
+    n = (needle or "").strip().lower()
+    if len(n) < 5:
+        return False
+    if re.fullmatch(r"[.%][a-z0-9]{1,4}\.?", n):      # .do .sh .cgi .%2e %5c 등
+        return False
+    if "%" in n and "/" not in n:                      # 순수 인코딩 조각(%5c.. 등)
+        return False
+    return ("/" in n) or (len(n) >= 8)                 # 경로형이거나 충분히 고유한 토큰
 
 
 def _entries_with_hints(payloads_data: dict):
@@ -41,25 +56,30 @@ def match_cve_payloads(payloads_data: dict, path: str, params: Optional[dict] = 
     fp_powered = str(fp.get("powered_by", "")).lower()
     fp_body = str(fp.get("body", "")).lower()
 
-    strong, weak = [], []
+    strong = []
     for cat, p in _entries_with_hints(payloads_data):
         ap = p.get("applies_to") or {}
         score = 0
-        matched = False
+        fp_hit = False       # 지문(자산 식별) 일치
+        path_hit = False     # '특정' 경로 일치
 
-        if ap.get("path_contains") and _any_in(ap["path_contains"], path_lc):
-            score += 2; matched = True
-        if ap.get("param_names") and any(n.lower() in param_keys for n in ap["param_names"]):
-            score += 2; matched = True
+        # 1) 지문 — 응답 스택으로 자산을 정확히 식별했을 때(강)
         if fp_server and ap.get("server") and _any_in(ap["server"], fp_server):
-            score += 3; matched = True
+            score += 3; fp_hit = True
         if fp_powered and ap.get("powered_by") and _any_in(ap["powered_by"], fp_powered):
-            score += 3; matched = True
+            score += 3; fp_hit = True
         if fp_body and ap.get("body_keywords") and _any_in(ap["body_keywords"], fp_body):
-            score += 1; matched = True
+            score += 1; fp_hit = True
 
-        is_always = bool(ap.get("always"))
-        if not matched and not is_always:
+        # 2) 경로 — '특정' 경로가 URL 에 일치할 때만(확장자·짧은·인코딩 조각 제외)
+        for needle in (ap.get("path_contains") or []):
+            if needle and needle.lower() in path_lc and _is_specific_path(needle):
+                score += 2; path_hit = True
+                break
+
+        # 파라미터 이름 단독·always 필러는 정밀도를 위해 매칭 근거로 인정하지 않는다.
+        # 지문 또는 특정 경로가 맞아야만 후보로 채택(무관한 CVE 대량 출력 방지).
+        if not (fp_hit or path_hit):
             continue
 
         cand = {
@@ -73,8 +93,8 @@ def match_cve_payloads(payloads_data: dict, path: str, params: Optional[dict] = 
             "risk": p.get("risk", ""),
             "name": p.get("name", ""),
             "source": "cve",
-            # specific=True: 이 엔드포인트에 특정 매칭(경로/파라미터/지문). always 만인 항목은 False(약).
-            "specific": bool(matched),
+            # 채택된 항목은 전부 특정 매칭(지문 또는 특정 경로) — always/param 단독은 이미 제외됨.
+            "specific": True,
             "_score": score,
         }
         # 단일 POST/raw CVE: method·body·헤더까지 전달(폼에 그대로 세팅)
@@ -86,12 +106,11 @@ def match_cve_payloads(payloads_data: dict, path: str, params: Optional[dict] = 
             cand["headers"] = p["headers"]
         if not cand["payload"]:
             continue
-        (strong if matched else weak).append(cand)
+        strong.append(cand)
 
     strong.sort(key=lambda c: c["_score"], reverse=True)
-    merged = strong + weak            # 특정 매칭 우선, always 는 뒤에서 채움
     seen, out = set(), []
-    for c in merged:
+    for c in strong:
         key = (c["location"], (c["param"] or "").lower(), c["payload"])
         if key in seen:
             continue

@@ -33,13 +33,32 @@ def test_no_match_excluded():
     assert out == []
 
 
-def test_param_names_match():
+def test_param_names_alone_does_not_match():
+    """정밀도: 파라미터 이름 단독은 매칭 근거로 인정하지 않는다(무관 CVE 대량 출력 방지)."""
     data = _store({
         "name": "param CVE", "payload": "X",
         "applies_to": {"param_names": ["redirect_uri"]},
     })
     out = match_cve_payloads(data, path="/x", params={"redirect_uri": "http://a"})
-    assert len(out) == 1
+    assert out == []
+
+
+def test_generic_path_fragment_excluded():
+    """확장자(.do)·짧은(/env)·인코딩(%5c..) 경로 조각은 비특정 → 제외."""
+    data = _store(
+        {"name": "ext", "payload": "E", "applies_to": {"path_contains": [".do"]}},
+        {"name": "short", "payload": "H", "applies_to": {"path_contains": ["/env"]}},
+        {"name": "enc", "payload": "C", "applies_to": {"path_contains": ["%5c.."]}},
+    )
+    out = match_cve_payloads(data, path="/app/order.do/env/%5c..")
+    assert out == []
+
+
+def test_specific_path_still_matches():
+    data = _store({"name": "gpon", "payload": "P",
+                   "applies_to": {"path_contains": ["/GponForm/diag_Form"]}})
+    out = match_cve_payloads(data, path="/x/GponForm/diag_Form")
+    assert len(out) == 1 and out[0]["specific"] is True
 
 
 def test_fingerprint_server_match_scores_higher():
@@ -53,15 +72,15 @@ def test_fingerprint_server_match_scores_higher():
     assert out[0]["name"] == "by-server"    # 강한 지문 매칭이 먼저
 
 
-def test_always_included_as_weak_after_specific():
+def test_always_filler_excluded():
+    """always 필러는 정밀도를 위해 더 이상 출력하지 않는다(특정 매칭만)."""
     data = _store(
-        {"name": "specific", "payload": "S", "applies_to": {"path_contains": ["/x"]}},
+        {"name": "specific", "payload": "S", "applies_to": {"path_contains": ["/adminconsole"]}},
         {"name": "always", "payload": "A", "applies_to": {"always": True}},
     )
-    out = match_cve_payloads(data, path="/x/y")
+    out = match_cve_payloads(data, path="/adminconsole/login")
     names = [c["name"] for c in out]
-    assert names[0] == "specific"      # 특정 매칭 우선
-    assert "always" in names           # always 는 뒤에서 채움
+    assert names == ["specific"]       # 특정 경로만, always 제외
 
 
 def test_empty_payload_skipped():
@@ -71,9 +90,9 @@ def test_empty_payload_skipped():
 
 def test_dedup_same_location_param_payload():
     dup = {"name": "dup", "payload": "SAME", "location": "path", "param": "q",
-           "applies_to": {"always": True}}
+           "applies_to": {"path_contains": ["/dupendpoint"]}}
     data = _store(dict(dup), dict(dup))
-    out = match_cve_payloads(data, path="/x")
+    out = match_cve_payloads(data, path="/dupendpoint/x")
     assert len(out) == 1
 
 
@@ -138,9 +157,9 @@ def test_real_bank_matches_nginx_by_fingerprint():
 
 def test_limit_respected():
     payloads = [
-        {"name": f"p{i}", "payload": f"v{i}", "applies_to": {"always": True}}
+        {"name": f"p{i}", "payload": f"v{i}", "applies_to": {"path_contains": ["/vulnpath"]}}
         for i in range(20)
     ]
     data = _store(*payloads)
-    out = match_cve_payloads(data, path="/x", limit=5)
+    out = match_cve_payloads(data, path="/vulnpath/x", limit=5)
     assert len(out) == 5
