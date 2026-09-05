@@ -1058,7 +1058,13 @@ async def rag_ingest(url: str = Form(""), file: UploadFile = File(None)):
 
 @router.get("/rag/sources")
 def rag_sources():
-    return {"sources": rag.list_sources()}
+    return {"sources": rag.list_sources(), "embeddings": rag.embeddings_enabled()}
+
+
+@router.post("/rag/reindex")
+async def rag_reindex():
+    """벡터가 없는 기존 문서를 임베딩해 백필(의미 검색 활성화)."""
+    return await asyncio.to_thread(rag.reindex_embeddings)
 
 
 @router.delete("/rag/sources/{source_id}")

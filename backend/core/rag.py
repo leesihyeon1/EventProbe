@@ -18,6 +18,8 @@ import time
 from collections import Counter
 from typing import Optional
 
+import numpy as np
+
 _RAG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "rag")
 
 _TOKEN_RE = re.compile(r"[a-z0-9_][a-z0-9_./:\-]*", re.I)
@@ -83,8 +85,89 @@ class _BM25:
         return scored[:k]
 
 
+# ── NVIDIA 임베딩(의미 검색) ──────────────────────────────────────────────────
+# 검색 정확도를 '키워드'에서 '의미'로 올린다. 이미 쓰는 NVIDIA API 재사용(torch 불필요).
+# 실패/미설정 시 조용히 BM25 로 폴백한다.
+def _embed_cfg():
+    return (os.getenv("NVIDIA_API_KEY", "").strip(),
+            os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/"),
+            os.getenv("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3-embed-1b").strip())
+
+
+def embeddings_enabled() -> bool:
+    return bool(_embed_cfg()[0])
+
+
+# NVIDIA VL 임베더는 텍스트 속 data:/http: 등 스킴 토큰을 이미지 입력으로 오인해
+# 503("image inputs require VLM serving")을 낸다. 임베딩 전에만 스킴을 분리한다
+# (저장 텍스트·BM25·표시는 원본 유지).
+_SCHEME_RE = re.compile(r"(?i)\b(data|https?|ftp|file|blob):")
+
+
+def _sanitize_for_embed(text: str) -> str:
+    return _SCHEME_RE.sub(r"\1 :", text or "")[:2000]
+
+
+def _embed_batch(base, headers, model, batch, input_type):
+    """한 배치 → (행렬 or None, 치명오류 여부). 치명오류(인증/모델없음)면 폴백 중단."""
+    import httpx
+    payload = {"input": [_sanitize_for_embed(t) for t in batch], "model": model,
+               "input_type": input_type, "encoding_format": "float", "truncate": "END"}
+    try:
+        with httpx.Client(timeout=60) as client:
+            r = client.post(f"{base}/embeddings", headers=headers, json=payload)
+    except Exception:
+        return None, False
+    if r.status_code == 200:
+        data = sorted(r.json()["data"], key=lambda d: d["index"])
+        return np.asarray([d["embedding"] for d in data], dtype="float32"), False
+    if r.status_code in (401, 403, 404, 410):   # 키/모델 자체 불가 → 전체 폴백
+        return None, True
+    return None, False                          # 일시/콘텐츠 오류 → 청크 단위 재시도
+
+
+def _embed(texts: list, input_type: str) -> Optional["np.ndarray"]:
+    """텍스트 목록 → 정규화된 임베딩 행렬(N×D). input_type: 'query'|'passage'.
+    배치 실패 시 청크 단위로 재시도하고, 끝내 실패한 청크는 0 벡터(검색에서 자연히 제외).
+    임베딩 자체가 불가하면 None → 상위에서 BM25 폴백."""
+    key, base, model = _embed_cfg()
+    if not key or not texts:
+        return None
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    dim, rows = None, [None] * len(texts)
+    for i in range(0, len(texts), 50):
+        batch = texts[i:i + 50]
+        mat, fatal = _embed_batch(base, headers, model, batch, input_type)
+        if fatal:
+            return None
+        if mat is not None:
+            dim = mat.shape[1]
+            for j in range(len(batch)):
+                rows[i + j] = mat[j]
+            continue
+        for j, t in enumerate(batch):           # 청크 단위 재시도
+            single, fatal = _embed_batch(base, headers, model, [t], input_type)
+            if fatal:
+                return None
+            if single is not None:
+                dim = single.shape[1]
+                rows[i + j] = single[0]
+    if dim is None:                             # 단 하나도 성공 못 함
+        return None
+    arr = np.asarray([(r if r is not None else np.zeros(dim, dtype="float32")) for r in rows],
+                     dtype="float32")
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return arr / norms                          # 정규화 → 코사인 = 내적
+
+
+def _vec_path(source_id: str) -> str:
+    return os.path.join(_RAG_DIR, source_id + ".npy")
+
+
 # ── 색인 캐시(변경 시 재구성) ─────────────────────────────────────────────────
 _INDEX = {"sig": None, "chunks": [], "bm25": None}
+_VINDEX = {"sig": None, "mat": None, "chunks": []}   # 의미 검색용(임베딩 행렬)
 
 
 def _sources_signature() -> tuple:
@@ -183,9 +266,15 @@ def _save_source(source_id: str, title: str, kind: str, ref: str, chunks: list) 
            "added": time.strftime("%Y-%m-%d %H:%M:%S"), "chunks": chunks}
     with open(os.path.join(_RAG_DIR, source_id + ".json"), "w", encoding="utf-8") as f:
         json.dump(rec, f, ensure_ascii=False)
-    _INDEX["sig"] = None   # 다음 검색 때 재색인
+    # 임베딩(가능하면) — 실패해도 문서는 저장됨(BM25 로 동작)
+    mat = _embed([c.get("text", "") for c in chunks], "passage")
+    if mat is not None and mat.shape[0] == len(chunks):
+        np.save(_vec_path(source_id), mat)
+    _INDEX["sig"] = None    # 다음 검색 때 재색인
+    _VINDEX["sig"] = None
     return {"id": source_id, "title": rec["title"], "kind": kind,
-            "chunks": len(chunks), "added": rec["added"]}
+            "chunks": len(chunks), "added": rec["added"],
+            "embedded": mat is not None}
 
 
 def ingest_text(title: str, text: str, kind: str = "text", ref: str = "") -> dict:
@@ -217,9 +306,11 @@ def ingest_url(url: str) -> dict:
 def list_sources() -> list:
     out = []
     for src in _load_all_sources():
-        out.append({"id": src.get("id"), "title": src.get("title", ""),
+        sid = src.get("id")
+        out.append({"id": sid, "title": src.get("title", ""),
                     "kind": src.get("kind", ""), "chunks": len(src.get("chunks", [])),
-                    "added": src.get("added", ""), "source_ref": src.get("source_ref", "")})
+                    "added": src.get("added", ""), "source_ref": src.get("source_ref", ""),
+                    "embedded": bool(sid and os.path.isfile(_vec_path(sid)))})
     out.sort(key=lambda s: s.get("added", ""), reverse=True)
     return out
 
@@ -229,7 +320,11 @@ def delete_source(source_id: str) -> bool:
     path = os.path.join(_RAG_DIR, source_id + ".json")
     if os.path.isfile(path) and re.fullmatch(r"src_[0-9a-f]{12}", source_id or ""):
         os.remove(path)
+        vp = _vec_path(source_id)
+        if os.path.isfile(vp):
+            os.remove(vp)
         _INDEX["sig"] = None
+        _VINDEX["sig"] = None
         return True
     return False
 
@@ -238,8 +333,57 @@ def has_sources() -> bool:
     return bool(_sources_signature())
 
 
+def _ensure_vindex():
+    """저장된 .npy 벡터를 모아 의미 검색용 행렬을 구성. 벡터 없는 문서는 제외."""
+    sig = _sources_signature()
+    if _VINDEX["sig"] == sig and _VINDEX["mat"] is not None:
+        return
+    mats, chunks = [], []
+    for src in _load_all_sources():
+        sid = src.get("id")
+        vp = _vec_path(sid)
+        src_chunks = src.get("chunks", [])
+        if not (sid and os.path.isfile(vp) and src_chunks):
+            continue
+        try:
+            m = np.load(vp)
+        except Exception:
+            continue
+        if m.shape[0] != len(src_chunks):
+            continue
+        mats.append(m)
+        for c in src_chunks:
+            chunks.append({"text": c.get("text", ""), "source_id": sid,
+                           "title": src.get("title", ""), "kind": src.get("kind", ""),
+                           "loc": c.get("loc", "")})
+    _VINDEX["mat"] = np.vstack(mats) if mats else None
+    _VINDEX["chunks"] = chunks
+    _VINDEX["sig"] = sig
+
+
+def _semantic_search(query: str, k: int) -> Optional[list]:
+    """임베딩 기반 코사인 top-k. 임베딩/벡터 없으면 None → BM25 폴백."""
+    if not embeddings_enabled():
+        return None
+    _ensure_vindex()
+    if _VINDEX["mat"] is None or not _VINDEX["chunks"]:
+        return None
+    qm = _embed([query], "query")
+    if qm is None:
+        return None
+    sims = _VINDEX["mat"] @ qm[0]                       # 정규화돼 있어 내적=코사인
+    order = np.argsort(-sims)[:k]
+    return [{**_VINDEX["chunks"][int(i)], "score": round(float(sims[int(i)]), 3)}
+            for i in order if sims[int(i)] > 0]
+
+
 def search(query: str, k: int = 6) -> list:
-    """쿼리로 top-k 청크 검색. [{text, title, source_id, kind, loc, score}]."""
+    """쿼리로 top-k 청크 검색. 의미 검색 우선, 실패 시 BM25 폴백."""
+    if not (query or "").strip():
+        return []
+    sem = _semantic_search(query, k)
+    if sem:
+        return sem
     _ensure_index()
     if not _INDEX["chunks"]:
         return []
@@ -251,3 +395,26 @@ def search(query: str, k: int = 6) -> list:
         c = _INDEX["chunks"][i]
         hits.append({**c, "score": round(score, 3)})
     return hits
+
+
+def reindex_embeddings() -> dict:
+    """벡터(.npy)가 없는 기존 문서를 임베딩해 백필. 이미 있으면 건너뜀."""
+    if not embeddings_enabled():
+        return {"ok": False, "reason": "NVIDIA_API_KEY 미설정 — 임베딩 사용 불가", "embedded": 0}
+    done, failed, skipped = 0, 0, 0
+    for src in _load_all_sources():
+        sid = src.get("id")
+        chunks = src.get("chunks", [])
+        if not (sid and chunks):
+            continue
+        if os.path.isfile(_vec_path(sid)):
+            skipped += 1
+            continue
+        mat = _embed([c.get("text", "") for c in chunks], "passage")
+        if mat is not None and mat.shape[0] == len(chunks):
+            np.save(_vec_path(sid), mat)
+            done += 1
+        else:
+            failed += 1
+    _VINDEX["sig"] = None
+    return {"ok": failed == 0, "embedded": done, "skipped": skipped, "failed": failed}

@@ -81,6 +81,10 @@
               <input id="ragFile" type="file" accept=".pdf,.txt,.md" style="flex:1;font-size:10px">
               <button class="btn btn-secondary" style="font-size:11px;padding:4px 8px" onclick="ragIngestFile()">업로드</button>
             </div>
+            <div id="ragEmbedRow" style="display:none;align-items:center;gap:6px;font-size:10px;color:var(--text-muted)">
+              <span id="ragEmbedStatus"></span>
+              <button class="btn btn-secondary" style="font-size:10px;padding:3px 7px" onclick="ragReindex()">임베딩 재색인</button>
+            </div>
             <div id="ragSources" style="font-size:10px;color:var(--text-secondary)"></div>
           </div>
         </details>

@@ -35,6 +35,10 @@ const API = {
     const r = await fetch('/api/rag/sources/' + encodeURIComponent(id), { method:'DELETE' });
     return r.json();
   },
+  async ragReindex() {
+    const r = await fetch('/api/rag/reindex', { method:'POST' });
+    return r.json();
+  },
   async followupSuggest(data) {
     const r = await fetch('/api/followup-suggest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     return r.json();
@@ -1150,14 +1154,37 @@ async function loadRagSources() {
   const res = await API.ragSources();
   const srcs = res.sources || [];
   if (cnt) cnt.textContent = srcs.length ? `(${srcs.length})` : '';
+  // 임베딩 상태 표시 + 재색인 버튼(임베딩 사용 가능 & 미임베딩 문서 존재 시)
+  const embRow = document.getElementById('ragEmbedRow');
+  const embStat = document.getElementById('ragEmbedStatus');
+  if (embRow && embStat) {
+    if (!res.embeddings) {
+      embRow.style.display = srcs.length ? 'flex' : 'none';
+      embStat.textContent = 'BM25 키워드 검색(임베딩 미설정)';
+      embRow.querySelector('button').style.display = 'none';
+    } else {
+      const pending = srcs.filter(s => !s.embedded).length;
+      embRow.style.display = srcs.length ? 'flex' : 'none';
+      embStat.textContent = pending ? `의미 검색 · 미임베딩 ${pending}건` : '의미 검색 활성';
+      embRow.querySelector('button').style.display = pending ? '' : 'none';
+    }
+  }
   if (!srcs.length) { el.innerHTML = '<span style="color:var(--text-muted)">등록된 문서 없음</span>'; return; }
   el.innerHTML = srcs.map(s => `
     <div style="display:flex;gap:6px;align-items:center;padding:3px 0;border-top:1px solid var(--border)">
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.source_ref||'')}">
-        ${escapeHtml(s.title||s.id)} <span style="color:var(--text-muted)">· ${escapeHtml(s.kind)} · ${s.chunks}청크</span>
+        ${escapeHtml(s.title||s.id)} <span style="color:var(--text-muted)">· ${escapeHtml(s.kind)} · ${s.chunks}청크${s.embedded ? ' · 임베딩' : ''}</span>
       </span>
       <button class="btn btn-secondary" style="font-size:10px;padding:1px 6px" onclick="ragDelete('${s.id}')">삭제</button>
     </div>`).join('');
+}
+
+async function ragReindex() {
+  toast('임베딩 재색인 중… (문서 수에 따라 시간이 걸립니다)', 'info');
+  const res = await API.ragReindex();
+  if (res.ok === false && res.reason) { toast(res.reason, 'error'); }
+  else { toast(`임베딩 완료: ${res.embedded || 0}건 (건너뜀 ${res.skipped || 0}, 실패 ${res.failed || 0})`, res.failed ? 'error' : 'success'); }
+  loadRagSources();
 }
 
 async function ragIngestUrl() {

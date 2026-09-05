@@ -85,7 +85,10 @@ def _build_user_prompt(ctx: dict) -> str:
 
 def _extract_json(text: str) -> dict:
     """모델 응답에서 JSON 객체를 최대한 안전하게 추출."""
-    text = text.strip()
+    text = (text or "").strip()
+    # 추론형 모델(nemotron 등)의 <think>…</think> 프리앰블 제거(내부 중괄호 오탐 방지)
+    text = re.sub(r"(?is)<think>.*?</think>", "", text).strip()
+    text = re.sub(r"(?is)^<think>.*", "", text).strip()   # 닫히지 않은 경우
     # ```json ... ``` 코드펜스 제거
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence:
