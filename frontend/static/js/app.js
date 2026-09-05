@@ -2076,6 +2076,17 @@ function renderAnalysis(a, result) {
       </div>
     </div>
 
+    <!-- 기술 스택/인프라 지문 (Envoy, Next.js 등) -->
+    ${a.tech_stack?.length ? `
+    <div class="analysis-card" data-card-id="tech-stack">
+      <div class="analysis-card-header">감지된 기술 스택</div>
+      <div class="analysis-card-body">
+        <div class="tag-list">
+          ${a.tech_stack.map(s => `<span class="tag tag-blue" title="${escapeHtml(s.evidence || '')}">${escapeHtml(s.name)} · ${escapeHtml(s.kind)}</span>`).join('')}
+        </div>
+      </div>
+    </div>` : ''}
+
     <!-- 차단 이유 -->
     ${a.block_reason?.length ? `
     <div class="analysis-card" data-card-id="block-reason">

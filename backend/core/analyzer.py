@@ -54,6 +54,63 @@ def detect_waf(headers_lower: dict) -> Optional[str]:
             return waf
     return None
 
+
+# ── 기술 스택/인프라 지문 ─────────────────────────────────────────────────────
+# (라벨, 유형, [(헤더명 부분일치, 값 정규식 | None)]). 하나라도 매칭되면 감지.
+# 값이 None 이면 '그 이름을 포함하는 헤더가 존재'하는 것만으로 매칭(예: x-envoy-* 계열).
+_STACK_SIGNATURES = [
+    # 프록시 / 게이트웨이 / 서비스메시
+    ("Envoy",          "프록시",       [("server", r"\benvoy\b"), ("x-envoy-", None)]),
+    ("Istio",          "서비스 메시",  [("x-istio", None), ("server", r"istio")]),
+    ("Kong",           "API 게이트웨이", [("server", r"kong"), ("via", r"kong"), ("x-kong-", None)]),
+    ("Traefik",        "프록시",       [("server", r"traefik")]),
+    ("HAProxy",        "프록시",       [("server", r"haproxy")]),
+    ("Varnish",        "캐시 프록시",  [("via", r"varnish"), ("x-varnish", None)]),
+    ("Apache Traffic Server", "캐시 프록시", [("server", r"ats/|trafficserver")]),
+    # CDN
+    ("Cloudflare",     "CDN",          [("cf-ray", None), ("server", r"cloudflare")]),
+    ("Fastly",         "CDN",          [("via", r"fastly"), ("x-served-by", r"cache-"), ("x-fastly", None)]),
+    ("Amazon CloudFront", "CDN",       [("via", r"cloudfront"), ("x-amz-cf-id", None)]),
+    ("Akamai",         "CDN",          [("server", r"akamai"), ("x-akamai", None)]),
+    ("Vercel",         "호스팅/CDN",   [("server", r"vercel"), ("x-vercel-", None)]),
+    # 웹서버
+    ("nginx",          "웹서버",       [("server", r"nginx|openresty")]),
+    ("Apache",         "웹서버",       [("server", r"apache")]),
+    ("IIS",            "웹서버",       [("server", r"microsoft-iis|iis/")]),
+    ("LiteSpeed",      "웹서버",       [("server", r"litespeed")]),
+    # 프레임워크 / 런타임
+    ("Next.js",        "프레임워크",   [("x-powered-by", r"next\.?js"), ("x-nextjs-", None)]),
+    ("Express",        "프레임워크",   [("x-powered-by", r"express")]),
+    ("ASP.NET",        "프레임워크",   [("x-powered-by", r"asp\.net"), ("x-aspnet-version", None), ("x-aspnetmvc-version", None)]),
+    ("PHP",            "런타임",       [("x-powered-by", r"php/")]),
+    ("Ruby on Rails",  "프레임워크",   [("x-powered-by", r"phusion passenger"), ("x-runtime", None)]),
+    ("Django",         "프레임워크",   [("server", r"wsgiserver"), ("x-frame-options", r"__django__never__")]),
+    ("Spring",         "프레임워크",   [("x-application-context", None)]),
+    ("Laravel",        "프레임워크",   [("set-cookie", r"laravel_session")]),
+]
+
+
+def detect_stack(headers_lower: dict) -> list:
+    """응답 헤더에서 프록시·CDN·웹서버·프레임워크 등 기술 스택을 식별.
+
+    반환: [{"name","kind","evidence"}]. Envoy(server 또는 x-envoy-*) 같은 인프라도 인식한다.
+    """
+    items = list(headers_lower.items())
+    out, seen = [], set()
+    for label, kind, checks in _STACK_SIGNATURES:
+        for name_needle, val_re in checks:
+            hit = None
+            for hk, hv in items:
+                if name_needle in hk and (val_re is None or re.search(val_re, hv, re.I)):
+                    hit = (hk, hv)
+                    break
+            if hit and label not in seen:
+                seen.add(label)
+                ev = f"{hit[0]}: {hit[1][:60]}" if hit[1] else hit[0]
+                out.append({"name": label, "kind": kind, "evidence": ev})
+                break
+    return out
+
 # ── 차단 응답 바디 키워드 ────────────────────────────────────────────────────
 BLOCK_KEYWORDS = [
     "blocked", "forbidden", "access denied", "not allowed",
@@ -2036,6 +2093,7 @@ def analyze_response(
         "verdict": "unknown",
         "confidence": 0,
         "waf_detected": None,
+        "tech_stack": [],       # 프록시/CDN/웹서버/프레임워크 지문(Envoy, Next.js 등)
         "block_reason": [],
         "error_leaks": [],
         "sensitive_data": [],
@@ -2075,6 +2133,7 @@ def analyze_response(
         result["details"].append(f"HTTP {status_code} — 서버 에러")
 
     # 2. WAF 헤더 탐지
+    result["tech_stack"] = detect_stack(headers_lower)
     waf_name = detect_waf(headers_lower)
     if waf_name:
         result["waf_detected"] = waf_name

@@ -7,7 +7,7 @@
 증거가 없는 단순 통과(200)를 '취약'으로 격상하지 않고, 실제 성공 증거
 (파일 읽기·명령 출력·타이밍 일치·실행 컨텍스트 반사 등)가 있을 때만 격상한다.
 """
-from core.analyzer import analyze_response, detect_waf, generate_summary
+from core.analyzer import analyze_response, detect_waf, generate_summary, detect_stack
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -393,6 +393,40 @@ def test_ssrf_metadata_text_without_hint_not_flagged():
 # ─────────────────────────────────────────────────────────────────────────────
 # WAF 지문 탐지
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 기술 스택/인프라 지문 (Envoy 프록시 등)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_detect_stack_envoy_and_nextjs():
+    h = {"server": "envoy", "x-envoy-upstream-service-time": "54",
+         "x-powered-by": "Next.js", "content-type": "text/html"}
+    names = {s["name"] for s in detect_stack(h)}
+    assert "Envoy" in names
+    assert "Next.js" in names
+
+
+def test_detect_stack_envoy_via_xheader_only():
+    """server 헤더가 없어도 x-envoy-* 만으로 Envoy 인식."""
+    names = {s["name"] for s in detect_stack({"x-envoy-decorator-operation": "x"})}
+    assert "Envoy" in names
+
+
+def test_detect_stack_cdn_and_server():
+    assert "Cloudflare" in {s["name"] for s in detect_stack({"cf-ray": "abc", "server": "cloudflare"})}
+    assert "nginx" in {s["name"] for s in detect_stack({"server": "nginx/1.25.0"})}
+    assert "IIS" in {s["name"] for s in detect_stack({"server": "Microsoft-IIS/10.0"})}
+
+
+def test_detect_stack_none_when_generic():
+    assert detect_stack({"content-type": "text/html", "date": "..."}) == []
+
+
+def test_analyze_response_includes_tech_stack():
+    r = analyze_response(200, {"server": "envoy", "x-powered-by": "Next.js"}, "<html>ok</html>", 50,
+                         payload="x", category="xss")
+    names = {s["name"] for s in r["tech_stack"]}
+    assert "Envoy" in names and "Next.js" in names
+
+
 def test_detect_waf_cloudflare():
     assert detect_waf({"server": "cloudflare", "cf-ray": "abc123"}) == "Cloudflare"
 
