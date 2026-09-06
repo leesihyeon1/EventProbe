@@ -1,0 +1,14 @@
+GET /admin HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 145.92.52.149
+Accept: */*
+User-Agent: Go-http-client/1.1
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 165.96.190.25,142.32.30.159
+X-Cloud-Trace-Context: 881ed162ae2eb1547f15052434b9b5df/7168670181184942206
+x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware
+

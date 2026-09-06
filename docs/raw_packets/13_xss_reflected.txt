@@ -1,0 +1,13 @@
+GET /search?q=%3Cscript%3Ealert(document.domain)%3C/script%3E HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 7.105.185.38
+Accept: */*
+User-Agent: Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 141.13.152.251,166.46.133.133
+X-Cloud-Trace-Context: 5b0ee76f2ac34446e883a1d45de00997/2054900455814576406
+

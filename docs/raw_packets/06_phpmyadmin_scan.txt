@@ -1,0 +1,13 @@
+GET /phpmyadmin/index.php HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 118.35.47.242
+Accept: */*
+User-Agent: python-requests/2.31.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 123.33.31.188,181.158.228.73
+X-Cloud-Trace-Context: ab2cd31ee315128862c33a4fb774eb52/208106229431883325
+

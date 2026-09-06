@@ -36,19 +36,61 @@ def _tokenize(text: str) -> list:
     return [t.lower() for t in _TOKEN_RE.findall(text or "")]
 
 
+_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s+|={3,}\s*$|-{3,}\s*$)")
+
+
+def _split_blocks(text: str) -> list:
+    """마크다운 헤딩·빈 줄 문단 경계로 블록 분할(구조 인식). 헤딩은 새 블록을 연다."""
+    blocks, cur = [], []
+    for ln in text.split("\n"):
+        if _HEADING_RE.match(ln):
+            if cur:
+                blocks.append("\n".join(cur)); cur = []
+            cur.append(ln)
+        elif ln.strip() == "":
+            if cur:
+                blocks.append("\n".join(cur)); cur = []
+        else:
+            cur.append(ln)
+    if cur:
+        blocks.append("\n".join(cur))
+    return [b.strip() for b in blocks if b.strip()]
+
+
 def _chunk(text: str, base_meta: dict) -> list:
-    """텍스트를 겹침 있는 청크로 분할. base_meta 에 loc 만 덧붙인다."""
+    """구조 인식 청킹 — 헤딩/문단 경계를 존중해 개념이 중간에 잘리지 않게 한다.
+    블록을 _CHUNK_SIZE 까지 모으고, 한 블록이 너무 크면 문자 단위로 겹침 분할."""
     text = re.sub(r"[ \t]+", " ", (text or "")).strip()
     if not text:
         return []
-    out, i, n = [], 0, len(text)
-    while i < n:
-        piece = text[i:i + _CHUNK_SIZE]
-        out.append({**base_meta, "text": piece})
-        if i + _CHUNK_SIZE >= n:
-            break
-        i += _CHUNK_SIZE - _CHUNK_OVERLAP
-    return out
+    blocks = _split_blocks(text)
+    out, cur = [], []
+
+    def _flush():
+        joined = "\n".join(cur).strip()
+        if joined:
+            out.append({**base_meta, "text": joined})
+
+    curlen = 0
+    for b in blocks:
+        if len(b) > _CHUNK_SIZE:                       # 초대형 블록 → 문자 겹침 분할
+            _flush(); cur, curlen = [], 0
+            i, n = 0, len(b)
+            while i < n:
+                out.append({**base_meta, "text": b[i:i + _CHUNK_SIZE].strip()})
+                if i + _CHUNK_SIZE >= n:
+                    break
+                i += _CHUNK_SIZE - _CHUNK_OVERLAP
+            continue
+        if curlen + len(b) + 1 > _CHUNK_SIZE and cur:  # 현재 청크가 다 참 → 비우고 오버랩 유지
+            _flush()
+            tail = "\n".join(cur)[-_CHUNK_OVERLAP:]
+            cur = [tail] if tail.strip() else []
+            curlen = len(tail)
+        cur.append(b)
+        curlen += len(b) + 1
+    _flush()
+    return [c for c in out if c["text"]]
 
 
 # ── BM25 (순수 파이썬) ────────────────────────────────────────────────────────
@@ -377,13 +419,52 @@ def _semantic_search(query: str, k: int) -> Optional[list]:
             for i in order if sims[int(i)] > 0]
 
 
-def search(query: str, k: int = 6) -> list:
-    """쿼리로 top-k 청크 검색. 의미 검색 우선, 실패 시 BM25 폴백."""
+# 공격 카테고리 → 문서에서 그 주제를 가리키는 용어(리랭킹 부스트용).
+_CATEGORY_TERMS = {
+    "sqli":     ["sql injection", "sqli", "union select", "blind sql", "sqlmap", "boolean-based", "error-based"],
+    "xss":      ["cross-site scripting", "xss", "dom xss", "reflected", "stored xss", "csp", "innerhtml"],
+    "ssrf":     ["ssrf", "server-side request forgery", "metadata", "169.254", "internal request", "url parser"],
+    "lfi":      ["local file inclusion", "lfi", "path traversal", "directory traversal", "/etc/passwd", "file read"],
+    "xxe":      ["xxe", "xml external entity", "external entity", "doctype", "system \""],
+    "cmdi":     ["command injection", "os command", "rce", "remote code execution", "shell", "; id"],
+    "ssti":     ["template injection", "ssti", "server-side template", "jinja", "twig", "{{7*7}}"],
+    "redirect": ["open redirect", "redirect", "location header", "//evil"],
+    "jwt":      ["jwt", "json web token", "algorithm confusion", "alg none", "kid", "signature"],
+    "idor":     ["idor", "access control", "authorization", "insecure direct object", "broken access", "privilege"],
+    "nosql":    ["nosql", "mongodb", "nosql injection", "$where", "$ne"],
+    "xmlrpc":   ["xml-rpc", "xmlrpc", "pingback", "system.multicall", "wordpress"],
+    "csrf":     ["csrf", "cross-site request forgery", "samesite", "csrf token"],
+    "auth":     ["authentication", "brute force", "credential", "session", "login", "mfa", "2fa"],
+    "redos":    ["redos", "regular expression denial", "catastrophic backtracking"],
+    "deserial": ["deserialization", "insecure deserialization", "pickle", "gadget"],
+}
+
+
+def _rerank_by_category(hits: list, category: str) -> list:
+    """의미검색 후보를 공격 카테고리 용어 매칭으로 소폭 가산해 재정렬(관련도 우선 유지)."""
+    terms = _CATEGORY_TERMS.get((category or "").lower())
+    if not terms:
+        return hits
+    for h in hits:
+        blob = (str(h.get("text", "")) + " " + str(h.get("loc", "")) + " " + str(h.get("title", ""))).lower()
+        matched = sum(1 for t in terms if t in blob)
+        boost = min(0.15, 0.04 * matched)              # 최대 +0.15 (의미점수 왜곡 최소화)
+        if boost:
+            h["score"] = round(float(h.get("score", 0)) + boost, 3)
+            h["cat_boost"] = boost
+    hits.sort(key=lambda x: x.get("score", 0), reverse=True)
+    return hits
+
+
+def search(query: str, k: int = 6, category: str = "") -> list:
+    """쿼리로 top-k 청크 검색. 의미 검색 우선, 실패 시 BM25 폴백.
+    category 가 주어지면 후보 풀을 넓혀 카테고리 용어로 재정렬(기존 데이터에도 즉시 적용)."""
     if not (query or "").strip():
         return []
-    sem = _semantic_search(query, k)
+    pool = max(k, k * 3) if category else k             # 카테고리 리랭킹용 후보 확대
+    sem = _semantic_search(query, pool)
     if sem:
-        return sem
+        return _rerank_by_category(sem, category)[:k] if category else sem[:k]
     _ensure_index()
     if not _INDEX["chunks"]:
         return []
@@ -391,10 +472,10 @@ def search(query: str, k: int = 6) -> list:
     if not q:
         return []
     hits = []
-    for score, i in _INDEX["bm25"].topk(q, k):
+    for score, i in _INDEX["bm25"].topk(q, pool):
         c = _INDEX["chunks"][i]
         hits.append({**c, "score": round(score, 3)})
-    return hits
+    return _rerank_by_category(hits, category)[:k] if category else hits[:k]
 
 
 def reindex_embeddings() -> dict:

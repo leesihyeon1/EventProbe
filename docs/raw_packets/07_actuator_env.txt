@@ -1,0 +1,13 @@
+GET /actuator/env HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 120.181.86.157
+Accept: */*
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 128.30.111.197,75.66.126.102
+X-Cloud-Trace-Context: 7f1b103cdf1582b0eab477d26415479c/1534458142939740647
+

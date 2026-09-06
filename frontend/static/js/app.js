@@ -1175,14 +1175,28 @@ async function loadRagSources() {
       embRow.querySelector('button').style.display = pending ? '' : 'none';
     }
   }
+  // 문서가 많으면(>8) 필터 입력 노출
+  const flt = document.getElementById('ragFilter');
+  if (flt) flt.style.display = srcs.length > 8 ? '' : 'none';
   if (!srcs.length) { el.innerHTML = '<span style="color:var(--text-muted)">등록된 문서 없음</span>'; return; }
-  el.innerHTML = srcs.map(s => `
-    <div style="display:flex;gap:6px;align-items:center;padding:3px 0;border-top:1px solid var(--border)">
+  const totalChunks = srcs.reduce((n, s) => n + (s.chunks || 0), 0);
+  el.innerHTML =
+    `<div style="font-size:9px;color:var(--text-muted);padding:2px 0">문서 ${srcs.length} · 청크 ${totalChunks}</div>` +
+    srcs.map(s => `
+    <div class="rag-src-row" data-title="${escapeHtml((s.title||s.id).toLowerCase())}" style="display:flex;gap:6px;align-items:center;padding:3px 0;border-top:1px solid var(--border)">
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.source_ref||'')}">
         ${escapeHtml(s.title||s.id)} <span style="color:var(--text-muted)">· ${escapeHtml(s.kind)} · ${s.chunks}청크${s.embedded ? ' · 임베딩' : ''}</span>
       </span>
       <button class="btn btn-secondary" style="font-size:10px;padding:1px 6px" onclick="ragDelete('${s.id}')">삭제</button>
     </div>`).join('');
+}
+
+// 참고문서 목록 필터 — 제목 부분일치로 행 표시/숨김
+function filterRagSources(q) {
+  const t = (q || '').trim().toLowerCase();
+  document.querySelectorAll('#ragSources .rag-src-row').forEach(row => {
+    row.style.display = (!t || (row.dataset.title || '').includes(t)) ? '' : 'none';
+  });
 }
 
 async function ragReindex() {
@@ -2060,6 +2074,7 @@ function renderAttackCard(a) {
   const OUT = {
     success:      ['공격 성공',   'tag-red',   'rgba(248,81,73,.4)'],
     blocked:      ['차단됨',      'tag-green', 'var(--border)'],
+    safe:         ['영향 없음',   'tag-green', 'var(--border)'],
     inconclusive: ['미확정',      'tag-blue',  'var(--border)'],
   };
   const [label, cls, border] = OUT[a.attack_outcome] || ['분석', 'tag-blue', 'var(--border)'];
@@ -2123,17 +2138,31 @@ function _findingEvidenceBlock(findings) {
 function _ragContextBlock(ragCtx, usedCount) {
   const ctx = ragCtx || [];
   if (!usedCount || !ctx.length) return '';
-  const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>30 ? s.slice(0,30)+'…' : s; };
+  const _shortDoc = n => { let s = String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>34 ? s.slice(0,34)+'…' : s; };
+  // 소스(title)별 그룹핑 — 통합 소스가 여러 청크로 나와도 제목 한 번 + 하위 위치들로 정리
+  const groups = [];
+  const idx = {};
+  ctx.forEach(c => {
+    const key = c.title || '';
+    if (idx[key] == null) { idx[key] = groups.length; groups.push({ title: key, items: [] }); }
+    groups[idx[key]].items.push(c);
+  });
+  const titleList = groups.map(g => escapeHtml(_shortDoc(g.title))).slice(0, 3).join(', ') + (groups.length > 3 ? ` 외 ${groups.length - 3}` : '');
+  const groupHtml = g => `
+    <div style="border-top:1px solid rgba(188,140,255,.18);padding-top:4px">
+      <div style="color:var(--purple);font-weight:600">${escapeHtml(_shortDoc(g.title))} <span style="color:var(--text-muted);font-weight:400">· ${g.items.length}개 발췌</span></div>
+      ${g.items.map(c => `
+        <div style="margin-top:3px;padding-left:6px;border-left:2px solid rgba(188,140,255,.25)">
+          <div style="font-size:9px;color:var(--text-muted)">${c.loc ? escapeHtml(String(c.loc)) : ''}${(c.score!=null)?` · 관련도 ${escapeHtml(String(c.score))}`:''}</div>
+          <div style="font-size:10px;line-height:1.45;color:var(--text-secondary)">${escapeHtml(c.excerpt || '')}</div>
+        </div>`).join('')}
+    </div>`;
   return `
     <details style="margin-top:6px;background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);border-radius:5px;padding:5px 7px">
-      <summary style="font-size:10px;color:var(--purple);cursor:pointer;line-height:1.5">참고 지식(RAG) ${usedCount} — ${ctx.map(c => escapeHtml(_shortDoc(c.title)) + (c.loc ? ' ' + escapeHtml(c.loc) : '')).slice(0,3).join(', ')}${ctx.length>3?' 외':''} <span style="color:var(--text-muted)">(판정·조치에 반영된 외부 문서 · 펼쳐 보기)</span></summary>
+      <summary style="font-size:10px;color:var(--purple);cursor:pointer;line-height:1.5">참고 지식(RAG) 문서 ${groups.length} · 발췌 ${ctx.length} — ${titleList} <span style="color:var(--text-muted)">(판정·조치 근거 · 펼쳐 보기)</span></summary>
       <div style="margin-top:4px;font-size:9px;color:var(--text-muted)">※ 이 응답에서 찾은 탐지 증거가 아니라, 영향도·조치 서술을 뒷받침한 외부 참고 문서입니다.</div>
-      <div style="margin-top:5px;display:flex;flex-direction:column;gap:5px">
-        ${ctx.map(c => `
-          <div style="font-size:10px;line-height:1.45;border-top:1px solid rgba(188,140,255,.18);padding-top:4px">
-            <div style="color:var(--purple)">${escapeHtml(_shortDoc(c.title))}${c.loc?' · '+escapeHtml(c.loc):''}${(c.score!=null)?' <span style="color:var(--text-muted)">(관련도 '+escapeHtml(String(c.score))+')</span>':''}</div>
-            <div style="color:var(--text-secondary)">${escapeHtml(c.excerpt || '')}</div>
-          </div>`).join('')}
+      <div style="margin-top:5px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto">
+        ${groups.map(groupHtml).join('')}
       </div>
     </details>`;
 }
@@ -2141,8 +2170,9 @@ function _ragContextBlock(ragCtx, usedCount) {
 // 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
 function renderVerdictCard(a, confidenceColor) {
   const ai = a.ai_verdict;
+  const det = a.det_verdict || {};   // 결정적 서술(항상 존재) — AI 없거나 누락 시 폴백
   if (ai && !ai.error) {
-    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
+    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], safe: ['영향 없음', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
     const [label, cls] = OUT[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
     const sev = String(ai.severity || 'info');
     const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
@@ -2158,19 +2188,22 @@ function renderVerdictCard(a, confidenceColor) {
             <span class="tag ${sevCls}">위험도 ${escapeHtml(sevKo)}</span>
             <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
           </div>
-          ${ai.reasoning ? `<div class="detail-item">${escapeHtml(ai.reasoning)}</div>` : ''}
-          ${ai.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority)}</div>` : ''}
-          ${ai.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation)}</div>` : ''}
-          ${_ragContextBlock(ai.rag_context, ai.rag_used)}
+          ${(ai.reasoning || det.summary) ? `<div class="detail-item">${escapeHtml(ai.reasoning || det.summary)}</div>` : ''}
+          ${(ai.priority || det.priority) ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority || det.priority)}</div>` : ''}
+          ${(ai.remediation || det.remediation) ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation || det.remediation)}</div>` : ''}
           ${_findingEvidenceBlock(a.findings)}
         </div>
       </div>`;
   }
-  // 결정적 판정 (기본/폴백)
-  const aiErr = ai && ai.error ? `<div style="font-size:10px;color:var(--text-muted)">AI 판정 실패: ${escapeHtml(ai.error)}</div>` : '';
+  // 결정적 판정 (기본/폴백) — AI 없어도 요약·우선확인·조치를 결정적 서술로 제공
+  const aiErr = ai && ai.error ? `<div style="font-size:10px;color:var(--text-muted)">AI 판정 실패(결정적 판정으로 대체): ${escapeHtml(ai.error)}</div>` : '';
+  const outLabel = { success:'공격 성공', blocked:'차단됨', safe:'영향 없음', inconclusive:'미확정' }[a.attack_outcome];
+  const outCls = { success:'tag-red', blocked:'tag-green', safe:'tag-green', inconclusive:'tag-blue' }[a.attack_outcome] || 'tag-blue';
   return `
     <div class="analysis-card" data-card-id="verdict">
-      <div class="analysis-card-header">판정 결과</div>
+      <div class="analysis-card-header">판정 결과
+        <span style="margin-left:auto;font-size:9px;color:var(--text-muted);font-weight:400">결정적 판정(규칙 기반)</span>
+      </div>
       <div class="analysis-card-body">
         <div class="verdict-display">
           ${verdictBadge(a.verdict)}
@@ -2183,6 +2216,9 @@ function renderVerdictCard(a, confidenceColor) {
           ${riskBadge(a.risk_level)}
         </div>
         ${aiErr}
+        ${(outLabel || det.summary) ? `<div class="detail-item" style="margin-top:6px">${outLabel ? `<span class="tag ${outCls}" style="font-size:9px;margin-right:4px">${outLabel}</span>` : ''}${escapeHtml(det.summary || '')}</div>` : ''}
+        ${det.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(det.priority)}</div>` : ''}
+        ${det.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(det.remediation)}</div>` : ''}
         ${_findingEvidenceBlock(a.findings)}
       </div>
     </div>`;
@@ -2298,6 +2334,13 @@ function renderAnalysis(a, result) {
 
     <!-- 공격 결과 분석 (증거 기반) -->
     ${renderAttackCard(a)}
+
+    <!-- 관련 문서(RAG) — AI 유무와 무관하게 항상 표시(참고용, 판정 불변) -->
+    ${(() => {
+      const docs = (a.related_docs && a.related_docs.length) ? a.related_docs
+                 : ((a.ai_verdict && a.ai_verdict.rag_context) || []);
+      return docs.length ? _ragContextBlock(docs, docs.length) : '';
+    })()}
 
     <!-- AI 상세 분석 (NVIDIA NIM) -->
     ${a.ai ? renderAiCard(a.ai) : ''}
@@ -3436,6 +3479,39 @@ function generateReport() {
   if (!state.bulkResults) { toast('먼저 일괄 테스트를 실행하세요', 'error'); return; }
   switchView('report');
   renderReport(state.bulkResults);
+  appendReportRagRefs(state.bulkResults);   // 참고 자료(RAG) 섹션 비동기 추가
+}
+
+// 리포트에 공격유형별 RAG 참고 자료 섹션을 덧붙임(유형당 1회 검색, 판정 불변·참고용)
+async function appendReportRagRefs(data) {
+  const results = (data && data.results) || [];
+  if (!results.length) return;
+  // 결과에서 공격 유형 수집(분석의 attack_type 우선, 없으면 category)
+  const cats = [...new Set(results.map(r => (r.analysis && r.analysis.attack_type) || r.category).filter(Boolean))];
+  if (!cats.length) return;
+  let res;
+  try { res = await fetch('/api/rag/report-refs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({categories: cats})}).then(x=>x.json()); }
+  catch (e) { return; }
+  const refs = (res && res.refs) || [];
+  if (!refs.length) return;
+  const container = document.getElementById('reportContent');
+  if (!container) return;
+  const _short = n => { let s=String(n||'').replace(/\.(pdf|txt|md|html?)$/i,''); return s.length>34?s.slice(0,34)+'…':s; };
+  const html = `
+    <div class="report-section">
+      <h3>참고 자료 (RAG)</h3>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">공격 유형별로 인제스트한 문서에서 찾은 조치·참고 발췌입니다(탐지 증거 아님 · 판정 불변).</div>
+      ${refs.map(g => `
+        <div style="border:1px solid rgba(188,140,255,.25);border-radius:6px;padding:8px 10px;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:4px">${escapeHtml(g.category)}</div>
+          ${(g.docs||[]).map(d => `
+            <div style="margin-top:4px;padding-left:6px;border-left:2px solid rgba(188,140,255,.25)">
+              <div style="font-size:10px;color:var(--text-muted)">${escapeHtml(_short(d.title))}${d.loc?' · '+escapeHtml(String(d.loc)):''}${d.score!=null?' · 관련도 '+escapeHtml(String(d.score)):''}</div>
+              <div style="font-size:11px;line-height:1.45;color:var(--text-secondary)">${escapeHtml(d.excerpt||'')}</div>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>`;
+  container.insertAdjacentHTML('beforeend', html);
 }
 
 function renderReport(data) {

@@ -1,0 +1,280 @@
+{
+  "_comment": "DB/앱 에러 시그니처(선언형). 외부 참조: sqlmap data/xml/errors.xml. scope=global 은 모든 응답에 적용(오탐 낮은 특이 패턴만), scope=sqli 는 SQLi 문맥에서만 적용. tools/import_sqlmap_errors.py 로 sqlmap errors.xml 을 scope=sqli 로 임포트.",
+  "error_signatures": [
+    {
+      "regex": "SQL syntax.*?MySQL",
+      "label": "MySQL 에러 노출",
+      "scope": "global"
+    },
+    {
+      "regex": "You have an error in your SQL syntax",
+      "label": "MySQL/MariaDB 문법 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "check the manual that (?:corresponds to|fits) your (?:MySQL|MariaDB|TiDB|Drizzle) server version",
+      "label": "MySQL/MariaDB 문법 에러(매뉴얼)",
+      "scope": "global"
+    },
+    {
+      "regex": "MariaDB server version",
+      "label": "MariaDB 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "valid MySQL result",
+      "label": "MySQL 결과 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Warning.*?\\Wmysqli?_",
+      "label": "MySQL 함수 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "MySQLSyntaxErrorException",
+      "label": "MySQL(JDBC) 문법 예외",
+      "scope": "global"
+    },
+    {
+      "regex": "com\\.mysql\\.jdbc",
+      "label": "MySQL JDBC 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "MySqlException",
+      "label": "MySQL(.NET) 예외",
+      "scope": "global"
+    },
+    {
+      "regex": "pymysql\\.err\\.",
+      "label": "MySQL(pymysql) 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Unknown column '[^']+' in 'field list'",
+      "label": "MySQL 컬럼 에러(UNION 컬럼수 추정)",
+      "scope": "global"
+    },
+    {
+      "regex": "PostgreSQL.*?ERROR",
+      "label": "PostgreSQL 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "ERROR:\\s+syntax error at or near",
+      "label": "PostgreSQL 문법 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "PG::\\w*(?:SyntaxError|Error)",
+      "label": "PostgreSQL(PG) 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "org\\.postgresql\\.util\\.PSQLException",
+      "label": "PostgreSQL(JDBC) 예외",
+      "scope": "global"
+    },
+    {
+      "regex": "Npgsql\\.",
+      "label": "PostgreSQL(.NET) 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "psycopg2?\\.(?:errors\\.|\\w+Error)",
+      "label": "PostgreSQL(psycopg) 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Warning.*?\\Wpg_",
+      "label": "PostgreSQL 함수 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Microsoft SQL Server",
+      "label": "MSSQL 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Unclosed quotation mark after the character string",
+      "label": "MSSQL 문자열 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Incorrect syntax near",
+      "label": "MSSQL 문법 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "\\[SQL Server\\]",
+      "label": "MSSQL 드라이버 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "System\\.Data\\.SqlClient\\.SqlException",
+      "label": "MSSQL(.NET) 예외",
+      "scope": "global"
+    },
+    {
+      "regex": "com\\.microsoft\\.sqlserver\\.jdbc",
+      "label": "MSSQL(JDBC) 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "ODBC SQL Server Driver|ODBC Driver \\d+ for SQL Server",
+      "label": "MSSQL ODBC 드라이버",
+      "scope": "global"
+    },
+    {
+      "regex": "Microsoft SQL Native Client error",
+      "label": "MSSQL Native Client 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "\\bORA-\\d{5}",
+      "label": "Oracle DB 에러 코드",
+      "scope": "global"
+    },
+    {
+      "regex": "Oracle error",
+      "label": "Oracle 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "quoted string not properly terminated",
+      "label": "Oracle 문자열 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "SQL command not properly ended",
+      "label": "Oracle 구문 종료 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "oracle\\.jdbc",
+      "label": "Oracle JDBC 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "OracleException|cx_Oracle\\.\\w+Error|oracledb\\.(?:exceptions\\.|\\w+Error)",
+      "label": "Oracle 드라이버 예외",
+      "scope": "global"
+    },
+    {
+      "regex": "sqlite3\\.OperationalError",
+      "label": "SQLite 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "SQLite3::SQLException|\\[SQLITE_ERROR\\]|SQLite error \\d+:|org\\.sqlite\\.JDBC|SQLiteException",
+      "label": "SQLite 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "DB2 SQL error|com\\.ibm\\.db2\\.jcc|SQLCODE[=:\\d, -]+SQLSTATE",
+      "label": "IBM DB2 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "com\\.informix\\.jdbc|Exception.*?Informix|Informix ODBC Driver",
+      "label": "Informix 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Dynamic SQL Error.{1,10}SQL error code|org\\.firebirdsql\\.jdbc",
+      "label": "Firebird 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Sybase message|com\\.sybase\\.jdbc|SybSQLException",
+      "label": "Sybase 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Microsoft Access (?:\\d+ )?Driver|JET Database Engine|ODBC Microsoft Access",
+      "label": "MS Access 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "com\\.sap\\.db(?:tech)?\\.jdbc|Warning.*?\\Wmaxdb_",
+      "label": "SAP MaxDB 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "SAP DBTech JDBC|sql syntax error:.*?\\(at pos \\d+\\)",
+      "label": "SAP HANA 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "org\\.h2\\.jdbc",
+      "label": "H2 DB 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "com\\.vertica\\.jdbc|/vertica/Parser/scan",
+      "label": "Vertica 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "DB::Exception:|Code: \\d+[., ]+DB::Exception:",
+      "label": "ClickHouse 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "SQL compilation error: (?:syntax )?error line \\d+ at position \\d+",
+      "label": "Snowflake 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "org\\.apache\\.derby|ERROR 42X01",
+      "label": "Apache Derby 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "SQLSTATE\\[",
+      "label": "SQL(PDO/SQLSTATE) 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "ODBC.*?Driver",
+      "label": "ODBC 드라이버 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "<b>Fatal error</b>",
+      "label": "PHP Fatal 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "stack trace",
+      "label": "스택 트레이스 노출",
+      "scope": "global"
+    },
+    {
+      "regex": "at java\\.",
+      "label": "Java 스택 트레이스",
+      "scope": "global"
+    },
+    {
+      "regex": "Exception in thread",
+      "label": "Java 예외",
+      "scope": "global"
+    },
+    {
+      "regex": "Traceback \\(most recent",
+      "label": "Python 트레이스백",
+      "scope": "global"
+    },
+    {
+      "regex": "ActiveRecord::.*Error",
+      "label": "Ruby on Rails DB 에러",
+      "scope": "global"
+    },
+    {
+      "regex": "Uncaught TypeError",
+      "label": "JavaScript 에러 노출",
+      "scope": "global"
+    }
+  ]
+}

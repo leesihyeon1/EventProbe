@@ -158,8 +158,11 @@ def probe_plan(category: str, base_value: str = "") -> list[dict]:
         ]
 
     if cat == "xss":
+        # 대조군(baseline)은 '무해한' 값이어야 한다. base_value 에 이미 payload 가 들어와 있으면
+        # (URL 에 직접 주입한 경우) 실행 문자를 제거한 benign 값으로 대체 — 대조군 오염 방지.
+        benign = b if (b and not re.search(r'[<>]|on\w+\s*=|script|alert\(|svg|img', b, re.I)) else "benign123"
         return [
-            {"role": "baseline", "label": "원본",        "value": b},
+            {"role": "baseline", "label": "원본(무해)",  "value": benign},
             {"role": "probe",    "label": "반사 마커",   "value": _XSS_BREAK},
         ]
 

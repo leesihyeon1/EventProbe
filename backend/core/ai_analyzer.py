@@ -152,16 +152,27 @@ _VARIANT_SYSTEM = (
 )
 
 
-async def ai_generate_variants(base_payload: str, category: str = "", waf: str = "", count: int = 8) -> dict:
-    """차단된 payload의 WAF 우회 변형을 생성. 응답 민감정보를 보내지 않음(payload+WAF명만)."""
+async def ai_generate_variants(base_payload: str, category: str = "", waf: str = "",
+                               count: int = 8, retrieved=None) -> dict:
+    """차단된 payload의 WAF 우회 변형을 생성. 응답 민감정보를 보내지 않음(payload+WAF명만).
+    retrieved: RAG 로 검색한 우회 기법 스니펫 [{title,text,loc}] — 프롬프트에 근거로 주입."""
     key = _api_key()
     if not key:
         return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
     model, base_url = _model(), _base_url()
+    rag_block = ""
+    if retrieved:
+        lines = []
+        for i, r in enumerate(retrieved[:6], 1):
+            snip = re.sub(r"\s+", " ", str(r.get("text", "")))[:400]
+            lines.append(f"{i}) {snip}")
+        rag_block = ("RETRIEVED (인제스트한 참고문서의 WAF/필터 우회 기법 — 여기 나온 인코딩/치환/"
+                     "구문 우회를 우선 활용해 변형을 만들 것):\n" + "\n".join(lines) + "\n")
     user = (
         f"Base payload: {base_payload}\n"
         f"Attack category: {category or '(unspecified)'}\n"
         f"Target WAF: {waf or '(unknown)'}\n"
+        f"{rag_block}"
         f"Generate {count} distinct evasion variants as a JSON array of strings."
     )
     payload = {

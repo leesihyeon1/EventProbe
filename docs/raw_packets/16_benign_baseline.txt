@@ -1,0 +1,15 @@
+GET / HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 125.0.245.233
+Accept: */*
+User-Agent: Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 90.43.61.233,101.102.244.228
+X-Cloud-Trace-Context: a2c68e45ca04c79f6f15b6ad2db3997f/800126162127804665
+X-Nextjs-Request-Id: 3451d013
+Purpose: prefetch
+

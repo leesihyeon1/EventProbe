@@ -287,7 +287,7 @@ def test_git_config_not_exposed_is_low_and_explicit():
                          payload="/.git/config", category="cve")
     assert r["risk_level"] == "low"
     assert r["verdict"] == "passed"
-    assert r["attack_outcome"] == "inconclusive"
+    assert r["attack_outcome"] == "safe"   # 미노출=영향없음(안전)
     assert any("미노출" in n for n in _names(r)), "미노출 사실이 신호로 남아야 한다"
 
 
@@ -459,7 +459,7 @@ def test_url_only_git_config_not_exposed_is_low():
     r = analyze_response(200, {}, "<html>app shell</html>", 80,
                          payload="", category="", url="http://h/public/.git/config")
     assert r["risk_level"] == "low"
-    assert r["attack_outcome"] == "inconclusive"
+    assert r["attack_outcome"] == "safe"   # 미노출=영향없음(안전)
     assert any("미노출" in n for n in _names(r))
 
 
@@ -918,3 +918,150 @@ def test_convert_exposure_parses_nuclei_matchers():
     s = N.convert_exposure(tpl)
     assert s and s["path_contains"] == ["/.svn/entries"]
     assert s["matchers_condition"] == "and" and len(s["matchers"]) == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 결정적 서술(det_verdict) — AI 없이도 요약·우선확인·조치 제공
+# ─────────────────────────────────────────────────────────────────────────────
+def test_det_verdict_always_present():
+    r = analyze_response(200, {}, "<html>ok</html>", 80, payload="1' OR '1'='1", category="sqli")
+    d = r["det_verdict"]
+    assert d["summary"] and d["priority"] and d["remediation"]
+
+
+def test_det_verdict_success_gives_type_remediation():
+    body = "You have an error in your SQL syntax; check the manual near '1''"
+    r = analyze_response(200, {}, body, 100, payload="1'", category="sqli")
+    d = r["det_verdict"]
+    assert r["attack_outcome"] == "success"
+    assert "쿼리" in d["remediation"] or "바인딩" in d["remediation"]
+
+
+def test_det_verdict_safe_no_type_remediation():
+    r = analyze_response(404, {}, "<html>404</html>", 60, payload="/serverless.yaml",
+                         category="cve", url="https://t/serverless.yaml")
+    d = r["det_verdict"]
+    assert r["attack_outcome"] == "safe"
+    assert "불필요" in d["remediation"]
+
+
+def test_sql_error_variants_detected():
+    from core.analyzer import ERROR_LEAK_PATTERNS
+    import re
+    for msg in ["You have an error in your SQL syntax",
+                "check the manual that corresponds to your MariaDB server version",
+                "SQLSTATE[42000]: Syntax error"]:
+        assert any(re.search(p, msg, re.I) for p, _ in ERROR_LEAK_PATTERNS), msg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# URL 직접 입력(payload 필드 빈값)에서도 반사형 XSS 탐지 — 요청 실제 값으로 반사 검사
+# ─────────────────────────────────────────────────────────────────────────────
+def test_reflected_xss_from_url_when_payload_empty():
+    body = "<h1>0 search results for 'test\"><svg onload=alert(1)>'</h1>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 100,
+                         payload="", category="",
+                         url="https://t/?search=test\"><svg onload=alert(1)>")
+    assert r["attack_outcome"] == "success"
+    assert any("반사형 XSS" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+
+
+def test_benign_url_reflection_no_false_positive():
+    r = analyze_response(200, {"content-type": "text/html"}, "<h1>results for hello world</h1>", 80,
+                         payload="", category="", url="https://t/?search=hello world")
+    assert not any("XSS" in f["name"] for f in r["findings"])
+
+
+def test_reflected_xss_from_body_value():
+    body = "<div>comment: <img src=x onerror=alert(1)></div>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 90,
+                         payload="", category="", url="https://t/comment",
+                         req_body='{"comment":"<img src=x onerror=alert(1)>"}', method="POST")
+    assert any("반사형 XSS" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XSS 인코딩/문자열 변형에도 일관 탐지 — 실행형 구성요소가 인코딩 없이 반사되면 성공,
+# 전체 HTML 인코딩(방어)이면 안전
+# ─────────────────────────────────────────────────────────────────────────────
+def test_xss_partial_encoding_still_detected():
+    # 서버가 따옴표만 인코딩, <svg onload=…> 는 원문 반사 → 실행 가능
+    body = "<h1>x&quot;><svg onload=alert(1)></h1>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 50,
+                         payload="", category="", url='https://t/?q="><svg onload=alert(1)>')
+    assert r["attack_outcome"] == "success"
+    assert any("반사형 XSS" in f["name"] for f in r["findings"])
+
+
+def test_xss_full_html_encoding_is_safe():
+    body = "<h1>&lt;svg onload=alert(1)&gt;</h1>"   # 완전 인코딩 = 방어됨
+    r = analyze_response(200, {"content-type": "text/html"}, body, 50,
+                         payload="", category="", url="https://t/?q=<svg onload=alert(1)>")
+    assert not any("반사형 XSS" in f["name"] for f in r["findings"])
+
+
+def test_xss_transport_urlencoded_reflected_decoded():
+    body = "<h1>'<svg onload=alert(1)>'</h1>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 50,
+                         payload="", category="", url="https://t/?q=%3Csvg%20onload%3Dalert(1)%3E")
+    assert r["attack_outcome"] == "success"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UNION 기반 SQLi — 버전/배너 데이터가 응답에 추출되면 성공(에러 아님)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_union_sqli_oracle_extraction_success():
+    body = ("<table><tr><th>Oracle Database 11g Express Edition Release 11.2.0.2.0</th></tr>"
+            "<tr><th>PL/SQL Release 11.2.0.2.0 - Production</th></tr></table>")
+    r = analyze_response(200, {"content-type": "text/html"}, body, 1200, payload="", category="",
+                         url="https://t/filter?category=x' UNION SELECT BANNER,NULL FROM v$version--")
+    assert r["attack_outcome"] == "success"
+    assert any("UNION 기반 SQLi" in f["name"] for f in r["findings"])
+
+
+def test_union_sqli_various_dbms():
+    u = "https://t/?id=1 UNION SELECT version()--"
+    for banner in ["8.0.32-0ubuntu0.22.04.2", "10.5.18-MariaDB-0+deb11u1",
+                   "PostgreSQL 14.5 on x86_64-pc-linux-gnu", "Microsoft SQL Server 2019 (RTM)"]:
+        r = analyze_response(200, {}, banner, 50, payload="", category="sqli", url=u)
+        assert any("UNION 기반 SQLi" in f["name"] for f in r["findings"]), banner
+
+
+def test_db_name_mention_without_sqli_probe_no_fp():
+    r = analyze_response(200, {}, "<p>Powered by Oracle Database</p>", 50,
+                         payload="", category="", url="https://t/about")
+    assert not any("UNION" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DBMS 에러 시그니처 보강(sqlmap errors.xml 참조) — 다수 DBMS 에러 탐지 + 단순 언급 무탐
+# ─────────────────────────────────────────────────────────────────────────────
+def test_expanded_dbms_error_signatures():
+    import re
+    from core.analyzer import ERROR_LEAK_PATTERNS
+    def hit(s): return any(re.search(p, s, re.I) for p, _ in ERROR_LEAK_PATTERNS)
+    for s in [
+        "org.postgresql.util.PSQLException: ERROR: syntax error at or near",
+        "com.mysql.jdbc.exceptions.MySQLSyntaxErrorException",
+        "Incorrect syntax near ')'.",
+        "ORA-00933: SQL command not properly ended",
+        "[SQLITE_ERROR] near \"'\": syntax error",
+        "DB2 SQL error: SQLCODE=-104, SQLSTATE=42601",
+        "Code: 62. DB::Exception: Syntax error",
+    ]:
+        assert hit(s), s
+
+
+def test_dbms_name_mention_not_flagged():
+    import re
+    from core.analyzer import ERROR_LEAK_PATTERNS
+    for s in ["We use PostgreSQL and MySQL in production.",
+              "<h1>Oracle Database consulting services</h1>",
+              "Learn SQL Server administration"]:
+        assert not any(re.search(p, s, re.I) for p, _ in ERROR_LEAK_PATTERNS), s
+
+
+def test_error_based_sqli_detected_via_expanded_patterns():
+    body = "<pre>org.postgresql.util.PSQLException: ERROR: syntax error at or near \"'\"</pre>"
+    r = analyze_response(200, {}, body, 80, payload="1'", category="sqli", url="https://t/?id=1'")
+    assert any("SQL/DB 에러 노출" in f["name"] for f in r["findings"])

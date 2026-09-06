@@ -1,0 +1,13 @@
+GET /.git/config HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 110.30.63.243
+Accept: */*
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 163.31.203.13,58.23.68.75
+X-Cloud-Trace-Context: 1e27a1c08a6a63ec24ede6a46b4cb242/2845242645790811736
+

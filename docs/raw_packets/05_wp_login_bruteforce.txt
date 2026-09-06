@@ -1,0 +1,16 @@
+POST /wp-login.php HTTP/1.1
+CDN-Loop: google
+X-Forwarded-Proto: https
+Connection: Keep-Alive
+X-Forwarded-For: 20.60.214.43
+Accept: */*
+User-Agent: python-requests/2.31.0
+Host: test.com
+Accept-Encoding: gzip, deflate
+Via: 1.1 google
+X-Forwarded-For: 40.250.215.11,173.39.160.88
+X-Cloud-Trace-Context: 7f26144b98289fcd59a54a7bb1fee08f/7350031197456827163
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 39
+
+log=admin&pwd=admin123&wp-submit=Log+In
