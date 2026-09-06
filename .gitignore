@@ -8,5 +8,4 @@ Thumbs.db
 .venv/
 *.env
 
-# RAG 인제스트 문서(로컬 코퍼스)
-backend/data/rag/
+# (RAG 인제스트 코퍼스는 이제 저장소에 포함)
