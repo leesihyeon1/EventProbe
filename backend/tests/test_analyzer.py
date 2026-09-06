@@ -1065,3 +1065,124 @@ def test_error_based_sqli_detected_via_expanded_patterns():
     body = "<pre>org.postgresql.util.PSQLException: ERROR: syntax error at or near \"'\"</pre>"
     r = analyze_response(200, {}, body, 80, payload="1'", category="sqli", url="https://t/?id=1'")
     assert any("SQL/DB 에러 노출" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 인코딩 반사 설명 신호 — 응답 본문에 HTML 엔티티로 반사되면 '여기선 안전'을 명시
+# ─────────────────────────────────────────────────────────────────────────────
+def test_encoded_reflection_marked_safe_with_explanation():
+    body = "<h1>0 results for '&quot;&gt;&lt;svg onload=alert(&apos;XSS&apos;)&gt;'</h1>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 50, payload="",
+                         category="", url="https://t/?search=\"><svg onload=alert('XSS')>")
+    assert any("인코딩 반사" in f["name"] and f["verdict"] == "안전" for f in r["findings"])
+
+
+def test_encoded_reflection_plus_dom_sink_shows_both():
+    body = ("<h1>'&quot;&gt;&lt;svg onload=alert(1)&gt;'</h1>"
+            "<script>document.write(location.search)</script>")
+    r = analyze_response(200, {"content-type": "text/html"}, body, 50, payload="",
+                         category="xss", url="https://t/?search=\"><svg onload=alert(1)>")
+    names = [f["name"] for f in r["findings"]]
+    assert any("인코딩 반사" in n for n in names)
+    assert any("DOM 기반 XSS" in n for n in names)
+
+
+def test_unencoded_reflection_not_marked_as_encoded():
+    body = "<h1>x\"><svg onload=alert(1)></h1>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 50, payload="",
+                         category="", url="https://t/?q=\"><svg onload=alert(1)>")
+    assert any("반사형 XSS" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+    assert not any("인코딩 반사" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# robots.txt 파일 스캔 — 노출된 경로(관리/백업 등) 분석
+# ─────────────────────────────────────────────────────────────────────────────
+def test_robots_txt_interesting_path_disclosed():
+    r = analyze_response(200, {"content-type": "text/plain"},
+                         "User-agent: *\nDisallow: /backup\n", 50,
+                         payload="", category="", url="https://t/robots.txt")
+    f = next(f for f in r["findings"] if "robots.txt" in f["name"])
+    assert "민감 경로" in f["name"]
+    assert "/backup" in f["evidence"]
+
+
+def test_robots_txt_mundane_paths_low_key():
+    r = analyze_response(200, {}, "User-agent: *\nDisallow: /css\nDisallow: /images\n", 50,
+                         payload="", category="", url="https://t/robots.txt")
+    assert any("robots.txt 경로 노출" == f["name"] for f in r["findings"])
+    assert not any("민감 경로" in f["name"] for f in r["findings"])
+
+
+def test_robots_content_on_non_robots_path_no_fp():
+    r = analyze_response(200, {}, "User-agent: *\nDisallow: /admin", 50,
+                         payload="", category="", url="https://t/index.html")
+    assert not any("robots.txt" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OS/시스템/앱 설정 파일 노출 — 내용 시그니처로 확증(경로+내용), 오탐 방지
+# ─────────────────────────────────────────────────────────────────────────────
+def test_os_config_files_detected_by_content():
+    cases = [
+        ("https://t/..%2f..%2fetc/passwd", "root:x:0:0:root:/root:/bin/bash"),
+        ("https://t/etc/shadow", "root:$6$abcd$hashvalue:19000:0:99999"),
+        ("https://t/ssh/sshd_config", "Port 22\nPermitRootLogin yes"),
+        ("https://t/php.ini", "[PHP]\ndisplay_errors = On"),
+        ("https://t/..\windows\win.ini", "[fonts]\n[extensions]"),
+        ("https://t/unattend.xml", "<AutoLogon><Password>x</Password></AutoLogon>"),
+        ("https://t/settings.py", "SECRET_KEY = 'x'\nDATABASES = {}"),
+        ("https://t/nginx.conf", "worker_processes auto;\nhttp {"),
+    ]
+    for url, body in cases:
+        r = analyze_response(200, {}, body, 50, payload="", category="", url=url)
+        assert any("노출" in f["name"] and f["verdict"] == "성공" for f in r["findings"]), url
+
+
+def test_os_config_path_without_content_no_fp():
+    # 경로는 config 파일이지만 응답이 catch-all HTML → 노출 아님
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "<!doctype html><html><body>Not Found</body></html>", 50,
+                         payload="", category="", url="https://t/etc/passwd")
+    assert not any("노출" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+
+
+def test_config_content_on_unrelated_path_no_fp():
+    r = analyze_response(200, {}, "how to read /etc/passwd tutorial root:x:0:0 example", 50,
+                         payload="", category="", url="https://t/blog/article")
+    assert not any("etc/passwd" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 클라우드 자격증명/설정 및 백업·덤프 파일 노출 (경로+내용 확증)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_cloud_and_backup_files_detected():
+    cases = [
+        ("https://t/.aws/config", "[default]\nregion = us-east-1\noutput = json"),
+        ("https://t/service-account.json", '{"type": "service_account","private_key":"-----BEGIN","client_email":"a@b"}'),
+        ("https://t/.kube/config", "apiVersion: v1\nclusters:\n- cluster:\ncurrent-context: prod"),
+        ("https://t/terraform.tfstate", '{"terraform_version":"1.5","resources":[],"lineage":"x"}'),
+        ("https://t/.netrc", "machine ftp.example.com login admin password secret"),
+        ("https://t/.pgpass", "db.host:5432:mydb:admin:s3cret"),
+        ("https://t/.ssh/id_ed25519", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn"),
+        ("https://t/backup.sql", "-- MySQL dump 10.13\nCREATE TABLE users (id int);\nINSERT INTO users"),
+        ("https://t/wp-config.php.bak", "define('DB_PASSWORD','root');\ndefine('DB_NAME','wp');"),
+        ("https://t/index.php.old", "<?php\n$password='admin';\ndefine('DB_HOST','x');"),
+        ("https://t/.env.bak", "DB_PASSWORD=secret\nAPI_KEY=abc\nSECRET=x"),
+        ("https://t/.vscode/sftp.json", '{"host":"1.2.3.4","password":"pw","remotePath":"/var/www"}'),
+    ]
+    for url, body in cases:
+        r = analyze_response(200, {}, body, len(body), payload="", category="", url=url)
+        assert any("노출" in f["name"] and f["verdict"] == "성공" for f in r["findings"]), url
+
+
+def test_cloud_backup_no_fp_on_html_or_mention():
+    # 경로는 백업 파일이지만 catch-all HTML → 노출 아님
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "<!doctype html><html><body>404 Not Found</body></html>", 40,
+                         payload="", category="", url="https://t/backup.sql")
+    assert not any("노출" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+    # 무관 경로에서 aws 설정 언급만 → 노출 아님
+    r2 = analyze_response(200, {}, "put your keys in .aws/config with region = us-east-1", 40,
+                          payload="", category="", url="https://t/blog/aws-guide")
+    assert not any("AWS config" in f["name"] for f in r2["findings"])

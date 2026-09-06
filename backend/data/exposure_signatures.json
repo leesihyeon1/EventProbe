@@ -4,11 +4,27 @@
     {
       "id": "aws-credentials-file",
       "name": "AWS 자격증명 파일(.aws/credentials) 노출",
-      "path_contains": ["/.aws/credentials", "credentials"],
+      "path_contains": [
+        "/.aws/credentials",
+        "credentials"
+      ],
       "matchers_condition": "and",
       "matchers": [
-        {"type": "word", "part": "body", "words": ["aws_access_key_id", "aws_secret_access_key"], "condition": "and"},
-        {"type": "status", "status": [200]}
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "aws_access_key_id",
+            "aws_secret_access_key"
+          ],
+          "condition": "and"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
       ],
       "severity": "critical",
       "reference": "https://github.com/projectdiscovery/nuclei-templates"
@@ -16,11 +32,30 @@
     {
       "id": "svn-entries",
       "name": "Subversion .svn/entries 노출",
-      "path_contains": ["/.svn/entries", "/.svn/wc.db"],
+      "path_contains": [
+        "/.svn/entries",
+        "/.svn/wc.db"
+      ],
       "matchers_condition": "or",
       "matchers": [
-        {"type": "regex", "part": "body", "regex": ["^\\d+\\s*[\\r\\n]", "dir[\\r\\n]"], "condition": "or"},
-        {"type": "word", "part": "body", "words": ["svn:", "dir"], "condition": "and"}
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "^\\d+\\s*[\\r\\n]",
+            "dir[\\r\\n]"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "svn:",
+            "dir"
+          ],
+          "condition": "and"
+        }
       ],
       "severity": "medium",
       "reference": "https://github.com/projectdiscovery/nuclei-templates"
@@ -28,11 +63,26 @@
     {
       "id": "apache-server-status",
       "name": "Apache server-status 노출",
-      "path_contains": ["/server-status"],
+      "path_contains": [
+        "/server-status"
+      ],
       "matchers_condition": "and",
       "matchers": [
-        {"type": "word", "part": "body", "words": ["Apache Server Status", "Server uptime"], "condition": "or"},
-        {"type": "status", "status": [200]}
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "Apache Server Status",
+            "Server uptime"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
       ],
       "severity": "medium",
       "reference": "https://github.com/projectdiscovery/nuclei-templates"
@@ -40,11 +90,26 @@
     {
       "id": "npmrc-config",
       "name": ".npmrc 인증 토큰 노출",
-      "path_contains": ["/.npmrc"],
+      "path_contains": [
+        "/.npmrc"
+      ],
       "matchers_condition": "and",
       "matchers": [
-        {"type": "word", "part": "body", "words": ["_authToken", "//registry.npmjs.org"], "condition": "or"},
-        {"type": "status", "status": [200]}
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "_authToken",
+            "//registry.npmjs.org"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
       ],
       "severity": "high",
       "reference": "https://github.com/projectdiscovery/nuclei-templates"
@@ -52,11 +117,25 @@
     {
       "id": "ds-store-file",
       "name": ".DS_Store 노출",
-      "path_contains": ["/.DS_Store"],
+      "path_contains": [
+        "/.DS_Store"
+      ],
       "matchers_condition": "and",
       "matchers": [
-        {"type": "word", "part": "body", "words": ["Bud1"], "condition": "and"},
-        {"type": "status", "status": [200]}
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "Bud1"
+          ],
+          "condition": "and"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
       ],
       "severity": "low",
       "reference": "https://github.com/projectdiscovery/nuclei-templates"
@@ -64,14 +143,1862 @@
     {
       "id": "laravel-telescope",
       "name": "Laravel Telescope 노출",
-      "path_contains": ["/telescope/requests", "/telescope"],
+      "path_contains": [
+        "/telescope/requests",
+        "/telescope"
+      ],
       "matchers_condition": "and",
       "matchers": [
-        {"type": "word", "part": "body", "words": ["Telescope", "laravel"], "condition": "or"},
-        {"type": "status", "status": [200]}
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "Telescope",
+            "laravel"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
       ],
       "severity": "medium",
       "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    },
+    {
+      "id": "unix-etc-passwd",
+      "name": "/etc/passwd 노출",
+      "path_contains": [
+        "/etc/passwd",
+        "etc/passwd"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "root:.*?:0:0:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-etc-shadow",
+      "name": "/etc/shadow 노출(해시)",
+      "path_contains": [
+        "/etc/shadow",
+        "etc/shadow"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "root:\\$[0-9a-z]\\$"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-etc-group",
+      "name": "/etc/group 노출",
+      "path_contains": [
+        "/etc/group",
+        "etc/group"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "(?m)^root:x:0:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-etc-hosts",
+      "name": "/etc/hosts 노출",
+      "path_contains": [
+        "/etc/hosts",
+        "etc/hosts"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "127\\.0\\.0\\.1\\s+localhost"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-etc-crontab",
+      "name": "/etc/crontab 노출",
+      "path_contains": [
+        "/etc/crontab",
+        "etc/crontab"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "SHELL=",
+            "MAILTO=",
+            "run-parts",
+            "cron.hourly"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-etc-fstab",
+      "name": "/etc/fstab 노출",
+      "path_contains": [
+        "/etc/fstab",
+        "etc/fstab"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "UUID=",
+            "/dev/",
+            "ext4",
+            "swap"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "(?m)^\\S+\\s+/\\S*\\s+\\w+\\s+\\w"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-sshd-config",
+      "name": "sshd_config 노출",
+      "path_contains": [
+        "sshd_config"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "PermitRootLogin",
+            "Subsystem\tsftp",
+            "Subsystem sftp",
+            "ChallengeResponseAuthentication"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-authorized-keys",
+      "name": "SSH authorized_keys 노출",
+      "path_contains": [
+        "authorized_keys"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "ssh-(?:rsa|ed25519|dss)\\s+AAAA"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-known-hosts",
+      "name": "SSH known_hosts 노출",
+      "path_contains": [
+        "known_hosts"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "ssh-(?:rsa|ed25519)\\s+AAAA|ecdsa-sha2"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-bash-history",
+      "name": ".bash_history 노출",
+      "path_contains": [
+        ".bash_history",
+        ".zsh_history"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "sudo ",
+            "curl ",
+            "wget ",
+            "ssh ",
+            "mysql -u",
+            "export "
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-bashrc",
+      "name": ".bashrc/.profile 노출",
+      "path_contains": [
+        ".bashrc",
+        ".bash_profile",
+        ".profile",
+        ".zshrc"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "export PATH",
+            "alias ",
+            "PS1=",
+            "if [ -"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-proc-environ",
+      "name": "/proc/self/environ 노출",
+      "path_contains": [
+        "/proc/self/environ",
+        "proc/self/environ"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "PATH=",
+            "HOME=",
+            "USER=",
+            "PWD="
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "unix-proc-version",
+      "name": "/proc/version 노출",
+      "path_contains": [
+        "/proc/version",
+        "proc/version"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "Linux version \\d"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-mysql-cnf",
+      "name": "MySQL my.cnf 노출",
+      "path_contains": [
+        "my.cnf",
+        "mysql/my.cnf"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[mysqld]",
+            "[client]",
+            "datadir",
+            "socket="
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-nginx-conf",
+      "name": "nginx.conf 노출",
+      "path_contains": [
+        "nginx.conf"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "worker_processes",
+            "worker_connections",
+            "http {",
+            "server_name"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-apache-conf",
+      "name": "Apache httpd.conf 노출",
+      "path_contains": [
+        "httpd.conf",
+        "apache2.conf"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "DocumentRoot",
+            "ServerRoot",
+            "LoadModule",
+            "<VirtualHost"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-php-ini",
+      "name": "php.ini 노출",
+      "path_contains": [
+        "php.ini"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[PHP]",
+            "display_errors",
+            "allow_url_fopen",
+            "disable_functions"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-redis-conf",
+      "name": "redis.conf 노출",
+      "path_contains": [
+        "redis.conf"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "maxmemory-policy",
+            "# Redis configuration",
+            "appendonly",
+            "requirepass"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-spring-props",
+      "name": "Spring application.properties/yml 노출",
+      "path_contains": [
+        "application.properties",
+        "application.yml",
+        "application.yaml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "spring.datasource",
+            "spring.application",
+            "server.port",
+            "management.endpoints"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-django-settings",
+      "name": "Django settings.py 노출",
+      "path_contains": [
+        "settings.py"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "SECRET_KEY",
+            "DATABASES",
+            "INSTALLED_APPS",
+            "ALLOWED_HOSTS"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-joomla-config",
+      "name": "Joomla configuration.php 노출",
+      "path_contains": [
+        "configuration.php"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "public \\$(?:secret|password|user|db|host)\\s*="
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-appsettings",
+      "name": "appsettings.json 노출",
+      "path_contains": [
+        "appsettings.json"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "ConnectionStrings",
+            "DefaultConnection",
+            "\"Logging\"",
+            "AllowedHosts"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-dockerfile",
+      "name": "Dockerfile 노출",
+      "path_contains": [
+        "/Dockerfile",
+        "Dockerfile"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "(?im)^\\s*(?:FROM|RUN|COPY|ENV|CMD|ENTRYPOINT)\\s"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "app-composer-json",
+      "name": "composer.json 노출",
+      "path_contains": [
+        "composer.json"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"require\"",
+            "\"autoload\"",
+            "\"psr-4\""
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-win-ini",
+      "name": "Windows win.ini 노출",
+      "path_contains": [
+        "win.ini",
+        "windows/win.ini",
+        "winnt/win.ini"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[fonts]",
+            "[extensions]",
+            "16-bit app support",
+            "[mci extensions]"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-system-ini",
+      "name": "Windows system.ini 노출",
+      "path_contains": [
+        "system.ini"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[386Enh]",
+            "[drivers]",
+            "[boot]",
+            "for 16-bit app support"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-boot-ini",
+      "name": "Windows boot.ini 노출",
+      "path_contains": [
+        "boot.ini"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[boot loader]",
+            "[operating systems]",
+            "multi(0)disk"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-hosts",
+      "name": "Windows hosts 노출",
+      "path_contains": [
+        "drivers/etc/hosts",
+        "system32/drivers/etc/hosts"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "127\\.0\\.0\\.1\\s+localhost|::1\\s+localhost"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-apphost-config",
+      "name": "IIS applicationHost.config 노출",
+      "path_contains": [
+        "applicationHost.config"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "<system.webServer>",
+            "<sites>",
+            "<applicationPools>",
+            "<configuration>"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-unattend",
+      "name": "Windows unattend.xml 노출(자격증명)",
+      "path_contains": [
+        "unattend.xml",
+        "sysprep.xml",
+        "autounattend.xml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "<AutoLogon>",
+            "cpassword",
+            "<UserAccounts>",
+            "urn:schemas-microsoft-com:unattend"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-machine-config",
+      "name": "ASP.NET machine.config/web.config machineKey 노출",
+      "path_contains": [
+        "machine.config"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "<machineKey",
+            "validationKey",
+            "decryptionKey",
+            "<system.web>"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-reg-export",
+      "name": "Windows 레지스트리 내보내기(.reg) 노출",
+      "path_contains": [
+        ".reg"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "Windows Registry Editor Version|REGEDIT4"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "win-desktop-ini",
+      "name": "desktop.ini 노출",
+      "path_contains": [
+        "desktop.ini"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[.ShellClassInfo]",
+            "IconResource",
+            "[ViewState]"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-osconfig"
+    },
+    {
+      "id": "cloud-aws-config",
+      "name": "AWS config 노출",
+      "path_contains": [
+        "/.aws/config",
+        ".aws/config"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[default]",
+            "[profile ",
+            "region =",
+            "output ="
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-gcloud-creds",
+      "name": "GCP 서비스계정 키(JSON) 노출",
+      "path_contains": [
+        "credentials.json",
+        "service-account",
+        "gcloud/",
+        "application_default_credentials.json"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "or",
+          "words": [
+            "\"type\": \"service_account\"",
+            "\"private_key\"",
+            "\"private_key_id\"",
+            "\"client_email\""
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-azure-profile",
+      "name": "Azure 프로필/토큰 노출",
+      "path_contains": [
+        ".azure/",
+        "azureProfile.json",
+        "accessTokens.json"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"subscriptions\"",
+            "\"tenantId\"",
+            "accessToken",
+            "\"cloudName\""
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-kube-config",
+      "name": "Kubernetes kubeconfig 노출",
+      "path_contains": [
+        "/.kube/config",
+        ".kube/config",
+        "kubeconfig"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "apiVersion:",
+            "clusters:",
+            "client-certificate-data",
+            "client-key-data",
+            "current-context:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-docker-config",
+      "name": "Docker config.json(레지스트리 자격증명) 노출",
+      "path_contains": [
+        ".docker/config.json",
+        "docker/config.json"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"auths\"",
+            "\"auth\":",
+            "\"credsStore\"",
+            "registry"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-dockercfg",
+      "name": ".dockercfg 노출",
+      "path_contains": [
+        ".dockercfg"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"auth\"",
+            "\"email\"",
+            "https://index.docker.io"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-terraform-tfstate",
+      "name": "Terraform tfstate 노출(시크릿 포함 가능)",
+      "path_contains": [
+        "terraform.tfstate",
+        ".tfstate"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"terraform_version\"",
+            "\"resources\"",
+            "\"lineage\"",
+            "\"outputs\""
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-terraform-tfvars",
+      "name": "Terraform tfvars 노출",
+      "path_contains": [
+        ".tfvars",
+        "terraform.tfvars"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "(?im)^\\s*[a-z_]+\\s*=\\s*\\\"[^\\\"]+\\\"|access_key|secret_key"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-gitlab-ci",
+      "name": "GitLab CI 설정 노출",
+      "path_contains": [
+        ".gitlab-ci.yml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "stages:",
+            "script:",
+            "image:",
+            "CI_"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-github-workflow",
+      "name": "GitHub Actions 워크플로 노출",
+      "path_contains": [
+        ".github/workflows"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "jobs:",
+            "runs-on:",
+            "uses:",
+            "on:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-travis",
+      "name": "Travis CI 설정 노출",
+      "path_contains": [
+        ".travis.yml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "language:",
+            "script:",
+            "install:",
+            "secure:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-circleci",
+      "name": "CircleCI 설정 노출",
+      "path_contains": [
+        ".circleci/config.yml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "version:",
+            "jobs:",
+            "workflows:",
+            "orbs:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "low",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-serverless",
+      "name": "Serverless Framework 설정 노출",
+      "path_contains": [
+        "serverless.yml",
+        "serverless.yaml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "service:",
+            "provider:",
+            "functions:",
+            "plugins:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-npmrc-token",
+      "name": ".npmrc 토큰 노출(보강)",
+      "path_contains": [
+        ".npmrc"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "_authToken",
+            "_password",
+            "//registry.npmjs.org/:_auth"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-pypirc",
+      "name": ".pypirc 노출",
+      "path_contains": [
+        ".pypirc"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "[pypi]",
+            "[distutils]",
+            "username",
+            "password"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-netrc",
+      "name": ".netrc 노출",
+      "path_contains": [
+        ".netrc",
+        "_netrc"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "machine\\s+\\S+\\s+login\\s+\\S+\\s+password"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-pgpass",
+      "name": ".pgpass 노출",
+      "path_contains": [
+        ".pgpass"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "(?m)^[^:\\n]+:\\d+:[^:\\n]*:[^:\\n]+:"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-boto",
+      "name": "boto/AWS SDK 설정 노출",
+      "path_contains": [
+        ".boto",
+        "boto.cfg"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "aws_access_key_id",
+            "aws_secret_access_key",
+            "[Credentials]"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-firebase-json",
+      "name": "Firebase 서비스계정/설정 노출",
+      "path_contains": [
+        "firebase",
+        "google-services.json",
+        "firebase-adminsdk"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"private_key\"",
+            "\"project_id\"",
+            "firebaseio.com",
+            "\"api_key\""
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "cloud-ssh-id-ed25519",
+      "name": "SSH 개인키(id_ed25519 등) 노출",
+      "path_contains": [
+        "id_ed25519",
+        "id_ecdsa",
+        "id_dsa",
+        ".ssh/id_"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "BEGIN (?:OPENSSH|RSA|EC|DSA) PRIVATE KEY"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-sql-dump",
+      "name": "SQL 덤프 노출(.sql/.bak)",
+      "path_contains": [
+        ".sql",
+        "dump.sql",
+        "backup.sql",
+        "database.sql",
+        ".sql.bak"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "CREATE TABLE",
+            "INSERT INTO",
+            "DROP TABLE",
+            "-- MySQL dump",
+            "PostgreSQL database dump",
+            "CREATE DATABASE"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-source-bak",
+      "name": "소스 백업 노출(.bak/.old/.save/~)",
+      "path_contains": [
+        ".bak",
+        ".old",
+        ".save",
+        ".orig",
+        ".backup",
+        ".copy"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "<?php",
+            "define(",
+            "password",
+            "DB_",
+            "connectionString",
+            "api_key",
+            "secret"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-config-bak",
+      "name": "설정 파일 백업 노출(.conf.bak/web.config.bak 등)",
+      "path_contains": [
+        "config.bak",
+        "web.config.bak",
+        ".env.bak",
+        "settings.bak",
+        ".env.save",
+        ".env.old"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "password",
+            "secret",
+            "DB_",
+            "<configuration>",
+            "connectionString",
+            "API_KEY",
+            "="
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-editor-swap",
+      "name": "에디터 스왑/임시 파일 노출(.swp/.swo)",
+      "path_contains": [
+        ".swp",
+        ".swo",
+        ".un~"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "b0(?:VIM|vim)|<?php|password|secret"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "medium",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-archive",
+      "name": "웹루트 아카이브 노출(zip/tar.gz 등 — 오프셋 시그니처)",
+      "path_contains": [
+        ".zip",
+        ".tar.gz",
+        ".tgz",
+        ".rar",
+        ".7z",
+        "backup.tar",
+        "www.zip",
+        "site.zip",
+        "backup.zip"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "^PK\\x03\\x04|^\\x1f\\x8b\\x08|^Rar!\\x1a\\x07|^7z\\xbc\\xaf"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-wpconfig-bak",
+      "name": "wp-config 백업 노출",
+      "path_contains": [
+        "wp-config.php.bak",
+        "wp-config.php~",
+        "wp-config.php.save",
+        "wp-config.php.old",
+        "wp-config.txt"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "DB_PASSWORD",
+            "DB_NAME",
+            "AUTH_KEY",
+            "define('DB_"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "critical",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-git-directory",
+      "name": ".git 디렉터리 노출(index/packed-refs)",
+      "path_contains": [
+        "/.git/index",
+        "/.git/packed-refs",
+        "/.git/logs/HEAD",
+        "/.git/refs/"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "regex",
+          "part": "body",
+          "regex": [
+            "DIRC|refs/heads/|[0-9a-f]{40}"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-vscode-sftp",
+      "name": "VSCode sftp.json(자격증명) 노출",
+      "path_contains": [
+        ".vscode/sftp.json",
+        "sftp.json"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "\"host\"",
+            "\"password\"",
+            "\"privateKeyPath\"",
+            "\"remotePath\""
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
+    },
+    {
+      "id": "backup-idea-dataSources",
+      "name": "JetBrains dataSources 노출(DB 자격증명)",
+      "path_contains": [
+        ".idea/dataSources",
+        "dataSources.local.xml",
+        "dataSources.xml"
+      ],
+      "matchers_condition": "and",
+      "matchers": [
+        {
+          "type": "word",
+          "part": "body",
+          "words": [
+            "jdbc:",
+            "<data-source",
+            "user=",
+            "<database-info"
+          ],
+          "condition": "or"
+        },
+        {
+          "type": "status",
+          "status": [
+            200
+          ]
+        }
+      ],
+      "severity": "high",
+      "source": "builtin-cloudbackup"
     }
   ]
 }

@@ -1914,7 +1914,8 @@ _FMT_VALIDATORS = {
     "yaml": ("YAML", _fmt_yaml), "yml": ("YAML", _fmt_yaml),
     "json": ("JSON", _fmt_json),
     "env": ("dotenv", _fmt_env), "properties": ("properties", _fmt_env),
-    "ini": ("INI", _fmt_ini), "conf": ("conf", _fmt_ini), "cfg": ("cfg", _fmt_ini), "toml": ("TOML", _fmt_ini),
+    "ini": ("INI", _fmt_ini), "toml": ("TOML", _fmt_ini),
+    # .conf/.cfg 는 형식이 제각각(nginx/apache/redis)이라 단일 INI 검증이 오판 → 특정 시그니처(exposure)로 처리
     "xml": ("XML", _fmt_xml), "config": ("XML/config", _fmt_xml),
     "pem": ("PEM", _fmt_pem), "key": ("PEM", _fmt_pem),
     "sql": ("SQL", _fmt_sql),
@@ -2432,10 +2433,12 @@ _VERIFY_META = [
     ("반사형 XSS",               ("반사+실행 컨텍스트",      "응답 본문의 payload 반사 위치")),
     ("payload 미인코딩 반사",     ("반사+실행 컨텍스트",      "응답 본문의 payload 반사 위치")),
     ("payload 반사",             ("반사 확인",              "응답 본문")),
+    ("payload 인코딩 반사",       ("반사 확인(인코딩)",       "응답 본문(HTML 엔티티)")),
     ("DOM 기반 XSS",             ("정적 소스→싱크 분석",     "응답 <script> 내 소스/싱크")),
     ("클라이언트 템플릿 인젝션",    ("반사+프레임워크 확인",     "응답 본문 + 프레임워크 마커")),
     ("파일 읽기 성공",            ("콘텐츠 시그니처",         "응답 본문")),
     ("노출 확인 —",              ("콘텐츠 시그니처(nuclei)",  "응답 본문/헤더")),
+    ("robots.txt",              ("콘텐츠 시그니처(recon)",   "응답 본문(Disallow/Allow)")),
     ("민감 파일 노출",            ("콘텐츠 시그니처",         "응답 본문")),
     ("민감 파일 미노출",          ("콘텐츠 시그니처(미검출)",  "응답 본문")),
     ("명령 실행 출력",            ("콘텐츠 시그니처",         "응답 본문")),
@@ -2485,6 +2488,28 @@ def _enrich_verification(findings: list) -> list:
             f.setdefault("method", "휴리스틱")
             f.setdefault("where", "응답")
     return findings
+
+
+# robots.txt / 유사 recon 파일 — 숨겨진 경로(관리·백업·API 등) 노출 분석
+_ROBOTS_INTERESTING = re.compile(
+    r"/(?:admin|administrator|backup|bak|config|conf|api|internal|private|secret|"
+    r"test|dev|staging|stage|db|sql|dump|log|logs|panel|manage|console|wp-admin|"
+    r"phpmyadmin|\.git|\.env|\.svn|old|tmp|temp|upload|cgi-bin|server-status|"
+    r"actuator|swagger|graphql|debug|hidden|flag|key|token|user|account)", re.I)
+
+
+def _detect_robots(body, status_code, probe):
+    """robots.txt 응답을 파싱해 노출된 경로를 분석. probe(요청)에 /robots.txt 가 있을 때만."""
+    if "/robots.txt" not in (probe or "").lower():
+        return None
+    b = body or ""
+    if status_code != 200 or not re.search(r"(?im)^\s*(?:user-agent|disallow|allow|sitemap)\s*:", b):
+        return None
+    paths = [p for p in dict.fromkeys(re.findall(r"(?im)^\s*(?:dis)?allow\s*:\s*(\S+)", b))
+             if p not in ("/", "*", "")]
+    sitemaps = re.findall(r"(?im)^\s*sitemap\s*:\s*(\S+)", b)
+    interesting = [p for p in paths if _ROBOTS_INTERESTING.search(p)]
+    return {"paths": paths, "interesting": interesting, "sitemaps": sitemaps}
 
 
 def _reflection_candidates(payload, url, req_body):
@@ -2539,6 +2564,25 @@ def _exec_construct_reflected(body, cand):
             "context": "HTML", "snippet": body[max(0, idx - 30): idx + len(frag) + 30], "payload": cand}
 
 
+def _encoded_reflection(body, payload, url, req_body):
+    """payload 가 응답 본문에 'HTML 엔티티로 인코딩'되어 반사됐는지(원문은 없고 인코딩본만).
+    이 위치(응답 본문)에선 실행 안 됨(서버 방어) — 단 DOM 싱크가 있으면 클라이언트 실행 가능.
+    사용자가 '왜 응답에 &quot;·&lt; 로 나오나' 헷갈리지 않도록 설명 신호로 표기한다."""
+    b = body or ""
+    for c in _reflection_candidates(payload, url, req_body):
+        if not any(ch in c for ch in "<>\"'"):
+            continue
+        if c in b:                       # 원문이 이미 있으면 인코딩 반사 아님(다른 신호가 처리)
+            continue
+        base = c.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        for apos in ("&apos;", "&#39;", "&#x27;", "'"):     # 따옴표 인코딩 변형 대응
+            enc = base.replace("'", apos)
+            idx = b.find(enc)
+            if idx >= 0 and len(enc) >= 6:
+                return {"snippet": b[max(0, idx - 20): idx + len(enc) + 20], "payload": c}
+    return None
+
+
 def _best_reflection(body, payload, url, req_body):
     """후보 값들 중 '가장 강한' 반사를 선택(실행컨텍스트 > 미인코딩 > 단순반사).
     전체 반사가 안 잡히면 '실행형 구성요소'가 인코딩 없이 반사됐는지로 보강(인코딩 변형 일관성)."""
@@ -2591,6 +2635,18 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             findings.append({"name": "payload 반사", "verdict": "미확정", "confidence": 40,
                              "why": f"{refl['context']}에 반영되나 특수문자 없음/인코딩 가능",
                              "evidence": refl["snippet"]})
+    else:
+        # 실행형 반사는 없지만 payload 가 '인코딩되어' 응답에 반사된 경우 → 서버 방어(이 위치는 안전).
+        # DOM 싱크가 있으면 클라이언트에서 실행될 수 있음을 함께 안내(사용자 혼동 방지).
+        enc = _encoded_reflection(body or "", payload, url, req_body)
+        if enc:
+            findings.append({"name": "payload 인코딩 반사 (응답 본문 — 여기선 안전)", "verdict": "안전", "confidence": 70,
+                             "why": "서버가 payload 를 HTML 엔티티(&quot; &lt; &gt; &apos; 등)로 인코딩해 반사 → "
+                                    "응답 본문 이 위치에선 실행되지 않음(서버측 방어). "
+                                    "단, 클라이언트 JS(document.write 등 DOM 싱크)가 원본 입력을 다시 쓰면 실행될 수 있으니 "
+                                    "DOM 싱크가 함께 탐지되면 브라우저 확증으로 검증하세요.",
+                             "checked": "응답 본문의 HTML 엔티티 인코딩 반사",
+                             "evidence": enc["snippet"]})
 
     # ② 카테고리별 성공 신호
     def _hit(markers):
@@ -2678,6 +2734,20 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # ②-c2 nuclei exposure 매처 — 임포트된 커뮤니티 시그니처로 노출 확증(경로 매칭 시에만 평가)
     findings.extend(_detect_exposure_sig(file_probe, body or "", headers_lower, status_code))
+
+    # ②-c3 robots.txt — 노출된 경로(관리·백업·API 등) 분석. recon 단서.
+    rb = _detect_robots(body or "", status_code, file_probe)
+    if rb:
+        if rb["interesting"]:
+            ev = ", ".join(rb["interesting"][:8]) + (f" 외 {len(rb['interesting'])-8}" if len(rb["interesting"]) > 8 else "")
+            findings.append({"name": "robots.txt 민감 경로 노출", "verdict": "미확정", "confidence": 55,
+                             "why": f"robots.txt 가 흥미로운 경로를 노출: {ev} → 숨겨진 관리/백업/API 영역 recon 단서(직접 접근 점검)",
+                             "checked": "robots.txt Disallow/Allow 경로", "evidence": ev})
+        elif rb["paths"]:
+            ev = ", ".join(rb["paths"][:8]) + (f" 외 {len(rb['paths'])-8}" if len(rb["paths"]) > 8 else "")
+            findings.append({"name": "robots.txt 경로 노출", "verdict": "미확정", "confidence": 35,
+                             "why": f"robots.txt 에 {len(rb['paths'])}개 경로 명시 → recon 단서(숨김 경로 점검): {ev}",
+                             "checked": "robots.txt Disallow/Allow 경로", "evidence": ev})
 
     # ②-b 클라이언트측(client-side) 취약점 신호
     # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
