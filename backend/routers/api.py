@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 import sys, os, secrets
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from core.analyzer import analyze_response, generate_summary
+from core.analyzer import analyze_response, generate_summary, file_exposure_looks_real, _sensitive_file_ext
 from urllib.parse import urlsplit, quote
 
 # 쿼리에서 RFC3986 상 합법이며 보안 페이로드에 흔히 쓰이는 문자는 보존하고
@@ -763,6 +763,70 @@ async def _run_method_probes(req: "ConfirmRequest", headers_base: dict):
     return techniques, probes
 
 
+# L3 catch-all 차분 확증 캐시 — (host, ext) → {"real": bool, "status": int}.
+# 형제 경로(존재하지 않는 파일) 응답은 호스트·확장자의 성질이라 한 번만 조회해 재사용한다.
+_CATCHALL_CACHE: dict = {}
+
+
+async def _run_file_exposure_confirm(req: "ConfirmRequest", headers_base: dict):
+    """파일 노출 catch-all 차분 확증(L3, traffic-safe).
+
+    - 대상 경로가 '민감/설정 파일'일 때만 동작(그 외엔 None → 요청 미발생).
+    - 대상 1회 + 존재하지 않는 형제 경로 1회. 형제 결과는 (host,ext)로 캐시해 재사용.
+    """
+    tgt_url = _url_with_params(req.url, req.params)
+    parts = urlsplit(tgt_url)
+    path = parts.path or "/"
+    hit = _sensitive_file_ext(path)
+    if not hit:
+        return None                      # 민감 파일 아님 → 추가 요청 없음
+    ext, fmt_label, _ = hit
+    host = parts.netloc
+    dirpath = path.rsplit("/", 1)[0] if "/" in path else ""
+    sib_path = f"{dirpath}/__evtprobe_{secrets.token_hex(4)}.{ext}"
+    sib_url = f"{parts.scheme}://{host}{sib_path}"
+    probes = []
+
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        # 대상 파일 1회 조회 → 유효 파일형 여부(L1+L2)
+        target_real, tstatus = False, 0
+        try:
+            tr = await client.get(tgt_url, headers=dict(headers_base), timeout=req.timeout)
+            tstatus = tr.status_code
+            target_real = file_exposure_looks_real(tr.text, dict(tr.headers), tstatus, ext)
+        except Exception as e:
+            probes.append({"role": "fileexp:target", "label": f"대상 조회 실패 ({path})",
+                           "value": path, "status": 0, "error": str(e)[:120]})
+        else:
+            probes.append({"role": "fileexp:target",
+                           "label": f"대상 파일 조회 — {fmt_label} 형식 {'O' if target_real else 'X'}",
+                           "value": path, "status": tstatus, "len": len(tr.text)})
+
+        # 형제(존재하지 않는) 경로 — (host,ext) 캐시로 1회만
+        key = (host, ext)
+        cached = _CATCHALL_CACHE.get(key)
+        if cached is None:
+            try:
+                sr = await client.get(sib_url, headers=dict(headers_base), timeout=req.timeout)
+                cached = {"real": file_exposure_looks_real(sr.text, dict(sr.headers), sr.status_code, ext),
+                          "status": sr.status_code}
+            except Exception as e:
+                cached = {"real": False, "status": 0, "error": str(e)[:120]}
+            _CATCHALL_CACHE[key] = cached
+            probes.append({"role": "fileexp:sibling",
+                           "label": f"존재하지 않는 형제 경로 확인 ({sib_path}) — 파일형 "
+                                    f"{'O(catch-all 의심)' if cached['real'] else 'X'}",
+                           "value": sib_path, "status": cached.get("status", 0)})
+        else:
+            probes.append({"role": "fileexp:sibling(cache)",
+                           "label": f".{ext} catch-all 판정 캐시 재사용 — 파일형 "
+                                    f"{'O' if cached['real'] else 'X'}",
+                           "value": f"({host}, .{ext})", "status": cached.get("status", 0)})
+
+    tech = confirm_scan.decide_file_exposure(ext, target_real, cached["real"])
+    return tech, probes
+
+
 @router.post("/confirm-scan")
 async def confirm_scan_endpoint(req: ConfirmRequest):
     """대상 파라미터에 오라클 프로브 세트를 순차 전송해 취약 여부를 확증한다.
@@ -800,6 +864,13 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         techniques += mtech
         all_probes += mprobes
         ran.append("메소드")
+
+    # 4) 파일 노출 catch-all 차분 확증 — 대상 경로가 민감/설정 파일일 때만(그 외 추가 요청 없음)
+    fx = await _run_file_exposure_confirm(req, sent_headers_base)
+    if fx is not None:
+        techniques += fx[0]
+        all_probes += fx[1]
+        ran.append("파일노출")
 
     if not ran:
         return {

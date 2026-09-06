@@ -2,6 +2,8 @@
 응답 분석 엔진 - WAF/IDS 차단 여부, 취약점 탐지, ZAP 스타일 Alert 생성
 """
 import ast
+import json
+import os
 import re
 from typing import Optional
 from urllib.parse import unquote, urlsplit
@@ -160,7 +162,9 @@ SENSITIVE_PATTERNS = [
     (r"api[_-]?key\s*[=:]\s*['\"]?\w{10,}",       "API 키 노출"),
     (r"secret[_-]?key\s*[=:]\s*['\"]?\w{10,}",    "Secret 키 노출"),
     (r"access[_-]?token\s*[=:]\s*['\"]?\S{10,}",  "Access Token 노출"),
-    (r"[A-Za-z0-9+/]{60,}={0,2}",                 "Base64 인코딩 데이터 (토큰 의심)"),
+    # JWT 만 정밀 탐지(eyJ...=base64 '{"'). 과거의 '60자+ base64 전부' 규칙은
+    # PNG/폰트/번들/SRI 해시까지 '토큰'으로 오탐해 제거함(구체 토큰은 secret Alert 룰이 커버).
+    (r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", "JWT 토큰 노출"),
     (r"\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+\b",
                                                    "내부 IP 주소 노출"),
 ]
@@ -1732,6 +1736,7 @@ _CHECKED_DESC = {
     "redirect": "외부 도메인으로의 3xx Location",
     "nosql": "참/거짓 응답 차이 · $where 평가",
     "cve":  "root:x:0:0 · uid= · 개인키 · 소스/설정 파일 내용",
+    "xmlrpc": "methodResponse · system.multicall · pingback.ping · wp.getUsersBlogs/getUsers · 'Incorrect username or password' · 'accepts POST requests only'",
 }
 _CHECKED_DEFAULT = "root:x:0:0 · uid=0(root) · 개인키 · 에러/메타데이터 시그니처"
 
@@ -1785,6 +1790,8 @@ def infer_attack_type(probe: str, category: str) -> str:
         return "ssrf"
     if _SQLI_HINT.search(probe):
         return "sqli"
+    if "xmlrpc" in probe.lower() or "<methodcall" in probe.lower():
+        return "xmlrpc"
     return (category or "").lower()
 
 
@@ -1817,8 +1824,202 @@ def _checked_desc_for(probe: str, category: str) -> str:
     return _SIG_DESC.get(cat, _checked_desc(cat))
 
 
-def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
+# ── L1/L2: 형식 인식 파일 노출 검증 (파일별 시그니처 없이 '형식'으로 확증) ──────────
+# L1 = 응답이 HTML(=catch-all/SPA/soft-404)이면 노출 아님. L2 = 확장자에 맞는 형식으로 파싱/매칭.
+def _looks_html(body: str, content_type: str) -> bool:
+    if "html" in (content_type or "").lower():
+        return True
+    head = (body or "").lstrip()[:256].lower()
+    return (head.startswith("<!doctype html") or head.startswith("<html")
+            or "<head" in head or "<body" in head or "<script" in head)
+
+
+def _fmt_yaml(b: str) -> bool:
+    try:
+        import yaml  # 있으면 실제 파싱
+        d = yaml.safe_load(b)
+        return isinstance(d, dict) and len(d) >= 1
+    except ImportError:
+        # 폴백 휴리스틱: 'key:' 매핑 줄이 2개 이상이고 HTML 태그가 없음
+        return len(re.findall(r'(?m)^[A-Za-z0-9_.\-]+\s*:(?:\s|$)', b)) >= 2
+    except Exception:
+        return False
+
+
+def _fmt_json(b: str) -> bool:
+    try:
+        d = json.loads(b)
+        return isinstance(d, (dict, list)) and (len(d) >= 1 if hasattr(d, "__len__") else True)
+    except Exception:
+        return False
+
+
+def _fmt_env(b: str) -> bool:
+    return len(re.findall(r'(?m)^\s*[A-Za-z_][A-Za-z0-9_]*\s*=', b)) >= 2
+
+
+def _fmt_ini(b: str) -> bool:
+    return bool(re.search(r'(?m)^\s*\[[^\]\n]+\]\s*$', b)) or _fmt_env(b)
+
+
+def _fmt_xml(b: str) -> bool:
+    s = (b or "").lstrip()
+    return s.startswith("<?xml") or bool(re.match(r'^<[A-Za-z][\w:.-]*(?:\s|>|/)', s))
+
+
+def _fmt_pem(b: str) -> bool:
+    return "BEGIN" in b and "PRIVATE KEY" in b
+
+
+def _fmt_sql(b: str) -> bool:
+    return bool(re.search(r'\b(CREATE TABLE|INSERT INTO|DROP TABLE|ALTER TABLE|CREATE DATABASE)\b', b, re.I))
+
+
+# 확장자 → (형식 라벨, 검증 함수)
+_FMT_VALIDATORS = {
+    "yaml": ("YAML", _fmt_yaml), "yml": ("YAML", _fmt_yaml),
+    "json": ("JSON", _fmt_json),
+    "env": ("dotenv", _fmt_env), "properties": ("properties", _fmt_env),
+    "ini": ("INI", _fmt_ini), "conf": ("conf", _fmt_ini), "cfg": ("cfg", _fmt_ini), "toml": ("TOML", _fmt_ini),
+    "xml": ("XML", _fmt_xml), "config": ("XML/config", _fmt_xml),
+    "pem": ("PEM", _fmt_pem), "key": ("PEM", _fmt_pem),
+    "sql": ("SQL", _fmt_sql),
+}
+
+# 민감 파일로 볼 경로: (1) 확장자 자체가 민감(env/pem/sql/bak…) 또는
+# (2) 흔한 설정/시크릿 파일명(yaml/json/xml 은 이름이 설정류일 때만 — 일반 API JSON 오탐 방지).
+_SENSITIVE_ALWAYS_EXT = re.compile(
+    r'\.(env|pem|key|p12|pfx|keystore|sql|bak|old|backup|swp|ini|conf|cfg|properties|'
+    r'tfstate|htpasswd|htaccess)(?:$|[?#/\s])', re.I)
+_SENSITIVE_NAMED = re.compile(
+    r'(?:^|/)(?:serverless|docker-compose|compose|config|configuration|settings|secret|secrets|'
+    r'credentials?|appsettings(?:\.\w+)?|application(?:-\w+)?|database|db|firebase|'
+    r'\.npmrc|\.dockercfg|\.pypirc|\.netrc|\.aws|\.terraform)'
+    r'[\w.-]*\.(ya?ml|json|xml|config|toml|ini|conf|properties)(?:$|[?#/\s])', re.I)
+
+
+def _sensitive_file_ext(path: str):
+    """경로가 '민감 파일'로 보이면 (확장자, 형식라벨, 검증함수) 반환, 아니면 None.
+    확장자는 매칭된 민감파일 토큰에서 뽑아 URL 호스트의 .com 등을 오인하지 않는다."""
+    m_always = _SENSITIVE_ALWAYS_EXT.search(path)
+    m_named = _SENSITIVE_NAMED.search(path)
+    if m_always:
+        ext = m_always.group(1).lower()
+    elif m_named:
+        ext = m_named.group(1).lower()
+    else:
+        return None
+    fmt = _FMT_VALIDATORS.get(ext)
+    return (ext, fmt[0], fmt[1]) if fmt else None
+
+
+def file_exposure_looks_real(body: str, headers_lower: Optional[dict],
+                             status_code: int, ext: str) -> bool:
+    """응답이 '실제 노출된 파일'로 보이는지 — L1(not-HTML) + L2(확장자 형식 검증).
+    L3 catch-all 차분 확증(api.py)에서 대상/형제 경로 비교에 재사용하는 공용 판정."""
+    if status_code and status_code >= 400:
+        return False
+    ct = (headers_lower or {}).get("content-type", "")
+    if _looks_html(body or "", ct):
+        return False
+    fmt = _FMT_VALIDATORS.get((ext or "").lower())
+    if not fmt:
+        return False
+    return bool((body or "").strip()) and fmt[1](body or "")
+
+
+# ── nuclei exposure 매처 임포트 소비 ─────────────────────────────
+# data/exposure_signatures.json 의 커뮤니티 시그니처(nuclei http/exposures 매처)를 로드해
+# '경로 매칭 + 응답 word/regex/status 매칭'으로 노출을 확증한다. 파일별 정밀 시그니처를
+# 손으로 쓰지 않고도 수백 종 노출을 커버(L1/L2 형식검증을 보완).
+_EXPOSURE_SIGS = None
+
+
+def _load_exposure_sigs() -> list:
+    global _EXPOSURE_SIGS
+    if _EXPOSURE_SIGS is not None:
+        return _EXPOSURE_SIGS
+    path = os.path.join(os.path.dirname(__file__), "..", "data", "exposure_signatures.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            _EXPOSURE_SIGS = json.load(f).get("signatures", [])
+    except Exception:
+        _EXPOSURE_SIGS = []
+    return _EXPOSURE_SIGS
+
+
+def _word_hits(text: str, words: list, cond: str):
+    if not words:
+        return True, []
+    tl = text.lower()
+    hits = [w for w in words if str(w).lower() in tl]
+    ok = (len(hits) == len(words)) if cond == "and" else bool(hits)
+    return ok, hits
+
+
+def _detect_exposure_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int) -> list:
+    """임포트된 nuclei exposure 매처로 노출 확증. (경로가 시그니처에 맞을 때만 평가)"""
+    out, seen = [], set()
+    body = body or ""
+    hdr_blob = " ".join(f"{k}: {v}" for k, v in (headers_lower or {}).items())
+    pl = (probe or "").lower()
+    for sig in _load_exposure_sigs():
+        pcs = sig.get("path_contains") or []
+        if pcs and not any(str(pc).lower() in pl for pc in pcs):
+            continue
+        matchers = sig.get("matchers") or []
+        if not matchers:
+            continue
+        mcond = sig.get("matchers_condition", "and")
+        results, ev, unsupported = [], [], False
+        for m in matchers:
+            t = m.get("type")
+            if t == "status":
+                results.append(status_code in (m.get("status") or []))
+            elif t == "word":
+                part = body if m.get("part", "body") != "header" else hdr_blob
+                ok, hits = _word_hits(part, m.get("words") or [], m.get("condition", "or"))
+                results.append(ok)
+                if ok:
+                    ev += hits
+            elif t == "regex":
+                part = body if m.get("part", "body") != "header" else hdr_blob
+                pats = m.get("regex") or []
+                matched = [p for p in pats if re.search(p, part, re.I)]
+                results.append((len(matched) == len(pats)) if m.get("condition", "or") == "and" else bool(matched))
+            else:
+                unsupported = True   # dsl 등 미지원 매처
+        # 'and' 조건에서 미지원 매처가 있으면 제약을 무시하게 되어 오탐 위험 → 스킵
+        if unsupported and mcond == "and":
+            continue
+        if not results:
+            continue
+        matched = all(results) if mcond == "and" else any(results)
+        if not matched:
+            continue
+        sid = sig.get("id", "")
+        if sid in seen:
+            continue
+        seen.add(sid)
+        words_checked = "; ".join(str(w) for m in matchers if m.get("type") == "word"
+                                  for w in (m.get("words") or [])) or "(status/regex)"
+        out.append({
+            "name": f"노출 확인 — {sig.get('name', sid)}",
+            "verdict": "성공", "confidence": 88,
+            "why": f"[nuclei:{sid}] exposure 시그니처 매칭 → 실제 노출 확인",
+            "checked": words_checked,
+            "evidence": (", ".join(ev[:6]) or f"HTTP {status_code}")[:180],
+        })
+    return out
+
+
+def _detect_sensitive_file(payload: Optional[str], body: str,
+                           headers_lower: Optional[dict] = None,
+                           status_code: int = 200) -> Optional[dict]:
     """민감 파일 탐색 페이로드에 대해 '실제 노출' 여부를 본문 내용으로 판정.
+
+    1) 고가치 파일은 정밀 시그니처(_SENSITIVE_FILE_PROBES)로 확증.
+    2) 그 외는 L1(not-HTML) + L2(확장자별 형식 검증)로 파일 종류와 무관하게 확증.
 
     반환:
       - None                : 민감 파일 탐색 페이로드가 아님(해당 없음)
@@ -1826,6 +2027,7 @@ def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
       - {"exposed": False, ...}: 파일을 요청했으나 내용이 없음 → 미노출(200이어도 안전)
     """
     p = payload or ""
+    # (1) 고가치 파일 — 정밀 내용 시그니처
     for path_re, sig_re, label, checked in _SENSITIVE_FILE_PROBES:
         if re.search(path_re, p, re.I):
             m = re.search(sig_re, body or "", re.I)
@@ -1833,7 +2035,33 @@ def _detect_sensitive_file(payload: Optional[str], body: str) -> Optional[dict]:
                 return {"targeted": label, "exposed": True, "checked": checked,
                         "evidence": _clip_evidence(m.group(0), 120)}
             return {"targeted": label, "exposed": False, "checked": checked, "evidence": ""}
-    return None
+
+    # (2) 형식 인식 검증 — 파일별 시그니처가 없어도 확장자 형식으로 노출 확증
+    hit = _sensitive_file_ext(p)
+    if not hit:
+        return None
+    ext, fmt_label, validator = hit
+    ct = (headers_lower or {}).get("content-type", "")
+    label = f"설정/시크릿 파일(.{ext})"
+    checked = f"Content-Type≠html · {fmt_label} 형식 파싱 · 실제 파일 내용"
+    body = body or ""
+
+    if status_code in (401, 403):
+        return {"targeted": label, "exposed": False, "checked": checked,
+                "evidence": f"HTTP {status_code} — 접근 제한(보호됨)"}
+    # L1: HTML(catch-all/SPA)이면 노출 아님
+    if _looks_html(body, ct):
+        return {"targeted": label, "exposed": False, "checked": checked,
+                "evidence": f"응답이 HTML(catch-all/SPA 추정) — {fmt_label} 파일 아님 "
+                            f"(Content-Type: {ct or 'n/a'})"}
+    # L2: 확장자 형식으로 파싱/매칭되면 노출 확증
+    if body.strip() and validator(body):
+        return {"targeted": label, "exposed": True, "checked": checked,
+                "evidence": f"{fmt_label} 형식으로 파싱됨 + HTML 아님(Content-Type: {ct or 'n/a'}) "
+                            f"→ {ext} 파일 내용 노출: {_clip_evidence(body.strip(), 120)}"}
+    return {"targeted": label, "exposed": False, "checked": checked,
+            "evidence": f"{fmt_label} 형식으로 파싱되지 않음 → 파일 내용 아님 "
+                        f"(HTTP {status_code} · {len(body)}B · Content-Type: {ct or 'n/a'})"}
 
 # ── 클라이언트측(client-side) 취약점 탐지용 ──────────────────────────
 # DOM XSS 소스: 공격자가 제어 가능한 클라이언트 입력
@@ -1910,6 +2138,69 @@ def _detect_client_redirect(body: str):
     if m:
         return {"how": "JS location", "target": m.group(1)[:100], "evidence": m.group(0)[:160]}
     return None
+
+
+# ── XML-RPC (주로 WordPress xmlrpc.php) 위험 응답 탐지 ────────────
+# methodResponse 응답에서 악용 가능한 신호를 찾는다: 로그인 메서드 활성(brute-force 표면),
+# system.multicall(brute-force 증폭), pingback.ping(SSRF/DDoS), 사용자 열거 메서드 등.
+# 응답 형태(methodResponse)로 판정하므로 카테고리와 무관하며 오탐이 거의 없다.
+_XMLRPC_METHOD_RISKS = [
+    ("system.multicall", "system.multicall 노출 — 한 요청에 수백 개 인증 시도를 묶어 보내는 brute-force 증폭 가능", 88),
+    ("pingback.ping",    "pingback.ping 노출 — 내부망 SSRF/포트스캔 및 pingback DDoS 벡터", 85),
+    ("wp.getUsersBlogs", "wp.getUsersBlogs 노출 — XML-RPC 를 통한 계정 brute-force 가능", 82),
+    ("wp.getUsers",      "wp.getUsers 노출 — 사용자 계정 열거 가능", 75),
+    ("metaWeblog.getUsersBlogs", "metaWeblog.getUsersBlogs 노출 — 자격증명 검증(brute-force) 표면", 78),
+]
+# "Incorrect username or password" 및 흔한 로케일 변형
+_XMLRPC_AUTH_FAULT_RE = re.compile(
+    r"incorrect username or password|잘못된\s*(?:사용자|아이디|비밀번호)|사용자\s*이름 또는 비밀번호", re.I)
+
+
+def _detect_xmlrpc(body: str):
+    """XML-RPC 응답에서 취약/악용 가능 신호를 수집해 finding 리스트로 반환(없으면 [])."""
+    if not body:
+        return []
+    low = body.lower()
+    if "<methodresponse" not in low:
+        # GET 등으로 XML-RPC 핸들러에 닿았을 때의 전형적 배너 → 엔드포인트 활성(공격 표면).
+        # (methodResponse 가 아니면 그 외 응답은 XML-RPC 신호로 보지 않음 → 오탐 방지)
+        if "xml-rpc server accepts post requests only" in low:
+            return [{"name": "XML-RPC 엔드포인트 활성", "verdict": "미확정", "confidence": 45,
+                     "why": "'XML-RPC server accepts POST requests only' 배너 → xmlrpc.php 활성(공격 표면). "
+                            "POST 로 system.listMethods 를 보내 노출 메서드(pingback/multicall/인증)를 점검하세요.",
+                     "evidence": body.strip()[:160]}]
+        return []
+    out = []
+
+    # (1) 인증 메서드가 살아있음 — fault(top-level <fault> 또는 multicall 배열 내 faultString) +
+    #     "Incorrect username or password". xmlrpc.php 가 로그인 시도를 처리·거부 =
+    #     wp.getUsersBlogs 등 인증 메서드 활성(brute-force 표면). multicall 응답이면 증폭까지 확인.
+    has_fault = "<fault" in low or "faultstring" in low or "faultcode" in low
+    if has_fault and _XMLRPC_AUTH_FAULT_RE.search(body):
+        # 배열 안에 fault struct 가 여러 개면 system.multicall 응답 = 증폭 벡터까지 확인됨
+        multicall = ("<array" in low) and (low.count("faultstring") + low.count("faultcode")) >= 2
+        why = ("xmlrpc.php 가 로그인 시도를 처리하고 'Incorrect username or password' fault 를 반환 "
+               "→ 인증 메서드(wp.getUsersBlogs 등)가 활성. 계정 brute-force 표면.")
+        if multicall:
+            why += " 응답이 multicall 배열 형태 → system.multicall 로 한 요청에 다수 시도를 묶는 증폭도 가능."
+        out.append({"name": "XML-RPC 인증 메서드 노출 (brute-force 표면)",
+                    "verdict": "성공", "confidence": 88 if multicall else 85,
+                    "why": why, "evidence": body.strip()[:200]})
+
+    # (2) system.listMethods 등으로 노출된 위험 메서드 — 메서드명을 '토큰 경계'로 매칭해
+    #     wp.getUsers 가 wp.getUsersBlogs 에 부분매칭되어 중복 탐지되던 문제 방지.
+    for name, why, conf in _XMLRPC_METHOD_RISKS:
+        if re.search(r'(?<![\w.])' + re.escape(name.lower()) + r'(?![\w.])', low):
+            out.append({"name": f"XML-RPC 위험 메서드 — {name}", "verdict": "성공", "confidence": conf,
+                        "why": why, "evidence": name})
+
+    # (3) 위 신호가 없으면 XML-RPC 활성 자체를 정보성 신호로(공격 표면 존재)
+    if not out:
+        out.append({"name": "XML-RPC 엔드포인트 활성", "verdict": "미확정", "confidence": 45,
+                    "why": "methodResponse 를 반환 → XML-RPC 엔드포인트가 켜져 있음(공격 표면). "
+                           "system.listMethods 로 노출 메서드 점검 권장.",
+                    "evidence": body.strip()[:200]})
+    return out
 
 
 # ── SPA 셸 감지 ──────────────────────────────────────────────
@@ -2070,6 +2361,68 @@ def _method_findings(method: str, status_code: int, url: str, body: str) -> list
     return out
 
 
+# ── 검증 내역(method/where) 부여 ──────────────────────────────────
+# finding 이름(부분일치) → (검증 방법, 검증 위치). 각 신호가 "어떤 전략으로 / 어디서"
+# 검증됐는지 명시해 분석 패널·리포트에 서술한다. docs/attack-verification.md 의 전략과 대응.
+# 향후 룰 추가 시: 이 표에 한 줄 추가하거나, finding 에 method/where 를 직접 넣으면 됨(직접 지정 우선).
+_VERIFY_META = [
+    ("반사형 XSS",               ("반사+실행 컨텍스트",      "응답 본문의 payload 반사 위치")),
+    ("payload 미인코딩 반사",     ("반사+실행 컨텍스트",      "응답 본문의 payload 반사 위치")),
+    ("payload 반사",             ("반사 확인",              "응답 본문")),
+    ("DOM 기반 XSS",             ("정적 소스→싱크 분석",     "응답 <script> 내 소스/싱크")),
+    ("클라이언트 템플릿 인젝션",    ("반사+프레임워크 확인",     "응답 본문 + 프레임워크 마커")),
+    ("파일 읽기 성공",            ("콘텐츠 시그니처",         "응답 본문")),
+    ("노출 확인 —",              ("콘텐츠 시그니처(nuclei)",  "응답 본문/헤더")),
+    ("민감 파일 노출",            ("콘텐츠 시그니처",         "응답 본문")),
+    ("민감 파일 미노출",          ("콘텐츠 시그니처(미검출)",  "응답 본문")),
+    ("명령 실행 출력",            ("콘텐츠 시그니처",         "응답 본문")),
+    ("내부/메타데이터 응답",       ("콘텐츠 시그니처",         "응답 본문")),
+    ("템플릿 평가됨",             ("계산 결과",              "응답 본문(7*7→49)")),
+    ("SQL/DB 에러 노출",          ("콘텐츠 시그니처",         "응답 본문(DB 에러)")),
+    ("외부 리다이렉트",           ("상태/헤더 오라클",        "응답 헤더 Location")),
+    ("위험 스킴 리다이렉트",       ("상태/헤더 오라클",        "응답 헤더 Location")),
+    ("클라이언트측 오픈 리다이렉트", ("콘텐츠 시그니처",        "응답 본문 meta/JS")),
+    ("시간 지연 일치",            ("타이밍",                "응답 시간 vs 요청 지연")),
+    ("시간 지연 없음",            ("타이밍",                "응답 시간 vs 요청 지연")),
+    ("베이스라인 대비 변화",       ("차분(baseline)",        "응답 상태·크기 vs baseline")),
+    ("XML-RPC 인증 메서드 노출",   ("콘텐츠 시그니처",         "응답 본문(methodResponse)")),
+    ("XML-RPC 위험 메서드",       ("콘텐츠 시그니처",         "응답 본문(methodResponse)")),
+    ("XML-RPC 엔드포인트 활성",    ("응답 형태 확인",          "응답 본문(methodResponse)")),
+    ("XML-RPC 취약 신호 미검출",   ("콘텐츠 시그니처(미검출)",  "응답 본문")),
+    ("오픈 리다이렉트 취약 신호 미검출", ("상태/헤더 오라클(미검출)", "응답 헤더 Location + 본문")),
+    ("취약 신호 미검출",           ("시그니처(미검출)",        "응답")),
+    ("PUT 메소드",               ("상태/헤더 오라클",        "응답 상태코드")),
+    ("DELETE 메소드",            ("상태/헤더 오라클",        "응답 상태코드")),
+    ("TRACE 메소드",             ("상태/헤더 오라클",        "응답 상태코드+본문 에코")),
+    ("WebDAV 메소드",            ("상태/헤더 오라클",        "응답 상태코드")),
+    ("메소드 거부됨",             ("상태/헤더 오라클",        "응답 상태코드")),
+    ("차단됨",                   ("상태/헤더 오라클",        "응답 상태코드/차단 문구")),
+    ("자동 판정 불가",            ("판정 불가",              "단일 응답(증거 없음)")),
+]
+
+
+def _verify_meta_for(name: str):
+    for stem, meta in _VERIFY_META:
+        if stem in (name or ""):
+            return meta
+    return None
+
+
+def _enrich_verification(findings: list) -> list:
+    """모든 finding 에 검증 방법(method)·위치(where)를 부여한다.
+    finding 이 이미 값을 지정했으면 유지하고, 표에 없으면 안전한 기본값을 채워
+    향후 추가되는 신호도 검증 내역을 항상 갖도록 한다."""
+    for f in findings:
+        meta = _verify_meta_for(f.get("name", ""))
+        if meta:
+            f.setdefault("method", meta[0])
+            f.setdefault("where", meta[1])
+        else:
+            f.setdefault("method", "휴리스틱")
+            f.setdefault("where", "응답")
+    return findings
+
+
 def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline,
                     url=None, req_body=None, method=None):
     """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환.
@@ -2168,18 +2521,23 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # ②-c 민감 파일 노출 — 상태코드가 아니라 '실제 파일 내용'으로 노출/미노출을 판정.
     #     (카테고리 무관: .git/config·.env 등은 cve/path 프로브로 들어온다)
-    sf = _detect_sensitive_file(file_probe, body or "")
+    sf = _detect_sensitive_file(file_probe, body or "", headers_lower, status_code)
     if sf and sf["exposed"]:
         if not h:   # 강한 마커(위)로 이미 노출을 잡았으면 중복 표기하지 않음
             findings.append({"name": f"민감 파일 노출 — {sf['targeted']}", "verdict": "성공", "confidence": 92,
                              "why": f"요청한 {sf['targeted']} 의 실제 내용이 응답에 노출됨 → 소스/시크릿 유출",
+                             "checked": sf.get("checked", ""),
                              "evidence": sf["evidence"]})
     elif sf:
         findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
                          "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
                                 " (200 응답은 일반 페이지·오류 페이지·SPA 껍데기일 수 있음)",
+                         "checked": sf.get("checked", ""),
                          "evidence": f"응답에서 {sf['targeted']} 시그니처({sf.get('checked','')})를 "
                                      f"검색 → 없음 (HTTP {status_code} · {len(body or '')}B)"})
+
+    # ②-c2 nuclei exposure 매처 — 임포트된 커뮤니티 시그니처로 노출 확증(경로 매칭 시에만 평가)
+    findings.extend(_detect_exposure_sig(file_probe, body or "", headers_lower, status_code))
 
     # ②-b 클라이언트측(client-side) 취약점 신호
     # DOM 기반 XSS — 응답 스크립트에서 소스→싱크 흐름 (XSS 테스트 시)
@@ -2203,6 +2561,37 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             findings.append({"name": "클라이언트측 오픈 리다이렉트", "verdict": "성공", "confidence": 78,
                              "why": f"{cr['how']}로 외부 이동: {cr['target']} → 클라이언트에서 리다이렉트 실행",
                              "evidence": cr["evidence"]})
+
+    # ②-d XML-RPC (WordPress xmlrpc.php 등) 위험 응답 — 응답 형태로 판정, 카테고리 무관
+    findings.extend(_detect_xmlrpc(body or ""))
+
+    # ②-e 시그니처 기반(비-blind) 검사의 '미검출 = 영향 없음(안전)' 판정.
+    #     해당 검사를 겨냥한 요청인데 그 검사의 양성 신호가 하나도 없으면 '영향 없음' 으로 명시한다.
+    #     ⚠️ blind/OOB 가능 계열(sqli·cmdi·ssrf·lfi·xxe·ssti·xss)은 제외 — 단일 응답으로
+    #        취약 부재를 단정할 수 없어 기존 '자동 판정 불가(미확인)' 로 남긴다.
+    #     각 항목: (라벨, probe 판정 함수, 양성 finding 이름 판별). 향후 비-blind 검사는 여기 추가.
+    # probe 판정은 '대상 URL' 이 아니라 공격 의도(카테고리/페이로드)에 근거해야 오탐이 없다.
+    # (대상 URL 의 https:// 를 리다이렉트/SSRF 힌트로 오인하지 않도록 category 중심으로 좁힘)
+    _probed_xmlrpc = ((url and "xmlrpc" in url.lower())
+                      or (category or "").lower() == "xmlrpc"
+                      or (req_body and "<methodcall" in req_body.lower()))
+    _probed_redirect = (category or "").lower() == "redirect"
+    _SIG_SAFE_CHECKS = [
+        ("XML-RPC",        _probed_xmlrpc,  lambda n: "XML-RPC" in n,
+         "methodResponse · system.multicall · pingback.ping · wp.getUsersBlogs/getUsers · "
+         "'Incorrect username or password' · 'accepts POST requests only'"),
+        ("오픈 리다이렉트",  _probed_redirect, lambda n: "리다이렉트" in n,
+         "3xx Location(외부 http(s)://·//) · 위험 스킴(javascript:/data:) · meta refresh · JS location"),
+    ]
+    for label, probed, is_positive, checked in _SIG_SAFE_CHECKS:
+        if probed and not any(is_positive(f.get("name", "")) for f in findings):
+            findings.append({
+                "name": f"{label} 취약 신호 미검출 — 영향 없음", "verdict": "안전", "confidence": 75,
+                "why": f"요청은 {label} 를 겨냥했으나 응답에서 취약 신호를 찾지 못함 → 이 검사 한정 영향 없음. "
+                       "(blind/OOB 유형은 단일 응답으로 완전 배제 불가)",
+                "checked": checked,
+                "evidence": f"확인 시그니처 [{checked}] → 모두 미검출 (HTTP {status_code} · {len(body or '')}B)",
+            })
 
     # ③ 타이밍 (time-based)
     n = _extract_sleep_seconds(payload)
@@ -2403,11 +2792,12 @@ def analyze_response(
             "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화 등)를 "
                    "찾지 못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. "
                    "응답 본문을 직접 확인하고, 확증 스캔 또는 baseline 비교로 검증하세요.",
+            "checked": _sigs,
             "evidence": f"응답에서 성공 시그니처 [{_sigs}]를 검색 → 미검출; 반사·시간지연·baseline 변화도 없음 "
                         f"(HTTP {status_code} · {len(body)}B · {response_time:.0f}ms{_bn})",
         })
 
-    result["findings"] = findings
+    result["findings"] = _enrich_verification(findings)   # 전 finding에 검증 내역(method/where) 부여
     result["attack_outcome"] = outcome
     result["attack_confidence"] = aconf
 

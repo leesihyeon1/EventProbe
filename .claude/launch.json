@@ -1,11 +1,1 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "SecAPITester",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["backend/main.py"],
-      "port": 8000
-    }
-  ]
-}
+{ "version": "0.0.1", "configurations": [ { "name": "secapi", "runtimeExecutable": ".venv/Scripts/python.exe", "runtimeArgs": ["backend/main.py"], "port": 8000, "autoPort": true } ] }

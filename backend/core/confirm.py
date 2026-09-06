@@ -451,3 +451,22 @@ def decide(category: str, results: list[dict]) -> dict:
                     break
 
     return {"confirmed": bool(techniques), "techniques": techniques, "category": cat}
+
+
+# ── L3: 파일 노출 catch-all 차분 확증 (순수 판정) ─────────────────
+def decide_file_exposure(ext: str, target_real: bool, sibling_real: bool) -> list[dict]:
+    """catch-all 차분으로 파일 노출을 확증한다.
+
+    target_real  = 대상 파일 응답이 '유효 파일형'(L1 not-HTML + L2 형식)인가
+    sibling_real = 존재하지 않는 형제 경로도 '유효 파일형'인가(=서버가 아무거나 파일로 응답)
+
+    반환: techniques(list). 노출이 '확증'될 때만 항목을 담는다(catch-all/미노출은 빈 리스트).
+    """
+    if target_real and not sibling_real:
+        return [{
+            "name": f".{ext} 파일 노출 확증 (catch-all 아님)",
+            "evidence": ("존재하지 않는 형제 경로는 파일형 응답이 아닌데(404/HTML) "
+                         f"대상만 유효한 {ext} 형식 → 실제 파일 노출 확증"),
+        }]
+    # target 이 파일형이 아니거나(미노출), 형제도 파일형이면(catch-all) 확증하지 않음 → 오탐 방지
+    return []

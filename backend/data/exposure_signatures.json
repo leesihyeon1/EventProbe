@@ -1,0 +1,77 @@
+{
+  "_comment": "nuclei http/exposures 매처 임포트 저장소. tools/import_nuclei.py --exposures 로 병합. 스키마: {id, name, path_contains[], matchers_condition(and|or), matchers[{type:word|regex|status, part:body|header, words[], regex[], status[], condition:and|or}], severity, reference}",
+  "signatures": [
+    {
+      "id": "aws-credentials-file",
+      "name": "AWS 자격증명 파일(.aws/credentials) 노출",
+      "path_contains": ["/.aws/credentials", "credentials"],
+      "matchers_condition": "and",
+      "matchers": [
+        {"type": "word", "part": "body", "words": ["aws_access_key_id", "aws_secret_access_key"], "condition": "and"},
+        {"type": "status", "status": [200]}
+      ],
+      "severity": "critical",
+      "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    },
+    {
+      "id": "svn-entries",
+      "name": "Subversion .svn/entries 노출",
+      "path_contains": ["/.svn/entries", "/.svn/wc.db"],
+      "matchers_condition": "or",
+      "matchers": [
+        {"type": "regex", "part": "body", "regex": ["^\\d+\\s*[\\r\\n]", "dir[\\r\\n]"], "condition": "or"},
+        {"type": "word", "part": "body", "words": ["svn:", "dir"], "condition": "and"}
+      ],
+      "severity": "medium",
+      "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    },
+    {
+      "id": "apache-server-status",
+      "name": "Apache server-status 노출",
+      "path_contains": ["/server-status"],
+      "matchers_condition": "and",
+      "matchers": [
+        {"type": "word", "part": "body", "words": ["Apache Server Status", "Server uptime"], "condition": "or"},
+        {"type": "status", "status": [200]}
+      ],
+      "severity": "medium",
+      "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    },
+    {
+      "id": "npmrc-config",
+      "name": ".npmrc 인증 토큰 노출",
+      "path_contains": ["/.npmrc"],
+      "matchers_condition": "and",
+      "matchers": [
+        {"type": "word", "part": "body", "words": ["_authToken", "//registry.npmjs.org"], "condition": "or"},
+        {"type": "status", "status": [200]}
+      ],
+      "severity": "high",
+      "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    },
+    {
+      "id": "ds-store-file",
+      "name": ".DS_Store 노출",
+      "path_contains": ["/.DS_Store"],
+      "matchers_condition": "and",
+      "matchers": [
+        {"type": "word", "part": "body", "words": ["Bud1"], "condition": "and"},
+        {"type": "status", "status": [200]}
+      ],
+      "severity": "low",
+      "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    },
+    {
+      "id": "laravel-telescope",
+      "name": "Laravel Telescope 노출",
+      "path_contains": ["/telescope/requests", "/telescope"],
+      "matchers_condition": "and",
+      "matchers": [
+        {"type": "word", "part": "body", "words": ["Telescope", "laravel"], "condition": "or"},
+        {"type": "status", "status": [200]}
+      ],
+      "severity": "medium",
+      "reference": "https://github.com/projectdiscovery/nuclei-templates"
+    }
+  ]
+}

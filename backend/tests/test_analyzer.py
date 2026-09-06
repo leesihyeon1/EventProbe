@@ -605,3 +605,316 @@ def test_generate_summary_counts_and_rate():
 
 def test_generate_summary_empty():
     assert generate_summary([]) == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XML-RPC (WordPress xmlrpc.php 등) 위험 응답 탐지
+# ─────────────────────────────────────────────────────────────────────────────
+def _has_finding(r, needle):
+    return any(needle in f["name"] for f in r["findings"])
+
+
+def test_xmlrpc_incorrect_password_is_bruteforce_surface():
+    """multicall 응답에 'Incorrect username or password' fault → 인증 메서드 활성(brute-force 표면) 성공 신호."""
+    body = ('<?xml version="1.0" encoding="UTF-8"?>\n<methodResponse><params><param><value>'
+            '<array><data><value><struct>'
+            '<member><name>faultCode</name><value><int>403</int></value></member>'
+            '<member><name>faultString</name><value><string>Incorrect username or password.</string></value></member>'
+            '</struct></value></data></array></value></param></params></methodResponse>')
+    r = analyze_response(200, {"content-type": "text/xml"}, body, 90,
+                         payload="", category="", url="https://t.example.com/xmlrpc.php")
+    assert _has_finding(r, "XML-RPC 인증 메서드 노출")
+    assert r["attack_outcome"] == "success"
+
+
+def test_xmlrpc_dangerous_methods_from_listmethods():
+    """system.listMethods 응답에 pingback.ping / system.multicall 노출 → 위험 메서드 성공 신호."""
+    body = ('<?xml version="1.0"?><methodResponse><params><param><value><array><data>'
+            '<value><string>system.multicall</string></value>'
+            '<value><string>pingback.ping</string></value>'
+            '<value><string>wp.getUsersBlogs</string></value>'
+            '</data></array></value></param></params></methodResponse>')
+    r = analyze_response(200, {"content-type": "text/xml"}, body, 80,
+                         payload="", category="", url="https://t.example.com/xmlrpc.php")
+    assert _has_finding(r, "system.multicall")
+    assert _has_finding(r, "pingback.ping")
+    assert r["attack_outcome"] == "success"
+
+
+def test_xmlrpc_bare_methodresponse_is_info_only():
+    """공격 신호 없는 단순 methodResponse → 엔드포인트 활성(미확정) 정보만, 성공으로 격상 안 함."""
+    body = ('<?xml version="1.0"?><methodResponse><params><param>'
+            '<value><string>hello</string></value></param></params></methodResponse>')
+    r = analyze_response(200, {"content-type": "text/xml"}, body, 50,
+                         payload="", category="", url="https://t.example.com/xmlrpc.php")
+    assert _has_finding(r, "XML-RPC 엔드포인트 활성")
+    assert r["attack_outcome"] != "success"
+
+
+def test_non_xmlrpc_body_no_false_positive():
+    """일반 HTML 응답은 XML-RPC 신호를 만들지 않는다(오탐 방지)."""
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "<html><body>Incorrect username or password.</body></html>", 60,
+                         payload="", category="")
+    assert not _has_finding(r, "XML-RPC")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 검증 내역(method/where) — 모든 finding이 "어떻게/어디서 검증했는지"를 갖는다
+# ─────────────────────────────────────────────────────────────────────────────
+def test_every_finding_has_verification_meta():
+    """성공/미확정/미확인 등 어떤 신호든 method·where 가 채워져야 한다(향후 추가분도)."""
+    cases = [
+        # (status, headers, body, time, payload, category, url)
+        (200, {}, "root:x:0:0:root:/root:/bin/bash", 100, "../../etc/passwd", "lfi", None),
+        (200, {}, "<html>uid=0(root) gid=0(root)</html>", 100, ";id", "cmdi", None),
+        (200, {}, "search: <script>alert(1)</script>", 100, "<script>alert(1)</script>", "xss", None),
+        (200, {"content-type": "text/xml"},
+         '<methodResponse><params><param><value><array><data><value><struct>'
+         '<member><name>faultString</name><value><string>Incorrect username or password.</string></value></member>'
+         '</struct></value></data></array></value></param></params></methodResponse>', 90, "", "", "https://t/xmlrpc.php"),
+        (200, {}, "<html>normal</html>", 60, "{{7*7}}", "ssti", None),   # 자동 판정 불가
+    ]
+    for st, h, b, t, p, c, u in cases:
+        r = analyze_response(st, h, b, t, payload=p, category=c, url=u)
+        for f in r["findings"]:
+            assert f.get("method"), f"method 누락: {f['name']}"
+            assert f.get("where"), f"where 누락: {f['name']}"
+
+
+def test_verification_meta_maps_known_finding():
+    """알려진 신호는 표에 정의된 검증 방법으로 매핑된다."""
+    r = analyze_response(200, {}, "root:x:0:0:root:/root:/bin/bash", 100,
+                         payload="../../etc/passwd", category="lfi")
+    fr = next(f for f in r["findings"] if "파일 읽기" in f["name"])
+    assert fr["method"] == "콘텐츠 시그니처"
+    assert "응답" in fr["where"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 오탐 수정: PNG/이미지 base64 를 '토큰'으로 오탐하지 않는다 (JWT 만 정밀 탐지)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_png_base64_is_not_flagged_as_token():
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAANAAAAAwCAYAAABg4PT2" + "A"*200
+    r = analyze_response(200, {"content-type": "text/html"},
+                         f"<html><img src='{png}'></html>", 120, payload="", category="")
+    assert not any("토큰" in s or "Base64" in s for s in r["sensitive_data"])
+
+
+def test_jwt_is_flagged_as_token():
+    jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"
+    r = analyze_response(200, {}, f"token={jwt}", 100, payload="", category="")
+    assert any("JWT" in s for s in r["sensitive_data"])
+
+
+def test_xmlrpc_post_only_banner_is_endpoint_active():
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "XML-RPC server accepts POST requests only.", 90,
+                         payload="", category="", url="https://t.example.com/xmlrpc.php")
+    assert any("XML-RPC 엔드포인트 활성" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XML-RPC: 취약 패턴 미검출 시 200이어도 '영향 없음(안전)'으로 판정 (시그니처 기반)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_xmlrpc_probe_no_signal_is_safe_not_unknown():
+    """xmlrpc.php 를 겨냥했는데 위험 신호가 없으면 '영향 없음(안전)', '미확인' 아님."""
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "<html><body>일반 페이지</body></html>", 120,
+                         payload="", category="",
+                         url="https://t.example.com/xmlrpc.php",
+                         req_body="<?xml version='1.0'?><methodCall><methodName>system.listMethods</methodName></methodCall>",
+                         method="POST")
+    assert any("영향 없음" in f["name"] and f["verdict"] == "안전" for f in r["findings"])
+    assert not any(f["verdict"] == "미확인" for f in r["findings"])
+
+
+def test_xmlrpc_probe_with_signal_is_not_safe():
+    """위험 신호가 있으면 '영향 없음' 안전 판정을 내리지 않는다."""
+    body = ('<methodResponse><params><param><value><array><data><value><struct>'
+            '<member><name>faultString</name><value><string>Incorrect username or password.</string></value></member>'
+            '</struct></value></data></array></value></param></params></methodResponse>')
+    r = analyze_response(200, {"content-type": "text/xml"}, body, 90,
+                         payload="", category="", url="https://t.example.com/xmlrpc.php")
+    assert not any("영향 없음" in f["name"] for f in r["findings"])
+    assert r["attack_outcome"] == "success"
+
+
+def test_non_xmlrpc_request_no_safe_noise():
+    """XML-RPC 와 무관한 요청엔 XML-RPC '영향 없음' 신호가 붙지 않는다."""
+    r = analyze_response(200, {}, "<html>ok</html>", 100, payload="", category="",
+                         url="https://t.example.com/index.html")
+    assert not any("XML-RPC" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 미검출=영향 없음 확장: 비-blind 시그니처 검사(오픈 리다이렉트)는 안전, blind 계열은 미확인 유지
+# ─────────────────────────────────────────────────────────────────────────────
+def test_redirect_probe_no_signal_is_safe():
+    """오픈 리다이렉트를 겨냥했는데 외부 Location·클라이언트 리다이렉트가 없으면 '영향 없음'."""
+    r = analyze_response(200, {"content-type": "text/html"},
+                         "<html><body>홈</body></html>", 80,
+                         payload="//evil.example.com", category="redirect",
+                         url="https://t.example.com/go?next=//evil.example.com")
+    assert any("오픈 리다이렉트 취약 신호 미검출" in f["name"] and f["verdict"] == "안전"
+               for f in r["findings"])
+
+
+def test_redirect_actual_external_is_success_not_safe():
+    r = analyze_response(302, {"location": "https://evil.example.com"}, "", 50,
+                         payload="//evil.example.com", category="redirect")
+    assert any("외부 리다이렉트" in f["name"] for f in r["findings"])
+    assert not any("영향 없음" in f["name"] for f in r["findings"])
+
+
+def test_blind_prone_sqli_miss_stays_unknown_not_safe():
+    """blind 가능 계열(SQLi)은 증거 미검출 시 '영향 없음'으로 단정하지 않고 미확인 유지."""
+    r = analyze_response(200, {}, "<html>일반 페이지</html>", 100,
+                         payload="1' OR '1'='1", category="sqli")
+    assert not any("영향 없음" in f["name"] for f in r["findings"])
+    assert any(f["verdict"] == "미확인" for f in r["findings"])
+
+
+def test_cmdi_miss_stays_unknown_not_safe():
+    r = analyze_response(200, {}, "<html>ok</html>", 100, payload=";id", category="cmdi")
+    assert not any("영향 없음" in f["name"] for f in r["findings"])
+    assert any(f["verdict"] == "미확인" for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 실제 확인한 시그니처(checked) — 미검출/미확인 판정에 무엇을 검색했는지 명시
+# ─────────────────────────────────────────────────────────────────────────────
+def test_xmlrpc_safe_lists_checked_signatures():
+    r = analyze_response(200, {"content-type": "text/html"}, "<html>ok</html>", 90,
+                         payload="", category="", url="https://t.example.com/xmlrpc.php",
+                         req_body="<methodCall><methodName>system.listMethods</methodName></methodCall>",
+                         method="POST")
+    f = next(x for x in r["findings"] if "영향 없음" in x["name"])
+    assert f.get("checked")
+    assert "methodResponse" in f["checked"] and "pingback.ping" in f["checked"]
+
+
+def test_unknown_finding_lists_checked_signatures():
+    r = analyze_response(200, {}, "<html>일반 페이지</html>", 100,
+                         payload="1' OR '1'='1", category="sqli")
+    f = next(x for x in r["findings"] if x["verdict"] == "미확인")
+    assert f.get("checked")   # SQL/DB 에러 등 검색 시그니처가 명시돼야
+
+
+def test_sensitive_file_miss_has_checked():
+    r = analyze_response(200, {}, "<html>page</html>", 80,
+                         payload="/.git/config", category="cve",
+                         url="https://t.example.com/.git/config")
+    f = next((x for x in r["findings"] if "민감 파일" in x["name"]), None)
+    if f:   # 프로브가 민감파일로 인식된 경우
+        assert f.get("checked")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L1(not-HTML) + L2(형식 검증) — 파일별 시그니처 없이 형식으로 노출 확증
+# ─────────────────────────────────────────────────────────────────────────────
+def test_serverless_yaml_valid_format_is_exposed():
+    body = "service: my-api\nprovider:\n  name: aws\nfunctions:\n  hello:\n    handler: h.main\n"
+    r = analyze_response(200, {"content-type": "application/x-yaml"}, body, 80,
+                         payload="/serverless.yaml", category="cve",
+                         url="https://t.example.com/serverless.yaml")
+    f = next(x for x in r["findings"] if "설정/시크릿" in x["name"] or "노출" in x["name"])
+    assert f["verdict"] == "성공"
+    assert f.get("checked")
+
+
+def test_serverless_yaml_html_catchall_is_safe():
+    """catch-all 이 200+HTML 을 줘도 노출로 오탐하지 않음(L1)."""
+    body = "<!doctype html><html><head><title>App</title></head><body>home</body></html>"
+    r = analyze_response(200, {"content-type": "text/html"}, body, 80,
+                         payload="/serverless.yaml", category="cve",
+                         url="https://t.example.com/serverless.yaml")
+    assert not any(f["verdict"] == "성공" and "노출" in f["name"] for f in r["findings"])
+    assert any("미노출" in f["name"] or "영향 없음" in f["name"] or f["verdict"] == "안전"
+               for f in r["findings"])
+
+
+def test_env_file_keyvalue_is_exposed():
+    body = "APP_KEY=base64:xxxx\nDB_PASSWORD=secret\nDB_HOST=localhost\n"
+    r = analyze_response(200, {"content-type": "text/plain"}, body, 60,
+                         payload="/.env", category="cve", url="https://t.example.com/.env")
+    assert any(f["verdict"] == "성공" for f in r["findings"] if "파일" in f["name"] or "env" in f["name"])
+
+
+def test_dotenv_403_is_protected_safe():
+    r = analyze_response(403, {"content-type": "text/html"}, "Forbidden", 40,
+                         payload="/.env", category="cve", url="https://t.example.com/.env")
+    assert not any(f["verdict"] == "성공" for f in r["findings"])
+
+
+def test_normal_json_api_not_flagged_as_file():
+    """일반 API 의 JSON 응답(설정 파일명 아님)은 파일 노출로 오탐하지 않음."""
+    r = analyze_response(200, {"content-type": "application/json"},
+                         '{"users":[{"id":1}],"total":1}', 50,
+                         payload="", category="", url="https://t.example.com/api/users")
+    assert not any("설정/시크릿" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L3 catch-all 차분 확증 — 순수 판정(decide_file_exposure) + 파일형 판정(looks_real)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_l3_decide_confirms_only_when_sibling_not_file():
+    from core.confirm import decide_file_exposure
+    # 대상=파일형, 형제=파일형 아님 → 노출 확증
+    assert decide_file_exposure("yaml", True, False)
+    # 형제도 파일형(catch-all) → 확증 안 함(오탐 방지)
+    assert decide_file_exposure("yaml", True, True) == []
+    # 대상이 파일형 아님 → 확증 안 함
+    assert decide_file_exposure("yaml", False, False) == []
+
+
+def test_l3_looks_real_yaml_vs_html():
+    from core.analyzer import file_exposure_looks_real
+    yaml_body = "service: api\nprovider:\n  name: aws\n"
+    assert file_exposure_looks_real(yaml_body, {"content-type": "application/x-yaml"}, 200, "yaml")
+    # HTML(catch-all) → 파일형 아님
+    assert not file_exposure_looks_real("<!doctype html><html></html>", {"content-type": "text/html"}, 200, "yaml")
+    # 404 → 파일형 아님
+    assert not file_exposure_looks_real(yaml_body, {"content-type": "application/x-yaml"}, 404, "yaml")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# nuclei exposure 매처 임포트 소비 — 경로 매칭 + word/status 로 노출 확증
+# ─────────────────────────────────────────────────────────────────────────────
+def test_exposure_sig_aws_credentials_detected():
+    body = "[default]\naws_access_key_id = AKIAxxxx\naws_secret_access_key = secret\n"
+    r = analyze_response(200, {"content-type": "text/plain"}, body, 60,
+                         payload="/.aws/credentials", category="cve",
+                         url="https://t.example.com/.aws/credentials")
+    assert any("노출 확인" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+    assert r["attack_outcome"] == "success"
+
+
+def test_exposure_sig_path_gated_no_false_positive():
+    """시그니처 경로와 무관한 요청엔 exposure 신호가 붙지 않는다(경로 게이팅)."""
+    r = analyze_response(200, {}, "aws_access_key_id=x aws_secret_access_key=y", 50,
+                         payload="", category="", url="https://t.example.com/api/data")
+    assert not any("노출 확인" in f["name"] for f in r["findings"])
+
+
+def test_exposure_sig_requires_all_matchers_when_and():
+    """matchers_condition=and 인데 word 만 있고 status 불일치면 확증하지 않는다."""
+    # AWS 시그니처는 and(word+status200). status 404 면 미매칭.
+    r = analyze_response(404, {}, "aws_access_key_id=x\naws_secret_access_key=y", 50,
+                         payload="/.aws/credentials", category="cve",
+                         url="https://t.example.com/.aws/credentials")
+    assert not any("노출 확인" in f["name"] for f in r["findings"])
+
+
+def test_convert_exposure_parses_nuclei_matchers():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+    import import_nuclei as N
+    tpl = {"id": "svn-entries", "info": {"name": "SVN", "severity": "medium"},
+           "http": [{"method": "GET", "path": ["{{BaseURL}}/.svn/entries"],
+                     "matchers-condition": "and",
+                     "matchers": [{"type": "word", "part": "body", "words": ["dir"], "condition": "or"},
+                                  {"type": "status", "status": [200]}]}]}
+    s = N.convert_exposure(tpl)
+    assert s and s["path_contains"] == ["/.svn/entries"]
+    assert s["matchers_condition"] == "and" and len(s["matchers"]) == 2

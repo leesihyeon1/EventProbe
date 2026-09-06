@@ -2080,6 +2080,8 @@ function renderAttackCard(a) {
           <span style="font-size:10px;color:var(--text-muted)">신뢰도 ${f.confidence ?? '-'}</span>
         </div>
         ${f.why ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${escapeHtml(f.why)}</div>` : ''}
+        ${(f.method || f.where) ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">검증: ${escapeHtml([f.method, f.where].filter(Boolean).join(' · '))}</div>` : ''}
+        ${f.checked ? `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">확인 시그니처: ${escapeHtml(f.checked)}</div>` : ''}
         ${f.evidence ? `<div class="attack-evidence">${ev}</div>` : ''}
       </div>`;
   }).join('');

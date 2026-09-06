@@ -36,6 +36,7 @@ except ImportError:
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PAYLOADS = os.path.join(_ROOT, "data", "payloads.json")
+_EXPOSURE_SIGS_PATH = os.path.join(_ROOT, "data", "exposure_signatures.json")
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{3,7}", re.I)
 _INTERP_RE = re.compile(r"\{\{(?!BaseURL\}\})")   # {{BaseURL}} 외의 인터폴레이션이 남았는지
@@ -146,17 +147,139 @@ def convert(tpl: dict) -> dict | None:
     return entry
 
 
+def convert_exposure(tpl: dict) -> dict | None:
+    """nuclei exposure 템플릿 → exposure_signatures.json 시그니처(경로+매처). 변환 불가면 None."""
+    tid = str(tpl.get("id") or "")
+    info = tpl.get("info") or {}
+    blk = _first_http_block(tpl)
+    if not blk or blk.get("raw"):
+        return None
+    paths = blk.get("path") or []
+    if isinstance(paths, str):
+        paths = [paths]
+    pcs = []
+    for p in paths:
+        pp = str(p).replace("{{BaseURL}}", "").replace("{{RootURL}}", "")
+        if _INTERP_RE.search(pp):          # {{helper}} 남은 경로는 스킵
+            continue
+        pp = ("/" + pp if not pp.startswith("/") else pp).split("?")[0]
+        if len(pp) >= 3:
+            pcs.append(pp)
+    pcs = sorted(set(pcs))[:4]
+    if not pcs:
+        return None
+
+    matchers = []
+    for m in (blk.get("matchers") or []):
+        t = (m.get("type") or "").lower()
+        if t == "word":
+            words = [str(w) for w in (m.get("words") or []) if "{{" not in str(w)]
+            if words:
+                matchers.append({"type": "word", "part": (m.get("part") or "body"),
+                                 "words": words[:8], "condition": (m.get("condition") or "or")})
+        elif t == "status":
+            st = [int(s) for s in (m.get("status") or []) if str(s).isdigit()]
+            if st:
+                matchers.append({"type": "status", "status": st})
+        elif t == "regex":
+            rx = [str(r) for r in (m.get("regex") or []) if "{{" not in str(r)]
+            if rx:
+                matchers.append({"type": "regex", "part": (m.get("part") or "body"),
+                                 "regex": rx[:5], "condition": (m.get("condition") or "or")})
+        # dsl 등 미지원 매처는 스킵(analyzer 에서 and 조건이면 안전하게 무시)
+    if not matchers:
+        return None
+    return {
+        "id": tid or ("exp_" + pcs[0].strip("/").replace("/", "_")),
+        "name": str(info.get("name") or tid),
+        "path_contains": pcs,
+        "matchers_condition": (blk.get("matchers-condition") or "and"),
+        "matchers": matchers,
+        "severity": str(info.get("severity") or "info").lower(),
+        "reference": "https://github.com/projectdiscovery/nuclei-templates",
+    }
+
+
+def _import_exposures(args, sev_filter):
+    """http/exposures/** 매처 → exposure_signatures.json 병합."""
+    roots = [os.path.join(args.templates_dir, "http", "exposures"),
+             os.path.join(args.templates_dir, "exposures")]
+    files = []
+    for r in roots:
+        if os.path.isdir(r):
+            files = glob.glob(os.path.join(r, "**", "*.yaml"), recursive=True)
+            break
+    if not files:
+        sys.exit(f"exposure 템플릿을 찾지 못함. 확인: {roots}")
+
+    try:
+        store = json.load(open(_EXPOSURE_SIGS_PATH, encoding="utf-8"))
+    except Exception:
+        store = {"signatures": []}
+    sigs = store.setdefault("signatures", [])
+    have = {s.get("id") for s in sigs}
+
+    added, dup, conv, sev_sk = 0, 0, 0, 0
+    new = []
+    for fp in files:
+        try:
+            tpl = yaml.safe_load(open(fp, encoding="utf-8"))
+        except Exception:
+            conv += 1
+            continue
+        if not isinstance(tpl, dict):
+            conv += 1
+            continue
+        sev = str((tpl.get("info") or {}).get("severity") or "info").lower()
+        if sev_filter is not None and sev not in sev_filter:
+            sev_sk += 1
+            continue
+        s = convert_exposure(tpl)
+        if not s:
+            conv += 1
+            continue
+        if s["id"] in have:
+            dup += 1
+            continue
+        have.add(s["id"])
+        new.append(s)
+        added += 1
+        if args.limit and added >= args.limit:
+            break
+
+    print(f"exposure 스캔:{len(files)} | 추가:{added} | 중복:{dup} | 변환불가:{conv} | 심각도필터:{sev_sk}")
+    for s in new[:5]:
+        print(f"  + {s['severity']:8} {s['id']}  {s['path_contains']}")
+    if args.dry_run:
+        print("\n[dry-run] 파일 미변경.")
+        return
+    if not new:
+        print("추가할 항목 없음.")
+        return
+    sigs.extend(new)
+    with open(_EXPOSURE_SIGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(store, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"\n병합 완료 → {_EXPOSURE_SIGS_PATH} (총 {len(sigs)}). git diff 로 검토하세요.")
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Nuclei 템플릿 → payloads.json CVE 임포터")
+    ap = argparse.ArgumentParser(description="Nuclei 템플릿 → payloads.json CVE / exposure 매처 임포터")
     ap.add_argument("templates_dir", help="클론한 nuclei-templates 디렉터리")
     ap.add_argument("--severity", default="critical,high",
                     help="쉼표구분 심각도 필터 (기본 critical,high). 'all' 이면 전체")
     ap.add_argument("--limit", type=int, default=0, help="추가 최대 개수(0=무제한)")
     ap.add_argument("--dry-run", action="store_true", help="파일 미변경, 요약만 출력")
+    ap.add_argument("--exposures", action="store_true",
+                    help="http/exposures 매처를 exposure_signatures.json 으로 임포트(노출 탐지 룰). "
+                         "노출은 low/medium 이 많으니 --severity all 권장")
     args = ap.parse_args()
 
     sev_filter = None if args.severity.lower() == "all" else {
         s.strip().lower() for s in args.severity.split(",") if s.strip()}
+
+    if args.exposures:
+        return _import_exposures(args, sev_filter)
 
     # http/cves 우선, 없으면 http 전체
     roots = [os.path.join(args.templates_dir, "http", "cves"),
