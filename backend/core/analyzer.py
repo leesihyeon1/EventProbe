@@ -2416,12 +2416,71 @@ def _method_findings(method: str, status_code: int, url: str, body: str) -> list
                    "디렉터리 열람·파일 쓰기/이동 등 인증 우회 공격 표면이 노출됩니다.",
             "evidence": m + " " + path + " → HTTP " + str(status_code),
         })
+    elif m == "CONNECT":
+        # CONNECT 는 프록시/터널 수립 메소드. 일반 웹서버로 오면 오픈 프록시·터널 프로브다.
+        # 경로/컨텍스트로 Cisco ASA WebVPN(AnyConnect) 터널 스캔을 식별한다:
+        #   /cscosslc/tunnel · /+CSCOE+/ · /+CSCOU+/ · /+webvpn+/ · webvpn 쿠키.
+        blob = ((url or "") + " " + (body or "")).lower()
+        is_cisco = bool(re.search(r"cscosslc|/\+csco[eu]?\+|/\+webvpn\+|webvpn", blob))
+        label = "Cisco ASA WebVPN 터널 스캔(CONNECT)" if is_cisco else "CONNECT 메소드(오픈 프록시/터널) 스캔"
+        why_cisco = (" 경로/쿠키가 Cisco ASA WebVPN(AnyConnect) 터널 수립 요청과 일치 → "
+                     "장비 지문 식별·인증 우회(CVE-2018-0101 계열 등) 표면 점검용 스캔입니다."
+                     if is_cisco else "")
+        if ok2xx:
+            short_body = len((body or "").strip()) < 64
+            success = short_body   # 정상 서버는 CONNECT 에 2xx 를 주지 않음. 빈/짧은 본문 2xx = 터널 수립
+            out.append({
+                "name": label, "verdict": "성공" if success else "미확정",
+                "confidence": 85 if success else 60,
+                "why": ("CONNECT 요청이 " + str(status_code) + " 로 수락됨 → 프록시/터널이 수립됩니다"
+                        "(오픈 프록시 악용·내부망 피벗 가능)." + why_cisco
+                        + ("" if success else " 본문이 일반 페이지 형태라 실제 터널 수립 여부는 원시 소켓 응답으로 재확인 필요.")),
+                "evidence": "CONNECT " + path + " → HTTP " + str(status_code)
+                            + ("; 빈/짧은 본문(터널 수립 정황)" if success else ""),
+            })
+        elif status_code in (400, 403, 405, 501, 502):
+            out.append({
+                "name": label + " — 거부됨", "verdict": "안전", "confidence": 72,
+                "why": "CONNECT 요청이 " + str(status_code) + " 로 거부됨 → 프록시/터널 메소드가 비활성입니다(양호)."
+                       + why_cisco,
+                "evidence": "CONNECT " + path + " → HTTP " + str(status_code),
+            })
+        else:
+            out.append({
+                "name": label, "verdict": "미확인", "confidence": 45,
+                "why": "CONNECT 요청에 HTTP " + str(status_code) + " 응답 → 프록시/터널 수립 여부가 불명확합니다. "
+                       "원시 소켓으로 응답 라인을 확인하세요(200 이면 터널 수립)." + why_cisco,
+                "evidence": "CONNECT " + path + " → HTTP " + str(status_code),
+            })
     elif m in ("PUT", "DELETE") and denied:
         out.append({
             "name": m + " 메소드 거부됨", "verdict": "안전", "confidence": 70,
             "why": m + " 요청이 " + str(status_code) + " 로 거부됨 → 쓰기/삭제 메소드가 제한되어 있습니다(양호).",
             "evidence": m + " " + path + " → HTTP " + str(status_code),
         })
+
+    # 미처리 비표준 메소드(OPTIONS/PATCH/임의 메소드 등)도 '메소드 스캔'으로 최소 인식한다.
+    # (아무 finding 도 없으면 스캔 자체가 누락돼 보이는 문제 방지 — 응답으로 3-상태 판정)
+    if not out:
+        if denied or status_code in (400, 501):
+            out.append({
+                "name": m + " 메소드 스캔 — 거부됨", "verdict": "안전", "confidence": 65,
+                "why": m + " 메소드가 " + str(status_code) + " 로 거부됨 → 비표준/위험 메소드가 제한되어 있습니다(양호).",
+                "evidence": m + " " + path + " → HTTP " + str(status_code),
+            })
+        elif ok2xx:
+            out.append({
+                "name": m + " 메소드 스캔 — 수락됨", "verdict": "미확정", "confidence": 55,
+                "why": m + " 메소드가 " + str(status_code) + " 로 수락됨 → 비표준 메소드가 처리됩니다. "
+                       "의도된 동작인지, 위험 동작(쓰기/조회 우회)인지 응답 본문으로 확인하세요.",
+                "evidence": m + " " + path + " → HTTP " + str(status_code),
+            })
+        else:
+            out.append({
+                "name": m + " 메소드 스캔", "verdict": "미확인", "confidence": 40,
+                "why": m + " 메소드에 HTTP " + str(status_code) + " 응답 → 처리 여부가 불명확합니다. 응답을 확인하세요.",
+                "evidence": m + " " + path + " → HTTP " + str(status_code),
+            })
     return out
 
 
@@ -2462,6 +2521,9 @@ _VERIFY_META = [
     ("DELETE 메소드",            ("상태/헤더 오라클",        "응답 상태코드")),
     ("TRACE 메소드",             ("상태/헤더 오라클",        "응답 상태코드+본문 에코")),
     ("WebDAV 메소드",            ("상태/헤더 오라클",        "응답 상태코드")),
+    ("CONNECT 메소드",           ("상태/헤더 오라클",        "응답 상태코드(+본문 길이)")),
+    ("Cisco ASA WebVPN 터널 스캔", ("경로 지문 + 상태 오라클",  "요청 경로/쿠키 + 응답 상태코드")),
+    ("메소드 스캔",              ("상태/헤더 오라클",        "응답 상태코드")),
     ("메소드 거부됨",             ("상태/헤더 오라클",        "응답 상태코드")),
     ("차단됨",                   ("상태/헤더 오라클",        "응답 상태코드/차단 문구")),
     ("자동 판정 불가",            ("판정 불가",              "단일 응답(증거 없음)")),

@@ -970,7 +970,7 @@ function _confirmBaseValue(location, param) {
   return (cur && cur === payload) ? '' : cur;
 }
 
-const _METHOD_PROBE_TRIGGERS = ['PUT','DELETE','PATCH','PROPFIND','PROPPATCH','MKCOL','COPY','MOVE','LOCK','UNLOCK','TRACE'];
+const _METHOD_PROBE_TRIGGERS = ['PUT','DELETE','PATCH','PROPFIND','PROPPATCH','MKCOL','COPY','MOVE','LOCK','UNLOCK','TRACE','CONNECT','OPTIONS'];
 
 async function confirmScan() {
   const cat = state.selectedCategory?.id || '';

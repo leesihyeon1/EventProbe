@@ -1186,3 +1186,35 @@ def test_cloud_backup_no_fp_on_html_or_mention():
     r2 = analyze_response(200, {}, "put your keys in .aws/config with region = us-east-1", 40,
                           payload="", category="", url="https://t/blog/aws-guide")
     assert not any("AWS config" in f["name"] for f in r2["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONNECT(오픈 프록시/터널) 및 비표준 메소드 스캔 인식
+# ─────────────────────────────────────────────────────────────────────────────
+def test_connect_cisco_webvpn_tunnel_scan():
+    url = "https://test.com/cscosslc/tunnel"
+    # 빈/짧은 본문 2xx → 터널 수립(성공), Cisco 라벨
+    r = analyze_response(200, {}, "", 0, payload="", category="", url=url, method="CONNECT")
+    f = next(f for f in r["findings"] if "CONNECT" in f["name"])
+    assert "Cisco" in f["name"] and f["verdict"] == "성공"
+    # 405 거부 → 안전
+    r2 = analyze_response(405, {}, "Method Not Allowed", 18, payload="", category="", url=url, method="CONNECT")
+    assert any("CONNECT" in f["name"] and f["verdict"] == "안전" for f in r2["findings"])
+
+
+def test_connect_generic_open_proxy():
+    r = analyze_response(200, {}, "", 0, payload="", category="", url="https://t/", method="CONNECT")
+    assert any("CONNECT" in f["name"] and "프록시" in f["name"] for f in r["findings"])
+
+
+def test_nonstandard_method_scan_recognized():
+    # 임의/비표준 메소드도 최소 '메소드 스캔'으로 인식돼야 함(누락 방지)
+    r = analyze_response(200, {}, "ok", 2, payload="", category="", url="https://t/api", method="OPTIONS")
+    assert any("메소드 스캔" in f["name"] for f in r["findings"])
+    r2 = analyze_response(405, {}, "no", 2, payload="", category="", url="https://t/api", method="PATCH")
+    assert any("PATCH 메소드 스캔" in f["name"] and f["verdict"] == "안전" for f in r2["findings"])
+
+
+def test_get_post_no_method_finding():
+    r = analyze_response(200, {}, "hello", 5, payload="", category="", url="https://t/", method="GET")
+    assert not any("메소드" in f["name"] for f in r["findings"])
