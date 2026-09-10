@@ -2040,8 +2040,21 @@ def _fmt_pem(b: str) -> bool:
     return "BEGIN" in b and "PRIVATE KEY" in b
 
 
+# SQLite 바이너리 DB 매직 헤더(파일 시작). 텍스트 덤프가 아니라 DB 파일 통째 노출.
+_SQLITE_MAGIC = "SQLite format 3\x00"
+
+
 def _fmt_sql(b: str) -> bool:
-    return bool(re.search(r'\b(CREATE TABLE|INSERT INTO|DROP TABLE|ALTER TABLE|CREATE DATABASE)\b', b, re.I))
+    """.sql 등에 '실제 SQL 쿼리/덤프'가 있으면 True(정밀). SQLite DB 파일은 매직 헤더로 확증."""
+    b = b or ""
+    if _SQLITE_MAGIC in b[:64]:                              # SQLite DB 파일 노출
+        return True
+    return bool(re.search(
+        r'\b(?:CREATE\s+(?:TABLE|DATABASE|INDEX|VIEW|SCHEMA)|INSERT\s+INTO|DROP\s+(?:TABLE|DATABASE)|'
+        r'ALTER\s+TABLE|LOCK\s+TABLES|UNLOCK\s+TABLES|GRANT\s+(?:ALL|SELECT)|BEGIN\s+TRANSACTION|'
+        r'AUTO_INCREMENT|ENGINE\s*=\s*(?:InnoDB|MyISAM)|PRIMARY\s+KEY|FOREIGN\s+KEY)\b|'
+        r'--\s*(?:MySQL|MariaDB|PostgreSQL|SQLite)[^\n]*dump|mysqldump|pg_dump|'
+        r'^PRAGMA\s+\w+', b, re.I | re.M))
 
 
 # 확장자 → (형식 라벨, 검증 함수)
@@ -2053,13 +2066,17 @@ _FMT_VALIDATORS = {
     # .conf/.cfg 는 형식이 제각각(nginx/apache/redis)이라 단일 INI 검증이 오판 → 특정 시그니처(exposure)로 처리
     "xml": ("XML", _fmt_xml), "config": ("XML/config", _fmt_xml),
     "pem": ("PEM", _fmt_pem), "key": ("PEM", _fmt_pem),
-    "sql": ("SQL", _fmt_sql),
+    "sql": ("SQL", _fmt_sql), "dump": ("SQL 덤프", _fmt_sql), "sqldump": ("SQL 덤프", _fmt_sql),
+    "mysql": ("MySQL 덤프", _fmt_sql), "pgsql": ("PostgreSQL 덤프", _fmt_sql),
+    "psql": ("PostgreSQL 덤프", _fmt_sql),
+    "sqlite": ("SQLite DB", _fmt_sql), "sqlite3": ("SQLite DB", _fmt_sql), "db": ("SQLite DB", _fmt_sql),
 }
 
 # 민감 파일로 볼 경로: (1) 확장자 자체가 민감(env/pem/sql/bak…) 또는
 # (2) 흔한 설정/시크릿 파일명(yaml/json/xml 은 이름이 설정류일 때만 — 일반 API JSON 오탐 방지).
 _SENSITIVE_ALWAYS_EXT = re.compile(
-    r'\.(env|pem|key|p12|pfx|keystore|sql|bak|old|backup|swp|ini|conf|cfg|properties|'
+    r'\.(env|pem|key|p12|pfx|keystore|sql|dump|sqldump|mysql|pgsql|psql|sqlite|sqlite3|db|'
+    r'bak|old|backup|swp|ini|conf|cfg|properties|'
     r'tfstate|htpasswd|htaccess)(?:$|[?#/\s])', re.I)
 _SENSITIVE_NAMED = re.compile(
     r'(?:^|/)(?:serverless|docker-compose|compose|config|configuration|settings|secret|secrets|'
