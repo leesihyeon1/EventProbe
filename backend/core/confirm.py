@@ -15,6 +15,8 @@ decide() 에 넘기는 results 항목 형식:
 from __future__ import annotations
 
 import re
+
+from core.detectors import _redirect_is_auth_reject
 from typing import Optional
 
 # ── 판정 임계값 ───────────────────────────────────────────────
@@ -440,9 +442,12 @@ def decide(category: str, results: list[dict]) -> dict:
                 # ② 로그인 성공 리다이렉트(대조군은 리다이렉트 아님)
                 if b_status in (301, 302, 303, 307, 308) and not c_redir:
                     signals.append(f"성공 리다이렉트({b_status})")
-                # ③ 상태 개선(대조 401/403 → 우회 200/302)
-                if c_status in (401, 403) and b_status in (200, 301, 302, 303, 307, 308):
+                # ③ 상태 개선(대조 401/403 → 우회 200/302). 단 3xx 는 로그인/에러 페이지로의
+                #    리다이렉트면 '거부'지 우회가 아니므로 제외(Location 확인).
+                if c_status in (401, 403) and b_status in (200, 201):
                     signals.append(f"상태 {c_status}→{b_status}")
+                elif c_status in (401, 403) and b_status in (301, 302, 303, 307, 308)                         and not _redirect_is_auth_reject(_loc_header(r.get("headers") or {})):
+                    signals.append(f"상태 {c_status}→{b_status}(리다이렉트)")
                 # ④ 실패 문구 소멸(대조엔 있고 우회엔 없음, 200 응답)
                 if c_fail and b_status == 200 and not _AUTH_FAIL_RE.search(b_body):
                     signals.append("인증 실패 문구 사라짐")

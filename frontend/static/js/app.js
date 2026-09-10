@@ -1,8 +1,29 @@
 /* ── SecAPITester — Main App ── */
 
+// 서버가 4xx/5xx(검증 오류·내부 오류)를 돌려주면 본문이 우리가 기대하는 형태가 아니다.
+// 그대로 r.json() 하면 analysis 가 undefined 인 채로 렌더가 조용히 멈춰 화면이
+// '분석 중…' 에 머문다. 상태를 확인해 호출부가 잡을 수 있는 에러로 바꾼다.
+async function _asJson(r, what) {
+  if (!r.ok) {
+    let detail = '';
+    try {
+      const j = await r.json();
+      detail = typeof j?.detail === 'string' ? j.detail : JSON.stringify(j?.detail ?? j);
+    } catch { try { detail = (await r.text()).slice(0, 200); } catch {} }
+    throw new Error(`${what} 실패 (HTTP ${r.status})` + (detail ? ` — ${detail}` : ''));
+  }
+  return r.json();
+}
+
 const API = {
   async request(data) {
     const r = await fetch('/api/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    return _asJson(r, '요청 전송');
+  },
+  // 규칙 기반 판정에 AI·RAG 만 나중에 덧붙인다 — /api/request 를 붙잡지 않기 위해 분리.
+  async enrich(data) {
+    const r = await fetch('/api/analyze/enrich', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.json();
   },
   async payloads() {
@@ -11,7 +32,7 @@ const API = {
   },
   async bulkTest(data) {
     const r = await fetch('/api/bulk-test', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
-    return r.json();
+    return _asJson(r, '일괄 테스트');
   },
   async aiStatus() {
     try { const r = await fetch('/api/ai-status'); return r.json(); } catch (e) { return { enabled: false }; }
@@ -1656,6 +1677,8 @@ async function sendRequest() {
       default_headers: getDefaultHeaderProfile(),
       use_defaults: getUseDefaults(),
       http_version: getHttpVersion(),
+      follow_redirects: getFollowRedirects(),
+      custom_alert_rules: getCustomAlertRules(),
       baseline: baseline ? { status_code: baseline.status_code, body: baseline.body } : null,
     };
 
@@ -1664,16 +1687,79 @@ async function sendRequest() {
     if (result.sent_headers) reqPayload._sentHeaders = result.sent_headers;
 
     state.lastResult = result;
+    // 규칙 기반 판정은 이미 확정 → 먼저 그린다. AI·RAG(임베딩/LLM 왕복)는 아래에서 비동기 보강.
+    // '보강 예정' 여부를 먼저 정해 배너와 실제 호출이 어긋나지 않게 한다.
+    const willEnrich = canEnrich(result);
+    if (result.analysis) result.analysis._enrich = willEnrich ? 'pending' : null;
     renderResponse(result);
     renderAnalysis(result.analysis, result);
     addHistory(reqPayload, result);   // 히스토리 저장
+    if (willEnrich) enrichAnalysis(reqPayload, result);
   } catch(e) {
     toast('요청 실패: ' + e.message, 'error');
     document.getElementById('responseBody').textContent = '요청 실패: ' + e.message;
+    // 분석 패널이 '분석 중…' 에 멈춰 있지 않도록 사유를 남긴다
+    document.getElementById('analysisVerdict').innerHTML = '';
+    document.getElementById('analysisContent').innerHTML =
+      `<div class="analysis-card" style="border-color:rgba(248,81,73,.45)">
+         <div class="analysis-card-header" style="color:var(--danger)">요청을 보내지 못했습니다</div>
+         <div class="analysis-card-body">
+           <div class="detail-item" style="font-family:var(--font-mono);font-size:11px;word-break:break-all">${escapeHtml(e.message)}</div>
+           <div class="detail-item" style="color:var(--text-muted)">분석이 수행되지 않았으므로 <b>취약/안전 어느 쪽도 판정되지 않았습니다</b>.</div>
+         </div>
+       </div>`;
   } finally {
     btn.disabled = false;
     btn.innerHTML = '▶ 전송';
   }
+}
+
+// AI 상세분석·RAG 관련문서·AI 종합판정을 응답 렌더 뒤에 채운다.
+// (예전엔 /api/request 안에서 처리해, 이미 도착한 응답조차 LLM 왕복이 끝날 때까지 못 봤다.)
+let _enrichSeq = 0;
+
+// 응답을 못 받았으면(연결 실패·타임아웃) 보강할 내용이 없다 —
+// 헛된 왕복도, '보강 중' 배너도 만들지 않는다.
+function canEnrich(result) {
+  return !!(result && result.analysis && !result.error && result.status_code);
+}
+
+async function enrichAnalysis(reqPayload, result) {
+  if (!canEnrich(result)) return;
+  const a = result.analysis;
+  const seq = ++_enrichSeq;
+  try {
+    const res = await API.enrich({
+      method: reqPayload.method, url: reqPayload.url, headers: reqPayload.headers,
+      params: reqPayload.params, body: reqPayload.body,
+      payload: reqPayload.payload, category: reqPayload.category,
+      status_code: result.status_code, response_time: result.response_time,
+      resp_headers: result.headers || {}, resp_body: result.body || '',
+      analysis: {
+        verdict: a.verdict, attack_type: a.attack_type, attack_outcome: a.attack_outcome,
+        findings: a.findings || [], alerts: a.alerts || [],
+      },
+    });
+    // 그 사이 다른 요청을 보냈으면 옛 결과로 화면을 덮지 않는다
+    if (seq !== _enrichSeq || state.lastResult !== result) return;
+    if (res && res.error) { a._enrich = 'error'; a._enrichError = res.error; }
+    else {
+      a._enrich = null;
+      if (res.ai) a.ai = res.ai;
+      if (res.related_docs) a.related_docs = res.related_docs;
+      if (res.ai_verdict) a.ai_verdict = res.ai_verdict;
+      // 정규식이 유형을 못 정한 패킷(SOC 붙여넣기)을 AI 가 분류해 보냈으면 라벨을 채운다.
+      if (res.attack_class && res.attack_class.primary) {
+        a.attack_type = res.attack_class.primary;
+        a.attack_class = res.attack_class;
+      }
+    }
+  } catch (e) {
+    if (seq !== _enrichSeq || state.lastResult !== result) return;
+    a._enrich = 'error';
+    a._enrichError = e.message;
+  }
+  renderAnalysis(a, result);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1880,7 +1966,7 @@ function renderResponse(result) {
     try { formatted = JSON.stringify(JSON.parse(result.body), null, 2); } catch {}
     bodyEl.textContent = formatted;
   } else {
-    bodyEl.textContent = '(응답 없음)';
+    bodyEl.textContent = result.error ? '요청 실패: ' + result.error : '(응답 없음)';
   }
 
   // 응답 헤더
@@ -2068,17 +2154,55 @@ function renderAiCard(ai) {
 }
 
 // 공격 결과 분석 카드 — outcome + 증거 신호
+// 공격 유형 분류 표시 — 판정(성공/실패)이 아니라 '무슨 공격 시도인가'.
+// 정규식(core.classify)이 정하면 그대로, 못 정하면(빈 값) AI 분류(attack_class)를 배지로.
+const _ATTACK_TYPE_KO = {
+  sqli:'SQL 인젝션', xss:'XSS', cmdi:'명령 주입', lfi:'파일 읽기/트래버설', xxe:'XXE',
+  ssrf:'SSRF', ssti:'서버 템플릿 주입', redirect:'오픈 리다이렉트', nosql:'NoSQL 주입',
+  xmlrpc:'XML-RPC', jwt:'JWT', idor:'IDOR/접근제어', ldap:'LDAP 주입', xpath:'XPath 주입',
+  crlf:'CRLF 주입', cors:'CORS 오설정', graphql:'GraphQL', ssi:'SSI/ESI', upload:'파일 업로드',
+  deserial:'역직렬화', prototype:'프로토타입 오염', csrf:'CSRF', log4shell:'Log4Shell',
+  shellshock:'Shellshock', header:'헤더 주입', cache:'캐시 포이즈닝', other:'기타',
+};
+function _typeKo(t){ return _ATTACK_TYPE_KO[t] || (t || ''); }
+function _attackClassCard(a) {
+  const t = a.attack_type || '';
+  const cls = a.attack_class;   // AI 분류(있으면)
+  if (!t && !cls) return '';
+  const aiBadge = (cls && cls.source === 'ai')
+    ? `<span class="tag" style="background:rgba(188,140,255,.18);color:var(--purple);border:1px solid rgba(188,140,255,.4)" title="정규식 미분류 → AI 분류">AI 분류</span>` : '';
+  const conf = (cls && cls.confidence != null) ? `<span style="font-size:10px;color:var(--text-muted)">신뢰도 ${escapeHtml(String(cls.confidence))}</span>` : '';
+  const hdr = (cls && cls.header_borne) ? `<span class="tag tag-orange" title="헤더에 실린 공격">헤더 기반</span>` : '';
+  const others = (cls && (cls.types||[]).filter(x=>x!==t)) || [];
+  const reason = (cls && cls.reason) ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:3px">${escapeHtml(cls.reason)}</div>` : '';
+  return `
+    <div class="analysis-card" data-card-id="attack-class">
+      <div class="analysis-card-header">공격 유형 분류
+        <span style="margin-left:auto;display:flex;gap:5px;align-items:center">${aiBadge}${hdr}${conf}</span>
+      </div>
+      <div class="analysis-card-body">
+        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          <span class="tag tag-blue" style="font-size:12px">${escapeHtml(_typeKo(t) || '유형 미상')}</span>
+          ${others.map(x=>`<span class="tag tag-gray" style="font-size:10px">${escapeHtml(_typeKo(x))}</span>`).join('')}
+        </div>
+        ${reason}
+        <div style="font-size:10px;color:var(--text-muted);margin-top:3px">분류는 '무슨 공격 시도인가'이며, 실제 성공 여부는 아래 증거 기반 판정에서 확인합니다.</div>
+      </div>
+    </div>`;
+}
+
 function renderAttackCard(a) {
   const findings = a.findings || [];
   if (!findings.length && !a.attack_outcome) return '';
   const OUT = {
     success:      ['공격 성공',   'tag-red',   'rgba(248,81,73,.4)'],
+    suspicious:   ['의심',        'tag-orange','rgba(210,153,34,.5)'],
     blocked:      ['차단됨',      'tag-green', 'var(--border)'],
     safe:         ['영향 없음',   'tag-green', 'var(--border)'],
     inconclusive: ['미확정',      'tag-blue',  'var(--border)'],
   };
   const [label, cls, border] = OUT[a.attack_outcome] || ['분석', 'tag-blue', 'var(--border)'];
-  const V = { '성공': 'tag-red', '차단': 'tag-green', '안전': 'tag-green', '미확정': 'tag-blue', '미확인': 'tag-orange' };
+  const V = { '성공': 'tag-red', '의심': 'tag-orange', '차단': 'tag-green', '안전': 'tag-green', '미확정': 'tag-blue', '미확인': 'tag-orange' };
 
   const rows = findings.map(f => {
     let ev = escapeHtml(String(f.evidence || ''));
@@ -2118,7 +2242,7 @@ function renderAttackCard(a) {
 // 판정 근거: findings 의 증거를 판정 카드에 표시. 성공이면 실제 매칭 스니펫,
 // 미노출/미확인이면 '응답에서 검색한 시그니처(root:x:0:0, uid=... 등) → 미검출'.
 function _findingEvidenceBlock(findings) {
-  const V = { '성공':'tag-red', '차단':'tag-green', '안전':'tag-green', '미확정':'tag-blue', '미확인':'tag-orange' };
+  const V = { '성공':'tag-red', '의심':'tag-orange', '차단':'tag-green', '안전':'tag-green', '미확정':'tag-blue', '미확인':'tag-orange' };
   const evs = (findings || []).filter(f => f && f.evidence);
   if (!evs.length) return '';
   return `<div style="margin-top:8px">
@@ -2172,7 +2296,7 @@ function renderVerdictCard(a, confidenceColor) {
   const ai = a.ai_verdict;
   const det = a.det_verdict || {};   // 결정적 서술(항상 존재) — AI 없거나 누락 시 폴백
   if (ai && !ai.error) {
-    const OUT = { success: ['공격 성공', 'tag-red'], blocked: ['차단됨', 'tag-green'], safe: ['영향 없음', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
+    const OUT = { success: ['공격 성공', 'tag-red'], suspicious: ['의심', 'tag-orange'], blocked: ['차단됨', 'tag-green'], safe: ['영향 없음', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
     const [label, cls] = OUT[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
     const sev = String(ai.severity || 'info');
     const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
@@ -2197,8 +2321,8 @@ function renderVerdictCard(a, confidenceColor) {
   }
   // 결정적 판정 (기본/폴백) — AI 없어도 요약·우선확인·조치를 결정적 서술로 제공
   const aiErr = ai && ai.error ? `<div style="font-size:10px;color:var(--text-muted)">AI 판정 실패(결정적 판정으로 대체): ${escapeHtml(ai.error)}</div>` : '';
-  const outLabel = { success:'공격 성공', blocked:'차단됨', safe:'영향 없음', inconclusive:'미확정' }[a.attack_outcome];
-  const outCls = { success:'tag-red', blocked:'tag-green', safe:'tag-green', inconclusive:'tag-blue' }[a.attack_outcome] || 'tag-blue';
+  const outLabel = { success:'공격 성공', suspicious:'의심', blocked:'차단됨', safe:'영향 없음', inconclusive:'미확정' }[a.attack_outcome];
+  const outCls = { success:'tag-red', suspicious:'tag-orange', blocked:'tag-green', safe:'tag-green', inconclusive:'tag-blue' }[a.attack_outcome] || 'tag-blue';
   return `
     <div class="analysis-card" data-card-id="verdict">
       <div class="analysis-card-header">판정 결과
@@ -2224,6 +2348,107 @@ function renderVerdictCard(a, confidenceColor) {
     </div>`;
 }
 
+// AI·RAG 보강 상태 — 규칙 기반 판정이 이미 확정됐음을 분명히 하고, 보강만 기다린다.
+function _enrichBanner(a) {
+  if (!a) return '';
+  if (a._enrich === 'pending') {
+    return `
+    <div class="analysis-card" data-card-id="enrich">
+      <div class="analysis-card-body" style="padding:6px 10px">
+        <span class="spinner" style="width:10px;height:10px"></span>
+        <span style="font-size:11px;color:var(--text-muted)">AI 종합판정·참고문서(RAG) 보강 중…
+        <b>아래 규칙 기반 판정은 이미 확정된 결과</b>입니다.</span>
+      </div>
+    </div>`;
+  }
+  if (a._enrich === 'error') {
+    return `
+    <div class="analysis-card" data-card-id="enrich">
+      <div class="analysis-card-body" style="padding:6px 10px">
+        <span style="font-size:11px;color:var(--text-muted)">AI·참고문서 보강 실패(규칙 기반 판정은 그대로 유효):
+        ${escapeHtml(String(a._enrichError || ''))}</span>
+      </div>
+    </div>`;
+  }
+  return '';
+}
+
+// 요청 자체가 실패한 경우(연결 실패·타임아웃) 사유를 그대로 보여준다.
+// 예전엔 백엔드가 만든 사유 문자열을 프론트가 버려서 '상태 -, 응답 없음'만 남았다.
+function _requestErrorCard(a, result) {
+  const err = result && result.error;
+  const v = a && a.verdict;
+  if (!err && v !== 'timeout' && v !== 'error') return '';
+  const title = v === 'timeout' ? '요청 타임아웃' : '요청 실패 — 응답을 받지 못함';
+  const details = (a && a.details) || [];
+  return `
+    <div class="analysis-card" data-card-id="req-error" style="border-color:rgba(248,81,73,.45)">
+      <div class="analysis-card-header" style="color:var(--danger)">${title}</div>
+      <div class="analysis-card-body">
+        ${err ? `<div class="detail-item" style="font-family:var(--font-mono);font-size:11px;word-break:break-all">${escapeHtml(String(err))}</div>` : ''}
+        ${details.map(d => `<div class="detail-item">${escapeHtml(String(d))}</div>`).join('')}
+        <div class="detail-item" style="color:var(--text-muted)">대상에 도달하지 못했으므로 <b>취약/안전 어느 쪽도 판정되지 않았습니다</b> —
+        URL·포트·DNS·방화벽, 그리고 프록시/VPN 설정을 확인하세요.</div>
+      </div>
+    </div>`;
+}
+
+// 응답 본문이 상한으로 잘렸으면 '미검출' 판정의 유효 범위를 알린다.
+function _truncationCard(a) {
+  if (!a || !a.body_truncated) return '';
+  const seen = (a.body_len_seen || 0).toLocaleString();
+  const full = (a.body_len_full || 0).toLocaleString();
+  return `
+    <div class="analysis-card" data-card-id="truncated" style="border-color:rgba(210,153,34,.5)">
+      <div class="analysis-card-header" style="color:var(--warning)">⚠️ 응답 본문 절단 — 부분만 검사</div>
+      <div class="analysis-card-body">
+        <div class="detail-item">전체 <b>${full}자</b> 중 앞 <b>${seen}자</b>만 분석했습니다.</div>
+        <div class="detail-item" style="color:var(--text-muted)">잘린 뒷부분에 신호가 있을 수 있으므로,
+        아래의 <b>‘미검출·영향 없음’ 판정은 검사한 앞부분에 한정</b>됩니다. 전체를 확인하려면
+        Response Body 탭에서 직접 검색하거나 응답을 줄여 재요청하세요.</div>
+      </div>
+    </div>`;
+}
+
+// 따라간 리다이렉트 홉을 카드로 — 최종 응답만 보여주면 사용자가 "무엇에 대한 판정인지"
+// 알 수 없다. 추적이 꺼져 있고 응답이 3xx 면 "추적 꺼짐" 안내로 오해를 막는다.
+function _redirectChainCard(result) {
+  const chain = (result && result.redirect_chain) || [];
+  const status = result && result.status_code;
+  if (!chain.length) {
+    if (!(status >= 300 && status < 400)) return '';
+    return `
+    <div class="analysis-card" data-card-id="redirect-chain">
+      <div class="analysis-card-header">리다이렉트 (추적 꺼짐)</div>
+      <div class="analysis-card-body">
+        <div class="detail-item">서버가 <b>HTTP ${status}</b> 로 응답했고 이 도구는 따라가지 않았습니다 —
+        아래 판정은 <b>이 3xx 응답 자체</b>에 대한 것입니다.</div>
+        <div class="detail-item" style="color:var(--text-muted)">최종 목적지의 본문까지 보려면 URL 바의
+        <b>리다이렉트 추적</b>을 켜세요(오픈 리다이렉트 판정은 첫 홉 기준으로 그대로 유지됩니다).</div>
+      </div>
+    </div>`;
+  }
+  const rows = chain.map((h, i) => `
+    <div class="detail-item" style="font-family:var(--font-mono);font-size:10px;word-break:break-all">
+      <span class="tag tag-blue" style="font-size:9px">${i + 1}</span>
+      <span style="color:${httpColor(h.status_code)}">${escapeHtml(String(h.status_code))}</span>
+      ${escapeHtml(String(h.url || ''))}
+      <span style="color:var(--text-muted)"> → </span>${escapeHtml(String(h.location || ''))}
+    </div>`).join('');
+  return `
+    <div class="analysis-card" data-card-id="redirect-chain" style="border-color:rgba(188,140,255,.35)">
+      <div class="analysis-card-header">리다이렉트 체인
+        <span style="margin-left:auto"><span class="tag tag-blue">${chain.length}홉 추적</span></span>
+      </div>
+      <div class="analysis-card-body">
+        ${rows}
+        <div class="detail-item" style="color:var(--text-muted);margin-top:4px">아래 본문·판정은
+        <b>최종 응답</b>(${escapeHtml(String(result.final_url || ''))})에 대한 것입니다.
+        오픈 리다이렉트는 <b>첫 홉</b>의 Location 으로 판정합니다.</div>
+      </div>
+    </div>`;
+}
+
 function renderAnalysis(a, result) {
   if (!a) return;
 
@@ -2235,8 +2460,17 @@ function renderAnalysis(a, result) {
   const confidenceColor = a.confidence >= 70 ? 'var(--success)' : a.confidence >= 40 ? 'var(--warning)' : 'var(--danger)';
 
   container.innerHTML = `
+    <!-- 요청 실패 사유(연결 실패·타임아웃) — 판정보다 먼저 알려야 할 사실 -->
+    ${_requestErrorCard(a, result)}
+
+    <!-- AI·RAG 보강 상태 -->
+    ${_enrichBanner(a)}
+
     <!-- 판정 카드 (AI 종합 판정 있으면 대체, 없으면 결정적 판정) -->
     ${renderVerdictCard(a, confidenceColor)}
+
+    <!-- 본문 절단 경고 — '미검출' 판정의 유효 범위 -->
+    ${_truncationCard(a)}
 
     <!-- SPA 셸 경고 — 서버가 껍데기만 주고 본문은 JS가 렌더 → 실제 API를 테스트해야 함 -->
     ${a.spa_shell ? `
@@ -2270,12 +2504,15 @@ function renderAnalysis(a, result) {
             <div class="meta-value" style="font-size:11px;color:${a.waf_detected ? 'var(--warning)' : 'var(--text-muted)'}">${a.waf_detected || '없음'}</div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">응답 크기</div>
-            <div class="meta-value">${formatBytes(result?.body_size)}</div>
+            <div class="meta-label">응답 크기${a.body_truncated ? ' <span style="color:var(--warning)">(절단)</span>' : ''}</div>
+            <div class="meta-value" title="${a.body_truncated ? `분석 범위: 앞 ${a.body_len_seen}자 / 전체 ${a.body_len_full}자` : ''}">${formatBytes(result?.body_size)}</div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 리다이렉트 체인 — 따라간 경우 '무엇을 보고 판정했는지'를 숨기지 않는다 -->
+    ${_redirectChainCard(result)}
 
     <!-- 기술 스택/인프라 지문 (Envoy, Next.js 등) -->
     ${a.tech_stack?.length ? `
@@ -2332,6 +2569,9 @@ function renderAnalysis(a, result) {
       </div>
     </div>` : ''}
 
+    <!-- 공격 유형 분류 (정규식 우선, miss 는 AI 보강) -->
+    ${_attackClassCard(a)}
+
     <!-- 공격 결과 분석 (증거 기반) -->
     ${renderAttackCard(a)}
 
@@ -2349,19 +2589,10 @@ function renderAnalysis(a, result) {
   // 카드 접기/펼치기 바인딩
   bindAnalysisCardToggles(container);
 
-  // 커스텀 Alert 룰 실행 후 내장 Alert과 병합
-  const headersLower = Object.fromEntries(
-    Object.entries(result?.headers || {}).map(([k,v]) => [k.toLowerCase(), (v||'').toLowerCase()])
-  );
-  const body      = result?.body || '';
-  const bodyLower = body.toLowerCase();
-  const customAlerts  = runCustomAlertRules(headersLower, body, bodyLower, result?.status_code || 0);
-  const riskOrder     = { high:0, medium:1, low:2, informational:3 };
-  const mergedAlerts  = [...(a.alerts || []), ...customAlerts]
-    .sort((x, y) => (riskOrder[x.risk] ?? 9) - (riskOrder[y.risk] ?? 9));
-
-  // Alert 섹션은 별도 렌더링 (클릭 이벤트 필요)
-  renderAlerts(mergedAlerts);
+  // Alert 섹션은 별도 렌더링 (클릭 이벤트 필요).
+  // 내장 룰과 사용자 정의 룰 모두 서버가 평가해 위험도순으로 담아 준다 —
+  // 예전처럼 브라우저에서 커스텀 룰을 또 돌리지 않는다(엔진 이원화 해소).
+  renderAlerts(a.alerts || []);
 
   // SPA 셸이면 실제 호출 API를 자동 정적 분석해 카드에 채움
   if (a.spa_shell) runApiDiscovery();
@@ -2486,7 +2717,16 @@ function saveAlertRules(rules) {
   localStorage.setItem(ALERT_RULE_KEY, JSON.stringify(rules));
 }
 
-/* ── 커스텀 룰 실행 ── */
+// 서버로 보낼 활성 커스텀 룰. 평가는 서버에서 한다 — 그래야 단일 전송뿐 아니라
+// 일괄 테스트·리포트까지 같은 룰셋이 적용된다(예전엔 브라우저에서만 돌았다).
+function getCustomAlertRules() {
+  try { return loadAlertRules().filter(r => r && r.enabled !== false); }
+  catch { return []; }
+}
+
+/* ── 커스텀 룰 실행 (레거시) ──
+   서버가 같은 룰을 평가해 analysis.alerts 에 담아 주므로 더는 쓰지 않는다.
+   커스텀 룰 편집 모달의 '테스트' 용도로만 남겨 둔다. */
 function runCustomAlertRules(headersLower, body, bodyLower, statusCode) {
   const rules   = loadAlertRules().filter(r => r.enabled !== false);
   const results = [];
@@ -3051,6 +3291,8 @@ async function runMultiTargetTest() {
     };
   }
 
+  requestBody.custom_alert_rules = getCustomAlertRules();   // 단일 전송과 같은 룰셋
+
   closeBulkModal();
   showLoadingOverlay(`${urls.length}개 대상 테스트 중...`);
 
@@ -3423,6 +3665,7 @@ async function runBulkTest() {
       payload_ids: checkedIds,
       default_headers: getDefaultHeaderProfile(),
       use_defaults: getUseDefaults(),
+      custom_alert_rules: getCustomAlertRules(),
     });
 
     state.bulkResults = result;
@@ -4340,6 +4583,13 @@ function saveDefaultHeaderProfile(obj) {
 function getUseDefaults() {
   const c = document.getElementById('useDefaultsChk');
   return c ? c.checked : true;
+}
+
+// 리다이렉트 추적 — 기본 꺼짐. 켜면 최종 응답을 보게 되므로 3xx/Location 기반 탐지
+// (오픈 리다이렉트 등)는 백엔드가 넘겨주는 redirect_chain 의 첫 홉으로 판정한다.
+function getFollowRedirects() {
+  const c = document.getElementById('followRedirChk');
+  return c ? c.checked : false;
 }
 
 function openHeaderProfileModal() {

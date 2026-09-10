@@ -30,7 +30,7 @@ def _url_with_params(url: str, params: dict) -> str:
         for k, v in params.items()
     )
     return url + ("&" if "?" in url else "?") + q
-from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
+from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, ai_classify_attack, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
 from core.raw_http import raw_send
 from core.cve_matcher import match_cve_payloads
 from core.followup import hot_families, escalation_candidates
@@ -102,8 +102,19 @@ class SingleRequest(BaseModel):
     use_defaults: bool = True
     http_version: Optional[str] = None   # 지정 시(비 HTTP/1.1) raw 소켓으로 요청라인 버전 그대로 전송
     baseline: Optional[dict] = None      # {status_code, body} — 공격 결과 Diff 판정용(정상 응답)
+    # 리다이렉트 추적은 기본 OFF — 보안 도구는 '서버가 실제로 준 응답'을 봐야 한다.
+    # 따라가면 3xx/Location 이 최종 응답으로 덮여 오픈 리다이렉트를 영영 탐지할 수 없고,
+    # 로그인 페이지 200 을 '정상 통과'로 오인하게 된다.
+    follow_redirects: bool = False
+    # AI 상세분석·RAG·AI 종합판정을 이 응답 안에서 처리할지. 기본 OFF —
+    # UI 는 규칙 기반 결과를 먼저 그리고 /api/analyze/enrich 로 나중에 채운다.
+    inline_ai: bool = False
+    # 사용자 정의 Alert 룰(브라우저 localStorage 보관분). 서버가 평가해야
+    # 단일 전송·일괄 테스트·리포트가 같은 룰셋을 쓴다.
+    custom_alert_rules: list = []
 
 class BulkRequest(BaseModel):
+    custom_alert_rules: list = []   # 사용자 정의 Alert 룰(단일 전송과 같은 룰셋 적용)
     method: str
     url: str
     target_param: str
@@ -119,6 +130,7 @@ class BulkRequest(BaseModel):
 
 # 다중 타겟 일괄 테스트
 class MultiTargetRequest(BaseModel):
+    custom_alert_rules: list = []   # 사용자 정의 Alert 룰(단일 전송과 같은 룰셋 적용)
     method: str
     urls: list[str]
     target_param: str
@@ -204,6 +216,36 @@ def _blurred_request(req) -> dict:
         "body": (req.body or "")[:800],
         "header_names": hdr_names,
     }
+
+
+# 분석에 쓰는 응답 본문 상한(문자). 경로마다 5KB/10KB/50KB 로 제각각이라
+# 같은 페이로드가 단일 전송과 일괄 테스트에서 다른 판정을 내던 문제가 있었다 → 하나로 통일.
+# 동시 실행 상한이 30 이라 피크 메모리는 문제되지 않는다.
+BODY_LIMIT = 50000
+
+
+def _read_body(response) -> tuple:
+    """응답 본문을 상한까지 읽고 (본문, 잘렸는지, 원본 길이) 반환.
+
+    잘린 사실을 analyzer 로 넘겨야 '시그니처 미검출 = 안전' 을 앞부분 한정으로 서술할 수 있다.
+    """
+    try:
+        full = response.text
+    except Exception:
+        return "", False, 0
+    return full[:BODY_LIMIT], len(full) > BODY_LIMIT, len(full)
+
+
+def _redirect_chain(response) -> list:
+    """httpx 가 따라간 리다이렉트 홉 목록 → [{status_code, location, url}, …].
+
+    따라가지 않았으면 빈 리스트. analyzer 는 첫 홉으로 오픈 리다이렉트를 판정하고,
+    UI 는 사용자에게 '무엇을 거쳐 최종 응답에 도달했는지' 보여준다.
+    """
+    return [{"status_code": h.status_code,
+             "location": str(h.headers.get("location", "")),
+             "url": str(h.url)}
+            for h in getattr(response, "history", []) or []]
 
 
 # 공격유형 → 코퍼스(산문)와 의미가 잘 맞는 앵커 문구. 원시 경로/페이로드만으로는
@@ -299,6 +341,84 @@ async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
         })
 
 
+class EnrichRequest(BaseModel):
+    """이미 규칙 기반 판정이 끝난 요청/응답에 AI·RAG 만 덧붙이기 위한 입력.
+
+    판정을 다시 계산하지 않는다 — 서버 규칙이 이미 확정한 findings 를 그대로 근거로 쓴다.
+    필드 이름은 SingleRequest 와 맞춰 _blurred_request() 를 그대로 재사용한다.
+    """
+    method: str = "GET"
+    url: str = ""
+    headers: dict = {}
+    params: dict = {}
+    body: Optional[str] = None
+    payload: Optional[str] = None
+    category: Optional[str] = None
+    status_code: int = 0
+    response_time: float = 0
+    resp_headers: dict = {}
+    resp_body: str = ""
+    analysis: dict = {}          # 규칙 기반 분석(findings/alerts/attack_* 등)
+
+
+@router.post("/analyze/enrich")
+async def analyze_enrich(req: EnrichRequest):
+    """규칙 기반 판정에 AI 상세분석·RAG 관련문서·AI 종합판정을 덧붙인다.
+
+    /api/request 에서 분리한 이유: 임베딩·LLM 왕복이 붙으면 이미 받아 놓은 응답조차
+    수 초간 화면에 못 띄운다. UI 는 즉시 렌더한 뒤 이 호출로 채운다.
+    AI 상세분석과 RAG→종합판정은 서로 의존하지 않으므로 동시에 돌린다.
+    """
+    analysis = dict(req.analysis or {})
+    out: dict = {}
+
+    async def _detail():
+        if not response_analysis_enabled():
+            return None
+        return await ai_analyze({
+            "method": (req.method or "GET").upper(), "url": req.url, "payload": req.payload,
+            "category": req.category, "req_body": req.body,
+            "status_code": req.status_code, "response_time": req.response_time,
+            "resp_headers": req.resp_headers, "resp_body": (req.resp_body or "")[:BODY_LIMIT],
+            "base_verdict": analysis.get("verdict"),
+            "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
+        })
+
+    async def _verdict():
+        await _attach_rag_and_verdict(analysis, req, req.status_code, req.response_time)
+
+    async def _classify():
+        # 규칙 기반 분류가 이미 유형을 정했으면 AI 를 부르지 않는다(하이브리드: miss 일 때만).
+        # attack_type 이 비어 있을 때만 = 정규식 힌트가 아무것도 못 맞춘 SOC 붙여넣기 케이스.
+        if (analysis.get("attack_type") or "").strip():
+            return None
+        if not ai_enabled():
+            return None
+        # 호스트 제거한 경로만 — 요청 본문/헤더값은 분석가 자신의 공격이라 저유출.
+        try:
+            path = urlsplit(req.url).path or "/"
+        except Exception:
+            path = req.url or "/"
+        return await ai_classify_attack({
+            "method": req.method, "path": path, "params": req.params,
+            "body": req.body, "headers": req.headers,
+        })
+
+    try:
+        detail, _, klass = await asyncio.gather(_detail(), _verdict(), _classify())
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    if detail is not None:
+        out["ai"] = detail
+    if analysis.get("related_docs") is not None:
+        out["related_docs"] = analysis["related_docs"]
+    if analysis.get("ai_verdict") is not None:
+        out["ai_verdict"] = analysis["ai_verdict"]
+    if klass and not klass.get("error") and (klass.get("primary") or klass.get("types")):
+        out["attack_class"] = klass          # {primary, types, confidence, header_borne, reason, source:"ai"}
+    return out
+
+
 # ── 단일 요청 전송 ──────────────────────────────────────────
 @router.post("/request")
 async def send_request(req: SingleRequest):
@@ -316,7 +436,7 @@ async def send_request(req: SingleRequest):
                 status_code=r["status_code"], headers=r["headers"], body=r["body"],
                 response_time=r["response_time"], payload=req.payload, category=req.category,
                 baseline=req.baseline, url=_url_with_params(req.url, req.params), req_body=req.body,
-                method=req.method,
+                method=req.method, req_headers=sent_headers,
             )
             if response_analysis_enabled():
                 analysis["ai"] = await ai_analyze({
@@ -333,9 +453,11 @@ async def send_request(req: SingleRequest):
                 "response_time": r["response_time"], "body_size": r["body_size"],
                 "sent_headers": sent_headers, "raw_mode": True,
                 "request_line": r["request_line"], "analysis": analysis,
+                "redirect_chain": [],          # raw 소켓은 리다이렉트를 따라가지 않음
+                "followed_redirects": False,
             }
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=req.follow_redirects) as client:
             start = time.time()
             response = await client.request(
                 method=req.method.upper(),
@@ -346,7 +468,8 @@ async def send_request(req: SingleRequest):
             )
             elapsed = (time.time() - start) * 1000
 
-        body_text = response.text[:50000]  # 최대 50KB
+        body_text, body_cut, body_full = _read_body(response)
+        chain = _redirect_chain(response)
         analysis = analyze_response(
             status_code=response.status_code,
             headers=dict(response.headers),
@@ -358,10 +481,18 @@ async def send_request(req: SingleRequest):
             url=_url_with_params(req.url, req.params),
             req_body=req.body,
             method=req.method,
+            redirect_chain=chain,
+            body_truncated=body_cut,
+            full_body_len=body_full,
+            custom_alert_rules=req.custom_alert_rules,
+            req_headers=sent_headers,
         )
 
-        # AI 상세 분석 — 응답 body 를 외부로 보내므로 기본 비활성(AI_RESPONSE_ANALYSIS=true 일 때만).
-        if response_analysis_enabled():
+        # AI 상세 분석 + RAG/AI 종합판정은 기본적으로 여기서 하지 않는다.
+        # 임베딩·LLM 호출이 최대 3회 붙어 '이미 도착한 응답'조차 수 초간 못 보게 만들기 때문.
+        # UI 는 규칙 기반 결과를 즉시 렌더한 뒤 POST /api/analyze/enrich 로 보강한다.
+        # (스크립트 등에서 한 번에 받고 싶으면 inline_ai=true 로 예전 동작을 쓴다.)
+        if req.inline_ai and response_analysis_enabled():
             analysis["ai"] = await ai_analyze({
                 "method": req.method.upper(),
                 "url": req.url,
@@ -377,7 +508,8 @@ async def send_request(req: SingleRequest):
             })
 
         # RAG 관련 문서(AI 무관) + AI 종합 판정(켜져 있으면) — 검색 1회로 공유
-        await _attach_rag_and_verdict(analysis, req, response.status_code, round(elapsed, 2))
+        if req.inline_ai:
+            await _attach_rag_and_verdict(analysis, req, response.status_code, round(elapsed, 2))
 
         return {
             "status_code": response.status_code,
@@ -387,6 +519,9 @@ async def send_request(req: SingleRequest):
             "body_size": len(response.content),
             "sent_headers": sent_headers,
             "analysis": analysis,
+            "redirect_chain": chain,
+            "followed_redirects": bool(req.follow_redirects),
+            "final_url": str(response.url),
         }
     except httpx.TimeoutException:
         return {
@@ -1045,11 +1180,15 @@ async def bulk_test(req: BulkRequest):
                     timeout=req.timeout,
                 )
                 elapsed = (time.time() - start) * 1000
-                body_text = response.text[:10000]
+                body_text, body_cut, body_full = _read_body(response)
                 analysis = analyze_response(
                     response.status_code, dict(response.headers),
                     body_text, elapsed, p["payload"], req.category,
                     url=_url_with_params(req.url, params), req_body=body, method=req.method,
+                    redirect_chain=_redirect_chain(response),
+                    body_truncated=body_cut, full_body_len=body_full,
+                    custom_alert_rules=getattr(req, "custom_alert_rules", None),
+                    req_headers=headers,
                 )
                 results.append({
                     "payload_id": p["id"],
@@ -1169,8 +1308,10 @@ async def multi_target_test(req: MultiTargetRequest):
                         timeout=req.timeout,
                     )
                     elapsed = (time.time() - start) * 1000
-                    bt = resp.text[:5000]
-                    analysis = analyze_response(resp.status_code, dict(resp.headers), bt, elapsed, p["payload"], req.category, url=_url_with_params(url, params), req_body=body, method=req.method)
+                    bt, bt_cut, bt_full = _read_body(resp)
+                    # 여기선 리다이렉트를 따라가므로(대상 앱 흐름 유지) 최종 응답엔 Location 이
+                    # 없다 → 첫 홉을 넘겨야 오픈 리다이렉트가 탐지된다.
+                    analysis = analyze_response(resp.status_code, dict(resp.headers), bt, elapsed, p["payload"], req.category, url=_url_with_params(url, params), req_body=body, method=req.method, redirect_chain=_redirect_chain(resp), body_truncated=bt_cut, full_body_len=bt_full, custom_alert_rules=getattr(req, "custom_alert_rules", None), req_headers=headers)
                     return {
                         "payload_id": p["id"], "payload_name": p["name"],
                         "payload": p["payload"], "description": p["description"],

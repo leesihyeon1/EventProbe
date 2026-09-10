@@ -767,6 +767,34 @@ def test_redirect_actual_external_is_success_not_safe():
     assert not any("영향 없음" in f["name"] for f in r["findings"])
 
 
+def test_same_host_redirect_is_not_open_redirect():
+    """'외부' 리다이렉트여야 성공이다 — 같은 호스트로의 절대 URL 이동(로그인 페이지 등)은 아니다.
+
+    회귀 방지: probe 에는 대상 URL 자체(//host.tld/)가 섞여 리다이렉트 힌트로 오인되므로,
+    평범한 SSO/로그인 리다이렉트가 '오픈 리다이렉트 성공'으로 뜨던 문제.
+    """
+    r = analyze_response(302, {"location": "https://t.example.com/login"}, "", 50,
+                         payload="/plugin", category="cve", url="https://t.example.com/plugin")
+    assert not any("외부 리다이렉트" in f["name"] for f in r["findings"])
+    assert r["attack_outcome"] != "success"
+
+
+def test_same_host_redirect_ignores_default_port_difference():
+    r = analyze_response(302, {"location": "https://t.example.com:443/login"}, "", 50,
+                         payload="//evil.example.com", category="redirect",
+                         url="https://t.example.com/go?next=//evil.example.com")
+    assert not any("외부 리다이렉트" in f["name"] for f in r["findings"])
+
+
+def test_external_redirect_with_known_request_host_is_success():
+    """요청 호스트를 알아도 실제로 다른 호스트로 나가면 오픈 리다이렉트 성공."""
+    r = analyze_response(302, {"location": "https://evil.example.com/"}, "", 50,
+                         payload="//evil.example.com", category="redirect",
+                         url="https://t.example.com/go?next=//evil.example.com")
+    assert any("외부 리다이렉트" in f["name"] for f in r["findings"])
+    assert r["attack_outcome"] == "success"
+
+
 def test_blind_prone_sqli_miss_stays_unknown_not_safe():
     """blind 가능 계열(SQLi)은 증거 미검출 시 '영향 없음'으로 단정하지 않고 미확인 유지."""
     r = analyze_response(200, {}, "<html>일반 페이지</html>", 100,

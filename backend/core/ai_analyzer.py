@@ -17,6 +17,8 @@ import json
 import re
 import httpx
 
+from core import classify as _classify
+
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
 def _api_key():  return os.getenv("NVIDIA_API_KEY", "").strip()
 def _model():    return os.getenv("NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct").strip()
@@ -312,28 +314,22 @@ _FILE_ACCESS = re.compile(
 
 
 def _infer_category(payload: str) -> str:
-    """모델이 category 를 스키마 문자열('sqli|xss|...')로 뱉거나 빠뜨린 경우 payload 로 추론."""
+    """모델이 category 를 빠뜨리거나 스키마 문자열로 뱉은 경우 payload 로 추론.
+
+    공용 분류는 core.classify 에 위임(정규식 단일화). classify 가 다루지 않는
+    redirect·authbypass 만 여기서 보강한다(오픈리다이렉트 //host. 는 헤더 오탐 탓에
+    classify 의 주 분류에서 제외돼 있으므로 payload 전용 경로인 여기서 처리)."""
     p = (payload or "").lower()
-    if any(t in payload for t in ("{{", "${", "#{", "<%=")):
-        return "ssti"
-    if "<script" in p or "onerror=" in p or "alert(" in p or "<img" in p:
-        return "xss"
-    if any(t in p for t in ("$ne", "$gt", "$where", "[$")):
-        return "nosql"
-    if any(t in p for t in ("union select", "or '1'='1", " or 1=1", "order by", "sleep(", "-- -", "waitfor delay")):
-        return "sqli"
-    if any(t in p for t in ("169.254.169.254", "file://", "http://127.", "http://localhost", "gopher://", "dict://")):
-        return "ssrf"
-    if _FILE_ACCESS.search(payload or ""):        # 민감 파일 직접 접근(.git/.env 등) → 파일읽기
+    if _FILE_ACCESS.search(payload or ""):        # 민감 파일 직접 접근 → 파일읽기 우선
         return "lfi"
+    primary = _classify.classify(payload=payload).primary
+    if primary:
+        return primary
+    # classify 미분류분 — ai 어휘 고유 카테고리 보강
     if "..;/" in p or "%2e%2e" in p or "..%2f" in p:
         return "authbypass"
-    if any(t in p for t in ("../", "..\\", "/etc/passwd", "%00", "..//")):
-        return "lfi"
-    if p.startswith(("//", "@", "http://evil", "https://evil")) or "\\evil" in p:
+    if p.startswith(("//", "@", "http://evil", "https://evil")) or r"\evil" in p:
         return "redirect"
-    if any(payload.strip().startswith(t) for t in (";", "|", "&", "$(", "`")) or "whoami" in p or ";id" in p:
-        return "cmdi"
     return "other"
 
 
@@ -624,3 +620,85 @@ async def ai_verdict(ctx: dict) -> dict | None:
         return {"error": "AI 판정 파싱 실패", "model": model}
     except Exception as e:
         return {"error": f"AI 판정 오류: {type(e).__name__}", "model": model}
+
+
+# ── 공격 유형 AI 분류(정규식 miss 보강) ────────────────────────────────────────
+# SOC 가 붙여넣은 패킷을 정규식(core.classify)이 분류하지 못했을 때만 호출한다.
+# 요청(호스트 제외)만 보내고 응답 본문은 보내지 않으므로 유출 위험이 낮다(is_enabled 게이트).
+# 분류만 담당 — '통했는가'(판정)는 여전히 analyzer 의 증거 기반 탐지기가 한다.
+_KNOWN_ATTACK_TYPES = [
+    "sqli", "xss", "cmdi", "lfi", "xxe", "ssrf", "ssti", "redirect", "nosql",
+    "xmlrpc", "jwt", "idor", "ldap", "xpath", "crlf", "cors", "graphql", "ssi",
+    "upload", "deserial", "prototype", "csrf", "xxe", "log4shell", "shellshock",
+    "header", "cache", "other",
+]
+
+_CLASSIFY_SYS = (
+    "당신은 웹 보안 분석가입니다. 주어진 HTTP 요청(대상 호스트는 제거됨)이 '어떤 공격 시도'인지 "
+    "분류하세요. 판정이 아니라 분류입니다 — 공격이 성공했는지는 묻지 않습니다. 요청의 payload·"
+    "파라미터·경로·헤더(값 포함)를 근거로, 아래 유형 중에서 고르세요. 헤더에 실린 공격(User-Agent·"
+    "Referer·X-* 등의 Log4Shell ${jndi:...}, Shellshock () { :;}, 헤더 SQLi 등)도 반드시 살피세요. "
+    "난독화·인코딩(base64·유니코드 등)은 의미로 해석하세요. 공격 징후가 없으면 types 를 빈 배열로 두세요.\n"
+    f"유형: {', '.join(sorted(set(_KNOWN_ATTACK_TYPES)))}\n"
+    "JSON 만 출력:\n"
+    '{"types":["<유형>",...],"primary":"<가장 가능성 높은 유형 또는 빈 문자열>",'
+    '"confidence":0-100,"header_borne":true|false,"reason":"<한국어 한 문장 근거>"}'
+)
+
+
+async def ai_classify_attack(ctx: dict) -> dict | None:
+    """요청(호스트 제외)을 LLM 으로 분류. {primary, types, confidence, header_borne, reason, model}.
+
+    ctx: {method, path, params, body, headers} — headers 는 {이름:값} (호스트/쿠키 민감값은
+    호출부에서 정리). 응답 데이터는 넣지 않는다."""
+    key = _api_key()
+    if not key:
+        return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
+    model, base_url = _model(), _base_url()
+
+    hdrs = ctx.get("headers") or {}
+    hdr_lines = "\n".join(f"  {k}: {str(v)[:200]}" for k, v in list(hdrs.items())[:30])
+    user = (
+        f"method: {ctx.get('method', 'GET')}\n"
+        f"path (host removed): {ctx.get('path', '')}\n"
+        f"query params: {json.dumps(ctx.get('params') or {}, ensure_ascii=False)[:800]}\n"
+        f"body: {(ctx.get('body') or '(none)')[:800]}\n"
+        f"headers:\n{hdr_lines or '  (none)'}\n"
+        "이 요청이 어떤 공격 시도인지 분류해 JSON 으로 주세요."
+    )
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": _CLASSIFY_SYS},
+                     {"role": "user", "content": user}],
+        "temperature": 0.0,
+        "max_tokens": 400,
+    }
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
+            r = await client.post(f"{base_url}/chat/completions", headers=headers,
+                                  json=_apply_model_opts(payload))
+        if r.status_code != 200:
+            return {"error": f"NVIDIA API {r.status_code}", "model": model}
+        parsed = _extract_json(r.json()["choices"][0]["message"]["content"])
+        # 어휘 밖 라벨은 버리고 정규화(모델이 자유 문자열을 뱉어도 안전)
+        types = [str(t).lower().strip() for t in (parsed.get("types") or [])]
+        types = [t for t in types if t in _KNOWN_ATTACK_TYPES]
+        primary = str(parsed.get("primary") or "").lower().strip()
+        if primary not in _KNOWN_ATTACK_TYPES:
+            primary = types[0] if types else ""
+        return {
+            "primary": primary,
+            "types": types,
+            "confidence": parsed.get("confidence"),
+            "header_borne": bool(parsed.get("header_borne")),
+            "reason": str(parsed.get("reason") or "")[:300],
+            "model": model,
+            "source": "ai",
+        }
+    except httpx.TimeoutException:
+        return {"error": "AI 분류 시간 초과", "model": model}
+    except json.JSONDecodeError:
+        return {"error": "AI 분류 파싱 실패", "model": model}
+    except Exception as e:
+        return {"error": f"AI 분류 오류: {type(e).__name__}", "model": model}

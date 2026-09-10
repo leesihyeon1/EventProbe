@@ -15,6 +15,10 @@ CVE 페이로드 스키마로 변환·중복제거 후 backend/data/payloads.jso
   # 3) 실제 병합 (심각도 critical/high 만, 최대 300개 예시)
   python backend/tools/import_nuclei.py nuclei-templates --severity critical,high --limit 300
 
+변환 시 템플릿의 확증 매처(status/word/regex)도 함께 담는다. CVE 는 취약점마다 성공 신호가
+전혀 달라 공용 시그니처(파일읽기 root:x:0:0 등)로는 검증할 수 없기 때문이다. analyzer 는 이
+매처로만 CVE 를 확증한다. 이미 뱅크에 있는 항목(중복)이라도 매처가 비어 있으면 채워 넣는다.
+
 주의:
   - 자동 변환이므로 병합 후 반드시 git diff 로 검토할 것(보안 도구 = 페이로드 정확성 중요).
   - {{helper}} 인터폴레이션이 남는 경로/본문은 그대로 전송 불가라 건너뛴다.
@@ -93,6 +97,35 @@ def _applies_to(info: dict, path: str) -> dict:
     return ap
 
 
+def convert_matchers(blk: dict) -> list:
+    """nuclei 요청 블록의 matcher(status/word/regex + condition) → 이 도구의 매처 스키마.
+
+    analyzer 의 매처 엔진(_eval_matchers)이 그대로 해석한다. dsl 등 미지원 타입은 담지 않고,
+    {{helper}} 인터폴레이션이 남은 word/regex 도 그대로 매칭 불가라 제외한다.
+    """
+    matchers = []
+    for m in (blk.get("matchers") or []):
+        if not isinstance(m, dict):
+            continue
+        t = str(m.get("type") or "").lower()
+        if t == "word":
+            words = [str(w) for w in (m.get("words") or []) if "{{" not in str(w)]
+            if words:
+                matchers.append({"type": "word", "part": (m.get("part") or "body"),
+                                 "words": words[:8], "condition": (m.get("condition") or "or")})
+        elif t == "status":
+            st = [int(x) for x in (m.get("status") or []) if str(x).isdigit()]
+            if st:
+                matchers.append({"type": "status", "status": st})
+        elif t == "regex":
+            rx = [str(r) for r in (m.get("regex") or []) if "{{" not in str(r)]
+            if rx:
+                matchers.append({"type": "regex", "part": (m.get("part") or "body"),
+                                 "regex": rx[:5], "condition": (m.get("condition") or "or")})
+        # dsl 등 미지원 매처는 스킵(analyzer 에서 and 조건이면 안전하게 평가 포기)
+    return matchers
+
+
 def convert(tpl: dict) -> dict | None:
     """Nuclei 템플릿 dict → payloads.json CVE 엔트리. 변환 불가면 None."""
     tid = str(tpl.get("id") or "")
@@ -144,7 +177,27 @@ def convert(tpl: dict) -> dict | None:
         entry["headers"] = {str(k): str(v) for k, v in hdrs.items()}
     if body:
         entry["body"] = str(body)
+    # 템플릿의 확증 매처를 함께 담는다 — CVE 는 취약점마다 성공 신호가 달라, analyzer 가
+    # 공용 시그니처(파일읽기 root:x:0:0 등)가 아니라 'CVE 자신의 매처'로 검증할 수 있게 한다.
+    matchers = convert_matchers(blk)
+    if matchers:
+        entry["matchers"] = matchers
+        entry["matchers_condition"] = str(blk.get("matchers-condition") or "and").lower()
     return entry
+
+
+def backfill_matchers(target: dict, fresh: dict) -> bool:
+    """이미 있는 CVE 항목에 '확증 매처만' 보강한다. 보강했으면 True.
+
+    기존 뱅크(수백 건)는 매처 없이 임포트돼 analyzer 가 CVE 별 확증을 할 수 없다.
+    중복이라 건너뛰더라도 매처는 채워줘야 (A)→(B) 검증이 실제로 동작한다.
+    요청 정의(payload/method/body 등)는 절대 덮어쓰지 않는다 — 매처가 없을 때만 추가.
+    """
+    if not fresh.get("matchers") or target.get("matchers"):
+        return False
+    target["matchers"] = fresh["matchers"]
+    target["matchers_condition"] = fresh.get("matchers_condition", "and")
+    return True
 
 
 def convert_exposure(tpl: dict) -> dict | None:
@@ -169,24 +222,7 @@ def convert_exposure(tpl: dict) -> dict | None:
     if not pcs:
         return None
 
-    matchers = []
-    for m in (blk.get("matchers") or []):
-        t = (m.get("type") or "").lower()
-        if t == "word":
-            words = [str(w) for w in (m.get("words") or []) if "{{" not in str(w)]
-            if words:
-                matchers.append({"type": "word", "part": (m.get("part") or "body"),
-                                 "words": words[:8], "condition": (m.get("condition") or "or")})
-        elif t == "status":
-            st = [int(s) for s in (m.get("status") or []) if str(s).isdigit()]
-            if st:
-                matchers.append({"type": "status", "status": st})
-        elif t == "regex":
-            rx = [str(r) for r in (m.get("regex") or []) if "{{" not in str(r)]
-            if rx:
-                matchers.append({"type": "regex", "part": (m.get("part") or "body"),
-                                 "regex": rx[:5], "condition": (m.get("condition") or "or")})
-        # dsl 등 미지원 매처는 스킵(analyzer 에서 and 조건이면 안전하게 무시)
+    matchers = convert_matchers(blk)
     if not matchers:
         return None
     return {
@@ -301,8 +337,13 @@ def main():
     have_ids = {p.get("id") for p in existing}
     have_cves = {p.get("cve") for p in existing if p.get("cve")}
     have_keys = {(p.get("location"), (p.get("param") or "").lower(), p.get("payload")) for p in existing}
+    # 중복 항목에 매처를 보강하려면 '집합' 이 아니라 실제 항목을 찾아야 한다.
+    by_id = {p.get("id"): p for p in existing if p.get("id")}
+    by_cve = {p.get("cve"): p for p in existing if p.get("cve")}
+    by_key = {(p.get("location"), (p.get("param") or "").lower(), p.get("payload")): p
+              for p in existing}
 
-    added, skipped_dup, skipped_conv, skipped_sev = 0, 0, 0, 0
+    added, skipped_dup, skipped_conv, skipped_sev, backfilled = 0, 0, 0, 0, 0
     new_entries = []
     for fp in files:
         try:
@@ -324,6 +365,11 @@ def main():
         key = (e["location"], (e["param"] or "").lower(), e["payload"])
         if e["id"] in have_ids or (e["cve"] and e["cve"] in have_cves) or key in have_keys:
             skipped_dup += 1
+            # 요청은 이미 있으니 추가하지 않되, 빠져 있던 확증 매처는 채운다(--limit 과 무관).
+            tgt = (by_id.get(e["id"]) or (by_cve.get(e["cve"]) if e["cve"] else None)
+                   or by_key.get(key))
+            if tgt is not None and backfill_matchers(tgt, e):
+                backfilled += 1
             continue
         have_ids.add(e["id"])
         if e["cve"]:
@@ -334,8 +380,8 @@ def main():
         if args.limit and added >= args.limit:
             break
 
-    print(f"스캔 파일: {len(files)} | 추가: {added} | 중복스킵: {skipped_dup} | "
-          f"변환불가: {skipped_conv} | 심각도필터: {skipped_sev}")
+    print(f"스캔 파일: {len(files)} | 추가: {added} | 중복스킵: {skipped_dup} "
+          f"(매처 보강: {backfilled}) | 변환불가: {skipped_conv} | 심각도필터: {skipped_sev}")
     if new_entries[:5]:
         print("예시(최대 5):")
         for e in new_entries[:5]:
@@ -344,16 +390,16 @@ def main():
     if args.dry_run:
         print("\n[dry-run] 파일 미변경. 실제 병합하려면 --dry-run 을 빼세요.")
         return
-    if not new_entries:
-        print("추가할 항목 없음.")
+    if not new_entries and not backfilled:
+        print("추가·보강할 항목 없음.")
         return
 
     cve_cat["payloads"].extend(new_entries)
     with open(_PAYLOADS, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print(f"\n병합 완료 → {_PAYLOADS} (cve 총 {len(cve_cat['payloads'])}). "
-          "git diff 로 반드시 검토하세요.")
+    print(f"\n병합 완료 → {_PAYLOADS} (cve 총 {len(cve_cat['payloads'])}, "
+          f"매처 보강 {backfilled}). git diff 로 반드시 검토하세요.")
 
 
 if __name__ == "__main__":

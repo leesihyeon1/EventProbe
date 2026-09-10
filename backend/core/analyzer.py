@@ -8,6 +8,12 @@ import re
 from typing import Optional
 from urllib.parse import unquote, urlsplit, parse_qsl
 
+# 공격 유형 분류의 단일 홈 — 힌트 정규식도 여기서 가져온다(예전엔 세 벌로 흩어져 있었다).
+from core import classify as _classify
+from core.classify import (_FILE_READ_HINT, _SSRF_HINT, _SQLI_HINT, _REDIRECT_HINT,
+                           _DANGEROUS_SCHEME, _CMDI_HINT, _XSS_HINT)
+from core import detectors as _detectors
+
 
 def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
     """body 에서 pattern(캡처그룹1=버전)을 찾아 target 미만이면 True (취약 라이브러리 판정용)."""
@@ -38,6 +44,40 @@ WAF_SIGNATURES = {
     "Sucuri":       {"header_names": ["x-sucuri-id", "x-sucuri-cache"], "cookies": [], "server": ["sucuri"]},
     "Wordfence":    {"header_names": [], "cookies": [], "server": ["wordfence"]},
 }
+
+
+class HeaderView(dict):
+    """매칭용 소문자 헤더 맵. 원본 값은 raw()/raw_items() 로 꺼낸다.
+
+    값까지 소문자로 만들면 매칭은 편하지만 증거가 원문과 달라진다 — Location URL,
+    Set-Cookie, 토큰처럼 대소문자가 의미를 갖는 값은 사용자가 응답에서 그대로
+    검색해도 찾지 못한다. 그래서 매칭(dict 접근)은 소문자로, 표시는 원본으로 나눈다.
+    dict 그대로이므로 기존 호출부(get/items/keys)는 하나도 바뀌지 않는다.
+    """
+
+    def __init__(self, headers: Optional[dict] = None):
+        headers = headers or {}
+        super().__init__({str(k).lower(): str(v or "").lower() for k, v in headers.items()})
+        self._raw = {str(k).lower(): str(v or "") for k, v in headers.items()}
+
+    def raw(self, key: str, default: str = "") -> str:
+        return self._raw.get(str(key or "").lower(), default)
+
+    def raw_items(self):
+        return self._raw.items()
+
+
+def _hdr_raw(headers_lower, key: str, default: str = "") -> str:
+    """표시용 원본 헤더 값. HeaderView 가 아니면(외부 호출) 소문자 값으로 폴백."""
+    getter = getattr(headers_lower, "raw", None)
+    if callable(getter):
+        return getter(key, default)
+    return (headers_lower or {}).get(str(key or "").lower(), default)
+
+
+def _hdr_raw_items(headers_lower):
+    getter = getattr(headers_lower, "raw_items", None)
+    return list(getter()) if callable(getter) else list((headers_lower or {}).items())
 
 
 def detect_waf(headers_lower: dict) -> Optional[str]:
@@ -97,7 +137,7 @@ def detect_stack(headers_lower: dict) -> list:
 
     반환: [{"name","kind","evidence"}]. Envoy(server 또는 x-envoy-*) 같은 인프라도 인식한다.
     """
-    items = list(headers_lower.items())
+    items = list(headers_lower.items())          # 매칭은 소문자로
     out, seen = [], set()
     for label, kind, checks in _STACK_SIGNATURES:
         for name_needle, val_re in checks:
@@ -108,7 +148,8 @@ def detect_stack(headers_lower: dict) -> list:
                     break
             if hit and label not in seen:
                 seen.add(label)
-                ev = f"{hit[0]}: {hit[1][:60]}" if hit[1] else hit[0]
+                raw_v = _hdr_raw(headers_lower, hit[0], hit[1])   # 증거는 원본 값으로
+                ev = f"{hit[0]}: {raw_v[:60]}" if raw_v else hit[0]
                 out.append({"name": label, "kind": kind, "evidence": ev})
                 break
     return out
@@ -1616,10 +1657,10 @@ def _extract_alert_evidence(rule_id: str, headers_lower: dict, body: str, body_l
             return _clip_evidence(body[idx:idx + len(lit)])
 
     # 3) 헤더 값(존재하는 헤더만; 누락 기반 룰은 여기서 자연히 빈 값)
+    #    증거는 원본 대소문자로 — 사용자가 응답에서 그대로 검색할 수 있어야 한다.
     for key in spec["hdr"]:
-        val = headers_lower.get(key)
-        if val:
-            return _clip_evidence(f"{key}: {val}")
+        if headers_lower.get(key):
+            return _clip_evidence(f"{key}: {_hdr_raw(headers_lower, key)}")
 
     return ""
 
@@ -1651,6 +1692,119 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
     risk_order = {"high": 0, "medium": 1, "low": 2, "informational": 3}
     alerts.sort(key=lambda a: risk_order.get(a["risk"], 9))
     return alerts
+
+
+# ── 사용자 정의 Alert 룰 ────────────────────────────────────────────────────────
+# 브라우저 localStorage 에만 있고 JS 로만 실행돼서, 커스텀 룰이 단일 전송 화면에서만
+# 동작하고 일괄 테스트·리포트에는 전혀 반영되지 않았다(엔진 이원화). 이제 룰을 요청에
+# 실어 보내면 서버가 모든 경로에서 같은 방식으로 평가한다.
+#
+# 룰 스키마(프론트 모달과 동일):
+#   {id, name, risk, confidence, description, solution, enabled,
+#    target: header_key|header_value|body|status, method: contains|not_contains|equals|regex,
+#    value}
+_CUSTOM_RISKS = ("high", "medium", "low", "informational")
+
+
+def _custom_rule_match(rule: dict, headers_lower: dict, body: str,
+                       body_lower: str, status_code: int):
+    """룰 1개 평가 → (매칭여부, 증거문자열). 정규식 오류 등은 미매칭으로 처리."""
+    target = str(rule.get("target") or "")
+    method = str(rule.get("method") or "")
+    raw_val = str(rule.get("value") or "")
+    val = raw_val.lower()
+
+    def _re(pattern, text, flags=re.I):
+        try:
+            return re.search(pattern, text, flags)
+        except re.error:
+            return None
+
+    if target == "header_key":
+        keys = list(headers_lower.keys())
+        if method == "not_contains":
+            return (not any(val in k for k in keys)), ""
+        if method == "contains":
+            hit = next((k for k in keys if val in k), None)
+        elif method == "equals":
+            hit = next((k for k in keys if k == val), None)
+        elif method == "regex":
+            hit = next((k for k in keys if _re(raw_val, k)), None)
+        else:
+            return False, ""
+        return bool(hit), (f"{hit}: {_hdr_raw(headers_lower, hit)}" if hit else "")
+
+    if target == "header_value":
+        pairs = _hdr_raw_items(headers_lower)          # 증거는 원본 값으로
+        if method == "not_contains":
+            return (not any(val in str(v).lower() for _, v in pairs)), ""
+        if method == "contains":
+            hit = next((kv for kv in pairs if val in str(kv[1]).lower()), None)
+        elif method == "equals":
+            hit = next((kv for kv in pairs if str(kv[1]).lower() == val), None)
+        elif method == "regex":
+            hit = next((kv for kv in pairs if _re(raw_val, str(kv[1]))), None)
+        else:
+            return False, ""
+        return bool(hit), (f"{hit[0]}: {hit[1]}" if hit else "")
+
+    if target == "body":
+        if method == "not_contains":
+            return (val not in body_lower), ""
+        if method == "contains":
+            idx = body_lower.find(val)
+            return idx >= 0, (_clip_evidence(body[idx:idx + len(raw_val)]) if idx >= 0 else "")
+        if method == "equals":
+            return body == raw_val, (_clip_evidence(body) if body == raw_val else "")
+        if method == "regex":
+            m = _re(raw_val, body)
+            return bool(m), (_clip_evidence(m.group(0)) if m else "")
+        return False, ""
+
+    if target == "status":
+        sc = str(status_code)
+        if method == "equals":
+            ok = sc == raw_val
+        elif method == "contains":
+            ok = raw_val in sc
+        elif method == "not_contains":
+            return (raw_val not in sc), ""
+        elif method == "regex":
+            ok = bool(_re(raw_val, sc, 0))
+        else:
+            return False, ""
+        return ok, (f"HTTP {sc}" if ok else "")
+
+    return False, ""
+
+
+def run_custom_alert_rules(rules: Optional[list], headers_lower: dict, body: str,
+                           body_lower: str, status_code: int) -> list:
+    """사용자 정의 룰을 평가해 Alert 목록 반환. 잘못된 룰은 조용히 건너뛴다."""
+    out = []
+    for rule in (rules or []):
+        if not isinstance(rule, dict) or rule.get("enabled") is False:
+            continue
+        try:
+            matched, evidence = _custom_rule_match(rule, headers_lower, body,
+                                                   body_lower, status_code)
+        except Exception:
+            continue
+        if not matched:
+            continue
+        risk = str(rule.get("risk") or "informational").lower()
+        out.append({
+            "id": str(rule.get("id") or "custom"),
+            "name": str(rule.get("name") or "사용자 정의 룰"),
+            "risk": risk if risk in _CUSTOM_RISKS else "informational",
+            "confidence": rule.get("confidence"),
+            "description": str(rule.get("description") or ""),
+            "solution": str(rule.get("solution") or ""),
+            "reference": "",
+            "evidence": evidence,
+            "_custom": True,
+        })
+    return out
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1689,32 +1843,11 @@ _FILE_READ_MARKERS_WEAK = [
 # 탐지를 켜기 위한 힌트. 수많은 경로 트래버설 익스플로잇이 'cve'·'sqli' 등으로 들어온다.
 # 힌트는 '콘텐츠 마커 검사를 켤지'만 정하는 게이트다. 실제 성공 판정은 엄격한 파일
 # '내용' 시그니처가 하므로, 힌트를 넉넉하게 잡아도 오탐이 늘지 않는다(인코딩 변형 포함).
-_FILE_READ_HINT = re.compile(
-    r"\.\.[\\/]|%2e|%252e|%c0%ae|"                 # 경로 트래버설(평문/단·이중 인코딩)
-    r"%2f|%5c|%252f|%255c|"                        # 인코딩된 슬래시/백슬래시
-    r"/etc/|etc%2f|/proc/|windows[\\/]|/windows/system32|win\.ini|boot\.ini|"
-    r"passwd|shadow|/hosts\b|access\.log|/environ\b|/cmdline\b|"
-    r"\.git[/%]|\.svn/|\.hg/|\.bzr/|\.env\b|wp-config\.php|web\.config|"  # VCS·설정·시크릿 파일 직접 접근
-    r"\.htaccess|/WEB-INF|id_rsa|\.(?:bak|old|swp|save|orig)\b|\.DS_Store|"
-    r"file://|LOAD_FILE|pg_read_file|xp_cmdshell",
-    re.I,
-)
+# _FILE_READ_HINT → core.classify(위에서 import).
 # 공격 유형 추론 힌트 — 카테고리를 고르지 않은 요청(PoC·붙여넣기 등)에서도 payload·URL·
 # 본문을 보고 어떤 공격인지 추정해, 맥락이 필요한 오라클(SSRF·SQLi·리다이렉트)을 켠다.
 # (증거가 자명한 오라클—명령 출력·파일 내용—은 힌트 없이 전역으로 동작한다.)
-_SSRF_HINT = re.compile(
-    r"169\.254\.169\.254|/latest/meta-data|metadata\.google|metadata\.azure|"
-    r"localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|file://|gopher://|dict://|"
-    r"internal|/computeMetadata", re.I)
-_SQLI_HINT = re.compile(
-    r"\bUNION\b\s+SELECT|\bSELECT\b.+\bFROM\b|SLEEP\s*\(|pg_sleep|benchmark\s*\(|"
-    r"waitfor\s+delay|information_schema|xp_cmdshell|load_file\s*\(|"
-    r"'\s*OR\s*'|\"\s*OR\s*\"|\bOR\b\s+\d+\s*=\s*\d+|\bAND\b\s+\d+\s*=\s*\d+|"
-    r"'--|\"--|--\s|/\*.*\*/", re.I)
-_REDIRECT_HINT = re.compile(
-    r"redirect|url=|next=|returnurl|return_to|dest=|goto=|callback=|//[a-z0-9.-]+\.", re.I)
-# XSS/오픈리다이렉트로 이어지는 위험 URI 스킴(링크 href·Location 에 들어가면 스크립트 실행)
-_DANGEROUS_SCHEME = re.compile(r"(?i)(?:javascript|data|vbscript)\s*:")
+# _SSRF_HINT·_SQLI_HINT·_REDIRECT_HINT·_DANGEROUS_SCHEME → core.classify(위에서 import).
 
 # 명령 실행 출력 마커 (Command Injection)
 _CMD_OUTPUT_MARKERS = [
@@ -1758,6 +1891,9 @@ _SENSITIVE_FILE_PROBES = [
      "\"propertySources\" / \"activeProfiles\""),
 ]
 
+# CVE 항목에 확증 매처가 없을 때의 정직한 서술(공용 시그니처를 들이대지 않는다).
+_CVE_NO_MATCHER = "이 CVE 항목에 확증 매처 없음 — 응답만으로 자동 확증 불가(수동 확인 필요)"
+
 # 카테고리별 '응답에서 검색한 성공 시그니처' 사람용 설명(미확인 증거에 사용).
 _CHECKED_DESC = {
     "lfi":  "root:x:0:0(passwd) · shadow 해시 · BEGIN PRIVATE KEY · win.ini · /proc 환경변수",
@@ -1769,7 +1905,10 @@ _CHECKED_DESC = {
     "xss":  "payload 의 실행 컨텍스트 반사",
     "redirect": "외부 도메인으로의 3xx Location",
     "nosql": "참/거짓 응답 차이 · $where 평가",
-    "cve":  "root:x:0:0 · uid= · 개인키 · 소스/설정 파일 내용",
+    # CVE 는 취약점마다 성공 신호가 전혀 다르다. 공용 파일읽기 시그니처(root:x:0:0 등)로
+    # 검증하는 것은 부정직하므로, 해당 CVE 항목이 들고 있는 매처만 근거로 쓴다(_cve_checked_desc).
+    # 이 문구는 '그 CVE 에 확증 매처가 아예 없는' 경우의 정직한 서술이다.
+    "cve":  _CVE_NO_MATCHER,
     "xmlrpc": "methodResponse · system.multicall · pingback.ping · wp.getUsersBlogs/getUsers · 'Incorrect username or password' · 'accepts POST requests only'",
 }
 _CHECKED_DEFAULT = "root:x:0:0 · uid=0(root) · 개인키 · 에러/메타데이터 시그니처"
@@ -1779,19 +1918,7 @@ def _checked_desc(category: str) -> str:
     return _CHECKED_DESC.get((category or "").lower(), _CHECKED_DEFAULT)
 
 
-# 명령 주입 지표 — 구분자(;|&)만으로는 SQLi(SLEEP·;DROP)·nosql(||)을 오인하므로,
-# '구분자 + 실제 셸 명령' 또는 명령치환($()·백틱)·알려진 지표(dest_host, system() 등)만 인정.
-_CMDI_HINT = re.compile(
-    r"(?:[;&|]|\|\||&&|%0a|%0d)\s*"
-    r"(?:id\b|cat\b|ls\b|dir\b|pwd\b|whoami|uname|sleep\b|ping\b|curl\b|wget\b|nslookup|"
-    r"nc\b|netcat|bash\b|/bin/|/etc/|\bsh\b|cmd\b|powershell|echo\b|type\b|net\s|ipconfig|ifconfig)"
-    r"|\$\([^)]*\)|`[^`]+`|dest_host|\b(?:exec|system|passthru|popen|shell_exec|proc_open)\s*\(", re.I)
-# XSS 강력 지표(스크립트 태그·이벤트 핸들러·위험 스킴). XSS payload 는 ';' 를 흔히 포함해
-# cmdi 로 오분류되기 쉬우므로, 이 지표가 있으면 cmdi 보다 우선한다.
-_XSS_HINT = re.compile(
-    r"<script|<img\b|<svg|<iframe|<body|<details|<marquee|"
-    r"on(?:error|load|mouseover|focus|click|toggle|animationstart)\s*=|"
-    r"alert\s*\(|prompt\s*\(|confirm\s*\(|document\.cookie|javascript:|data:text/html|vbscript:", re.I)
+# _CMDI_HINT·_XSS_HINT → core.classify(위에서 import).
 
 
 # 공격유형 → '검색한 성공 시그니처' 서술
@@ -1806,27 +1933,13 @@ _SIG_DESC = {
 }
 
 
-def infer_attack_type(probe: str, category: str) -> str:
-    """payload+URL+본문으로 공격 유형을 추론. payload 가 특정 유형을 명확히 가리키면
-    카테고리 라벨보다 그걸 신뢰한다(라벨이 틀리거나 뭉뚱그려진 cve 인 경우 오분류 방지).
-    예: category=sqli 인데 payload=/proc/self/environ → 파일읽기(lfi)로 인식."""
-    probe = probe or ""
-    if _FILE_READ_HINT.search(probe):
-        return "lfi"
-    # XSS 강력 마커는 cmdi(';' 등)보다 우선 — XSS payload 의 ';' 오분류 방지
-    if _XSS_HINT.search(probe):
-        return "xss"
-    if _CMDI_HINT.search(probe):
-        return "cmdi"
-    if re.search(r"7\s*\*\s*7|\{\{|\$\{|#\{", probe):
-        return "ssti"
-    if _SSRF_HINT.search(probe):
-        return "ssrf"
-    if _SQLI_HINT.search(probe):
-        return "sqli"
-    if "xmlrpc" in probe.lower() or "<methodcall" in probe.lower():
-        return "xmlrpc"
-    return (category or "").lower()
+def infer_attack_type(probe: str, category: str = "", headers: Optional[dict] = None) -> str:
+    """payload+URL+본문(+요청 헤더)으로 공격 유형을 추론 — core.classify 에 위임.
+
+    payload 가 특정 유형을 명확히 가리키면 카테고리 라벨보다 그걸 신뢰한다(라벨이 틀리거나
+    뭉뚱그려진 cve 인 경우 오분류 방지). headers 를 주면 헤더에 실린 공격(Log4Shell·
+    Shellshock 등)도 분류한다 — SOC 패킷 붙여넣기에서 헤더 공격이 미분류되던 문제 해결."""
+    return _classify.infer_attack_type(probe or "", category, headers)
 
 
 def _checked_desc_for(probe: str, category: str) -> str:
@@ -1854,6 +1967,11 @@ def _checked_desc_for(probe: str, category: str) -> str:
         parts.append(_SIG_DESC["ssrf"])
     if parts:
         return " · ".join(parts)
+    # CVE 는 공용 시그니처가 없다 — 경로에 맞는 CVE 항목의 '자기 매처'를 우선 서술한다.
+    if cat == "cve":
+        own = _cve_checked_desc(probe)
+        if own:
+            return own
     # payload 에 유형 힌트가 전혀 없을 때만 카테고리 기반 설명
     return _SIG_DESC.get(cat, _checked_desc(cat))
 
@@ -1992,51 +2110,97 @@ def _word_hits(text: str, words: list, cond: str):
     return ok, hits
 
 
+def _re_search(pat: str, text: str):
+    """임포트된 커뮤니티 정규식은 파이썬에서 컴파일 실패할 수 있으므로 안전하게 감싼다."""
+    try:
+        return re.search(pat, text, re.I)
+    except re.error:
+        return None
+
+
+def _eval_matchers(sig: dict, body: str, hdr_blob: str, status_code: int):
+    """시그니처의 매처 집합을 평가 → (matched, evidence_list).
+
+    nuclei 매처 문법(status·word·regex + condition/matchers-condition)을 그대로 해석한다.
+    exposure 시그니처와 CVE 항목이 같은 엔진을 쓰도록 분리했다.
+    """
+    matchers = sig.get("matchers") or []
+    if not matchers:
+        return False, []
+    mcond = str(sig.get("matchers_condition") or "and").lower()
+    results, ev, unsupported = [], [], False
+    for m in matchers:
+        t = (m.get("type") or "").lower()
+        if t == "status":
+            results.append(status_code in (m.get("status") or []))
+        elif t == "word":
+            part = body if m.get("part", "body") != "header" else hdr_blob
+            ok, hits = _word_hits(part, m.get("words") or [], m.get("condition", "or"))
+            results.append(ok)
+            if ok:
+                ev += hits
+        elif t == "regex":
+            part = body if m.get("part", "body") != "header" else hdr_blob
+            pats = m.get("regex") or []
+            found = [mm for mm in (_re_search(pt, part) for pt in pats) if mm]
+            ok = (len(found) == len(pats)) if m.get("condition", "or") == "and" else bool(found)
+            results.append(ok)
+            if ok:
+                ev += [_clip_evidence(mm.group(0), 80) for mm in found[:3]]
+        else:
+            unsupported = True   # dsl 등 미지원 매처
+    # 'and' 조건에서 미지원 매처가 있으면 제약을 무시하게 되어 오탐 위험 → 평가 포기
+    if unsupported and mcond == "and":
+        return False, []
+    if not results:
+        return False, []
+    return (all(results) if mcond == "and" else any(results)), ev
+
+
+def _matchers_desc(sig: dict) -> str:
+    """매처 집합을 사람이 읽는 '무엇을 확인했는가' 서술로 변환."""
+    parts = []
+    for m in sig.get("matchers") or []:
+        t = (m.get("type") or "").lower()
+        if t == "word":
+            ws = [str(w) for w in (m.get("words") or [])][:4]
+            if ws:
+                parts.append("본문/헤더 문자열(" + " , ".join(ws) + ")")
+        elif t == "regex":
+            rs = [str(r) for r in (m.get("regex") or [])][:2]
+            if rs:
+                parts.append("정규식(" + " , ".join(rs) + ")")
+        elif t == "status":
+            st = [str(x) for x in (m.get("status") or [])]
+            if st:
+                parts.append("상태코드(" + "/".join(st) + ")")
+    return " · ".join(parts)
+
+
+def _hdr_blob(headers_lower: Optional[dict]) -> str:
+    """매처가 훑을 헤더 텍스트. 값은 원본 — word 매칭은 양쪽 소문자, regex 는 re.I 라
+    매칭 결과는 같고, 뽑히는 증거만 원문이 된다."""
+    return " ".join(f"{k}: {v}" for k, v in _hdr_raw_items(headers_lower))
+
+
 def _detect_exposure_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int) -> list:
     """임포트된 nuclei exposure 매처로 노출 확증. (경로가 시그니처에 맞을 때만 평가)"""
     out, seen = [], set()
     body = body or ""
-    hdr_blob = " ".join(f"{k}: {v}" for k, v in (headers_lower or {}).items())
+    hdr_blob = _hdr_blob(headers_lower)
     pl = (probe or "").lower()
     for sig in _load_exposure_sigs():
         pcs = sig.get("path_contains") or []
         if pcs and not any(str(pc).lower() in pl for pc in pcs):
             continue
-        matchers = sig.get("matchers") or []
-        if not matchers:
-            continue
-        mcond = sig.get("matchers_condition", "and")
-        results, ev, unsupported = [], [], False
-        for m in matchers:
-            t = m.get("type")
-            if t == "status":
-                results.append(status_code in (m.get("status") or []))
-            elif t == "word":
-                part = body if m.get("part", "body") != "header" else hdr_blob
-                ok, hits = _word_hits(part, m.get("words") or [], m.get("condition", "or"))
-                results.append(ok)
-                if ok:
-                    ev += hits
-            elif t == "regex":
-                part = body if m.get("part", "body") != "header" else hdr_blob
-                pats = m.get("regex") or []
-                matched = [p for p in pats if re.search(p, part, re.I)]
-                results.append((len(matched) == len(pats)) if m.get("condition", "or") == "and" else bool(matched))
-            else:
-                unsupported = True   # dsl 등 미지원 매처
-        # 'and' 조건에서 미지원 매처가 있으면 제약을 무시하게 되어 오탐 위험 → 스킵
-        if unsupported and mcond == "and":
-            continue
-        if not results:
-            continue
-        matched = all(results) if mcond == "and" else any(results)
+        matched, ev = _eval_matchers(sig, body, hdr_blob, status_code)
         if not matched:
             continue
         sid = sig.get("id", "")
         if sid in seen:
             continue
         seen.add(sid)
-        words_checked = "; ".join(str(w) for m in matchers if m.get("type") == "word"
+        words_checked = "; ".join(str(w) for m in (sig.get("matchers") or []) if m.get("type") == "word"
                                   for w in (m.get("words") or [])) or "(status/regex)"
         out.append({
             "name": f"노출 확인 — {sig.get('name', sid)}",
@@ -2046,6 +2210,115 @@ def _detect_exposure_sig(probe: str, body: str, headers_lower: Optional[dict], s
             "evidence": (", ".join(ev[:6]) or f"HTTP {status_code}")[:180],
         })
     return out
+
+
+# ── CVE 항목의 '자기 매처'로 확증 ──────────────────────────────────
+# CVE 는 취약점마다 성공 신호가 전혀 달라 공용 시그니처(파일읽기 root:x:0:0 등)로는 검증할 수
+# 없다. import_nuclei 가 템플릿의 matcher(status/word/regex)를 CVE 항목에 함께 담으므로,
+# 여기서는 '경로 매칭 + 그 CVE 자신의 매처' 로만 확증한다(exposure 와 같은 엔진 재사용).
+_CVE_SIGS = None
+_PAYLOADS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "payloads.json")
+
+
+def _cve_entry_to_sig(entry: dict) -> Optional[dict]:
+    """payloads.json 의 cve 항목 → 경로+매처 시그니처. 확증 근거가 약하면 None."""
+    matchers = entry.get("matchers") or []
+    # 상태코드만 있는 매처는 '200 = 성공'이 되어 오탐 → 내용 매처(word/regex)가 있어야 확증에 쓴다.
+    if not any((m.get("type") or "").lower() in ("word", "regex") for m in matchers):
+        return None
+    pv = str(entry.get("payload") or "")
+    pcs = []
+    if pv.startswith("/"):
+        seg = pv.split("?")[0]
+        if len(seg) >= 4:
+            pcs.append(seg)
+    if not pcs:
+        pcs = [str(x) for x in ((entry.get("applies_to") or {}).get("path_contains") or [])
+               if len(str(x)) >= 4]
+    if not pcs:
+        return None
+    return {
+        "id": entry.get("cve") or entry.get("id") or "",
+        "name": entry.get("name") or entry.get("cve") or entry.get("id") or "",
+        "cve": entry.get("cve") or "",
+        "path_contains": sorted(set(pcs))[:4],
+        "matchers": matchers,
+        "matchers_condition": entry.get("matchers_condition", "and"),
+    }
+
+
+def _load_cve_sigs() -> list:
+    global _CVE_SIGS
+    if _CVE_SIGS is not None:
+        return _CVE_SIGS
+    sigs = []
+    try:
+        with open(_PAYLOADS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        cat = next((c for c in data.get("categories", []) if c.get("id") == "cve"), None)
+        for p in (cat or {}).get("payloads", []):
+            sig = _cve_entry_to_sig(p)
+            if sig:
+                sigs.append(sig)
+    except Exception:
+        sigs = []
+    _CVE_SIGS = sigs
+    return _CVE_SIGS
+
+
+def _cve_sigs_for(probe: str) -> list:
+    """요청 경로에 해당하는 CVE 시그니처(자기 매처를 가진 것)들."""
+    pl = (probe or "").lower()
+    return [sig for sig in _load_cve_sigs()
+            if any(str(pc).lower() in pl for pc in (sig.get("path_contains") or []))]
+
+
+def _cve_checked_desc(probe: str) -> str:
+    """'이 CVE 프로브에서 무엇을 확인했는가' — 경로에 맞는 CVE 항목의 매처만 서술."""
+    descs = []
+    for sig in _cve_sigs_for(probe)[:3]:
+        d = _matchers_desc(sig)
+        if d:
+            descs.append(f"{sig.get('id') or sig.get('name')}: {d}")
+    return " | ".join(descs)
+
+
+def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int) -> list:
+    """CVE 항목의 자기 매처로 익스플로잇 성공을 확증(경로가 맞을 때만 평가)."""
+    out, seen = [], set()
+    hdr_blob = _hdr_blob(headers_lower)
+    for sig in _cve_sigs_for(probe):
+        matched, ev = _eval_matchers(sig, body or "", hdr_blob, status_code)
+        if not matched:
+            continue
+        sid = sig.get("id") or sig.get("name")
+        if sid in seen:
+            continue
+        seen.add(sid)
+        out.append({
+            "name": f"CVE 확증 — {sid}",
+            "verdict": "성공", "confidence": 90,
+            "why": f"{sig.get('name')} 의 확증 매처가 응답에 일치 → 이 대상에서 해당 CVE 취약점 확인",
+            "checked": _matchers_desc(sig),
+            "evidence": (", ".join(str(e) for e in ev[:6]) or f"HTTP {status_code}")[:180],
+        })
+    return out
+
+
+def _cve_nonapplicable_reason(status_code: int, body: str, headers_lower: Optional[dict]) -> str:
+    """CVE 프로브 응답이 '익스플로잇 결과를 담을 수 없는 형태'인지 → 사유 문자열(아니면 '')."""
+    if status_code in (301, 302, 303, 307, 308):
+        loc = _hdr_raw(headers_lower, "location")
+        return (f"HTTP {status_code} 리다이렉트" + (f" → {loc[:80]}" if loc else "")
+                + " — 취약 엔드포인트가 응답하지 않고 다른 곳으로 돌림")
+    if status_code in (401, 403):
+        return f"HTTP {status_code} 인증/접근 거부 — 취약 엔드포인트에 도달하지 못함"
+    if status_code in (404, 410):
+        return f"HTTP {status_code} — 해당 경로/컴포넌트가 대상에 존재하지 않음"
+    # 5xx 는 익스플로잇이 서버를 흔든 신호일 수 있다 → 빈 본문이어도 "미해당"으로 단정하지 않는다.
+    if status_code < 500 and not (body or "").strip():
+        return f"HTTP {status_code} · 빈 응답 본문 — 익스플로잇 결과가 담길 내용 자체가 없음"
+    return ""
 
 
 def _detect_sensitive_file(payload: Optional[str], body: str,
@@ -2511,11 +2784,19 @@ _VERIFY_META = [
     ("시간 지연 일치",            ("타이밍",                "응답 시간 vs 요청 지연")),
     ("시간 지연 없음",            ("타이밍",                "응답 시간 vs 요청 지연")),
     ("베이스라인 대비 변화",       ("차분(baseline)",        "응답 상태·크기 vs baseline")),
+    ("차분 판정(대조군 비교)",     ("차분(대조군)",           "응답 상태·본문 vs 대조군")),
+    ("JWT alg=none",             ("토큰 구조 분석(+대조군)",  "요청 JWT 헤더")),
+    ("CORS 오설정",              ("응답 헤더 시그니처",       "응답 ACAO/ACAC vs 요청 Origin")),
+    ("GraphQL introspection",    ("응답 시그니처",           "응답 본문(스키마)")),
+    ("CRLF 헤더 인젝션",         ("주입 헤더 vs 응답 헤더",   "응답 헤더")),
+    ("인젝션 에러 노출",         ("응답 에러 시그니처",       "응답 본문(파서 에러)")),
     ("XML-RPC 인증 메서드 노출",   ("콘텐츠 시그니처",         "응답 본문(methodResponse)")),
     ("XML-RPC 위험 메서드",       ("콘텐츠 시그니처",         "응답 본문(methodResponse)")),
     ("XML-RPC 엔드포인트 활성",    ("응답 형태 확인",          "응답 본문(methodResponse)")),
     ("XML-RPC 취약 신호 미검출",   ("콘텐츠 시그니처(미검출)",  "응답 본문")),
     ("오픈 리다이렉트 취약 신호 미검출", ("상태/헤더 오라클(미검출)", "응답 헤더 Location + 본문")),
+    ("CVE 확증 —",               ("CVE 매처(nuclei)",       "응답 상태/본문/헤더")),
+    ("CVE 프로브 — 취약 징후 없음",  ("CVE 매처(미검출)+응답 형태", "응답 상태/본문")),
     ("취약 신호 미검출",           ("시그니처(미검출)",        "응답")),
     ("PUT 메소드",               ("상태/헤더 오라클",        "응답 상태코드")),
     ("DELETE 메소드",            ("상태/헤더 오라클",        "응답 상태코드")),
@@ -2659,8 +2940,82 @@ def _best_reflection(body, payload, url, req_body):
     return best
 
 
+def _is_external_location(loc: str, url: Optional[str]) -> bool:
+    """Location 이 요청 호스트와 다른 곳(=외부)을 가리키는지. 요청 URL 을 모르면 외부로 본다."""
+    if not url:
+        return True
+    try:
+        req_host = urlsplit(url).netloc.lower().split("@")[-1]
+        loc_host = urlsplit(loc if "//" in loc else "//" + loc).netloc.lower().split("@")[-1]
+    except Exception:
+        return True
+    if not req_host or not loc_host:
+        return True
+    # 포트 표기 차이(:80/:443)는 같은 호스트로 본다
+    strip = lambda h: re.sub(r":(?:80|443)$", "", h)
+    return strip(loc_host) != strip(req_host)
+
+
+def _note_body_truncated(findings: list, shown: int, full: int) -> None:
+    """본문이 잘린 상태에서 나온 '미검출' 계열 판정에 그 사실을 붙인다.
+
+    시그니처가 응답에 '없다'는 판정은 응답 전체를 봤을 때만 성립한다. 앞부분만 보고
+    내린 '안전/미확인' 을 근거 없이 단정처럼 보여주지 않기 위해 문구로 명시한다.
+    """
+    if not full or full <= shown:
+        return
+    note = (f"⚠ 응답 본문이 잘렸습니다 — 전체 {full:,}자 중 앞 {shown:,}자만 검사. "
+            f"잘린 뒷부분에 신호가 있을 수 있어 '미검출'을 단정으로 보면 안 됩니다.")
+    for f in findings:
+        if f.get("verdict") not in ("안전", "미확인"):
+            continue
+        f["why"] = (f.get("why") or "") + " " + note
+        f["evidence"] = (f.get("evidence") or "") + f" · 본문 절단({shown:,}/{full:,}자)"
+        f["truncated_scope"] = True
+
+
+def _first_redirect_hop(status_code, headers_lower, url, redirect_chain):
+    """리다이렉트 판정에 쓸 "우리 요청에 대한 첫 3xx 응답" → (status, location, 그 홉의 요청 URL).
+
+    - 리다이렉트를 따라가지 않았으면 현재 응답 자체가 첫 홉이다.
+    - 따라갔으면 최종 응답엔 Location 이 없으므로 redirect_chain[0] 을 쓴다.
+      2번째 이후 홉은 대상 사이트 내부 사정(사이트→CDN 등)이라 오픈 리다이렉트 근거가 아니다.
+    없으면 (0, "", "") 를 돌려 판정을 건너뛴다.
+    """
+    if redirect_chain:
+        hop = redirect_chain[0] or {}
+        try:
+            st = int(hop.get("status_code") or 0)
+        except (TypeError, ValueError):
+            st = 0
+        return st, str(hop.get("location") or ""), str(hop.get("url") or url or "")
+    if status_code in (301, 302, 303, 307, 308):
+        # Location 은 원본 대소문자로 — 경로·토큰이 소문자로 뭉개지면 증거가 못 쓰게 된다.
+        return status_code, _hdr_raw(headers_lower, "location"), url or ""
+    return 0, "", ""
+
+
+def _redirect_hint_probe(payload, url, req_body) -> str:
+    r"""리다이렉트 힌트 판정용 프로브 — 대상 URL 의 scheme://host 는 뺀다.
+
+    _REDIRECT_HINT 의 `//[a-z0-9.-]+\.` 는 주입값의 `//evil.com` 을 잡으려는 것인데,
+    프로브에 대상 URL 자체가 섞여 있으면 점 있는 호스트면 무조건 매칭돼 평범한
+    사이트→CDN 리다이렉트까지 오픈 리다이렉트로 오탐한다. 경로·쿼리·본문·payload 만 본다.
+    """
+    try:
+        u = urlsplit(url or "")
+        url_part = f"{u.path} {u.query}"
+    except Exception:
+        url_part = str(url or "")
+    raw = f"{payload or ''} {url_part} {req_body or ''}"
+    try:
+        return raw + " " + unquote(unquote(raw))
+    except Exception:
+        return raw
+
+
 def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline,
-                    url=None, req_body=None, method=None):
+                    url=None, req_body=None, method=None, redirect_chain=None, req_headers=None):
     """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환.
 
     payload/카테고리에만 의존하지 않고, 요청 전체(payload+URL+본문)를 프로브로 삼아
@@ -2676,7 +3031,12 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         probe = _raw_probe + " " + unquote(unquote(_raw_probe))
     except Exception:
         probe = _raw_probe
-    file_probe = probe
+    # '요청' 헤더에 실린 공격(Log4Shell·헤더 트래버설 등)도 파일-내용 게이트를 열도록 헤더
+    # 텍스트를 덧붙인다. 파일읽기 판정은 엄격한 '응답 내용' 시그니처라 프로브를 넓혀도 허위 성공은 없다.
+    _hdr_text = _classify._headers_text(req_headers or {})
+    file_probe = probe + (' ' + _hdr_text if _hdr_text else '')
+    # 리다이렉트 힌트는 대상 URL 의 호스트를 제외하고 판정(오픈 리다이렉트 오탐 방지)
+    _redirect_probe = _redirect_hint_probe(payload, url, req_body)
 
     # ⓪ HTTP 메소드 오라클 — PUT 업로드·DELETE 삭제·WebDAV·TRACE (2xx 자체가 성공 신호)
     findings.extend(_method_findings(method, status_code, url, body))
@@ -2742,10 +3102,9 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             findings.append({"name": "내부/메타데이터 응답", "verdict": "성공", "confidence": 85,
                              "why": hs[0], "evidence": hs[1]})
 
-    # SSTI — 요청에 7*7 표현식이 있고 결과 49 가 나오면(원문 아님) 서버 평가 성공. 카테고리 무관.
-    if re.search(r"7\s*\*\s*7|7\*'7'", probe) and "49" in (body or "") and "7*7" not in (body or ""):
-        findings.append({"name": "템플릿 평가됨(7*7=49)", "verdict": "성공", "confidence": 90,
-                         "why": "표현식이 서버에서 계산됨 → SSTI", "evidence": "응답에 '49' 포함"})
+    # SSTI/EL/OGNL 표현식 평가는 canary 탐지기(core.detectors.CanaryEvalDetector)가 판정한다.
+    #   7*7=49 하드코딩을 일반화 — 임의 피연산자의 '곱'을 확인해 우연 일치(‘49’ 흔함)를 없앴다.
+    #   (아래 ④ run_registered 에서 tier-1 로 실행됨)
 
     # SQL/DB 에러 노출 — SQLi 처럼 보이는 요청일 때 error-based 성공 신호로 본다(카테고리 무관).
     if category == "sqli" or _SQLI_HINT.search(probe):
@@ -2766,16 +3125,25 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # 외부 리다이렉트 — 3xx Location 이 외부로 나가면 오픈 리다이렉트 성공. 리다이렉트처럼
     # 보이는 요청일 때만(정상 SSO 리다이렉트 오탐 억제).
-    if category == "redirect" or _REDIRECT_HINT.search(probe) or _DANGEROUS_SCHEME.search(probe):
-        loc = headers_lower.get("location", "")
-        if status_code in (301, 302, 303, 307, 308) and re.search(r"^https?://|^//", loc):
+    #
+    # 판정 대상은 "우리 요청에 대한 첫 응답"이다. 클라이언트가 리다이렉트를 따라갔으면
+    # 최종 응답엔 Location 이 없으므로(그래서 예전엔 오픈 리다이렉트가 영원히 미검출),
+    # 호출부가 넘겨준 redirect_chain 의 첫 홉으로 판정한다.
+    hop_status, hop_loc, hop_url = _first_redirect_hop(status_code, headers_lower, url, redirect_chain)
+    if category == "redirect" or _REDIRECT_HINT.search(_redirect_probe) or _DANGEROUS_SCHEME.search(_redirect_probe):
+        _via = "" if not redirect_chain else " (따라간 리다이렉트 체인의 첫 홉)"
+        # '외부' 여야 오픈 리다이렉트다. 같은 호스트로의 절대 URL 리다이렉트(로그인 페이지 이동 등)는
+        # 성공이 아니므로 Location 호스트와 그 홉의 요청 호스트를 비교한다.
+        if (hop_status and re.search(r"^https?://|^//", hop_loc, re.I)
+                and _is_external_location(hop_loc, hop_url)):
             findings.append({"name": "외부 리다이렉트", "verdict": "성공", "confidence": 80,
-                             "why": f"Location 헤더가 외부로 이동: {loc[:80]}", "evidence": loc[:120]})
+                             "why": f"HTTP {hop_status} Location 헤더가 외부로 이동{_via}: {hop_loc[:80]}",
+                             "evidence": f"HTTP {hop_status} Location: {hop_loc[:120]}"})
         # 위험 스킴 리다이렉트 — Location 이 javascript:/data:/vbscript: 로 나가면 XSS 로 이어짐
-        elif status_code in (301, 302, 303, 307, 308) and _DANGEROUS_SCHEME.match(loc.strip()):
+        elif hop_status and _DANGEROUS_SCHEME.match(hop_loc.strip()):
             findings.append({"name": "위험 스킴 리다이렉트(XSS)", "verdict": "성공", "confidence": 85,
-                             "why": f"Location 헤더가 위험 스킴으로 이동 → 클릭 시 스크립트 실행(XSS): {loc[:80]}",
-                             "evidence": loc[:120]})
+                             "why": f"HTTP {hop_status} Location 헤더가 위험 스킴으로 이동{_via} → 클릭 시 스크립트 실행(XSS): {hop_loc[:80]}",
+                             "evidence": f"HTTP {hop_status} Location: {hop_loc[:120]}"})
 
     # ②-c 민감 파일 노출 — 상태코드가 아니라 '실제 파일 내용'으로 노출/미노출을 판정.
     #     (카테고리 무관: .git/config·.env 등은 cve/path 프로브로 들어온다)
@@ -2786,6 +3154,10 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                              "why": f"요청한 {sf['targeted']} 의 실제 내용이 응답에 노출됨 → 소스/시크릿 유출",
                              "checked": sf.get("checked", ""),
                              "evidence": sf["evidence"]})
+    elif sf and status_code in (301, 302, 303, 307, 308):
+        # 3xx 는 본문에 파일이 없는 게 당연 → '미노출' 이라 단정하지 않는다. Location 을 보는
+        # FileScanRedirectDetector(tier-1)가 파일 존재/보호/추적필요를 판정한다(위음성 방지).
+        pass
     elif sf:
         findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
                          "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
@@ -2796,6 +3168,10 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # ②-c2 nuclei exposure 매처 — 임포트된 커뮤니티 시그니처로 노출 확증(경로 매칭 시에만 평가)
     findings.extend(_detect_exposure_sig(file_probe, body or "", headers_lower, status_code))
+
+    # ②-c2b CVE 자기 매처 확증 — CVE 마다 성공 신호가 달라 공용 시그니처로는 검증 불가.
+    #       import_nuclei 가 담아둔 그 CVE 자신의 matcher(status/word/regex)로만 확증한다.
+    findings.extend(_detect_cve_sig(file_probe, body or "", headers_lower, status_code))
 
     # ②-c3 robots.txt — 노출된 경로(관리·백업·API 등) 분석. recon 단서.
     rb = _detect_robots(body or "", status_code, file_probe)
@@ -2865,6 +3241,39 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                 "evidence": f"확인 시그니처 [{checked}] → 모두 미검출 (HTTP {status_code} · {len(body or '')}B)",
             })
 
+    # ④ 등록된 탐지기(tier-1 시그니처/구조/canary + tier-2 차분) — core.detectors 레지스트리.
+    #    파일스캔 3xx·인증우회·불리언·JWT·CORS·역직렬화 등을 판정한다. cve 미해당(②-f)보다 먼저
+    #    돌려, 이 탐지기들의 성공/의심 신호가 '미해당(안전)'에 가려지지 않게 한다.
+    _dctx = _detectors.DetectionContext(
+        status_code=status_code, body=body or "", body_lower=body_lower,
+        response_time=response_time, payload=payload, category=category,
+        attack_type=infer_attack_type(probe, category), url=url, req_body=req_body,
+        method=method, headers_lower=headers_lower, req_headers=req_headers,
+        baseline=baseline, probe=probe)
+    findings.extend(_detectors.run_registered(_dctx))
+
+    # ②-f CVE 프로브 '미해당' 판정 — CVE 는 자기 매처로만 확증하므로, 매처가 맞지 않았고
+    #     응답 자체가 익스플로잇 결과를 담을 수 없는 형태(3xx 리다이렉트·401/403·404·빈 본문)면
+    #     '이 대상엔 해당 없음' 으로 정직하게 판정한다. (예전에는 무관한 파일읽기 시그니처로
+    #      '미확인 + 무관한 확인 시그니처' 를 붙여 오해를 만들었다.)
+    #     payload 가 다른 유형(트래버설 등)을 명확히 가리키면 그 유형 판정을 유지한다.
+    cve_non_applicable = False
+    if (category or "").lower() == "cve" and _classify.classify(
+            payload=payload, url=url, req_body=req_body, category=category).primary == "cve" \
+            and not any(f["verdict"] in ("성공", "의심") for f in findings):
+        _reason = _cve_nonapplicable_reason(status_code, body, headers_lower)
+        if _reason:
+            _cchecked = _cve_checked_desc(file_probe) or _CVE_NO_MATCHER
+            findings.append({
+                "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
+                "why": f"{_reason}. 해당 CVE 의 확증 매처가 매칭되지 않았고 응답도 익스플로잇 결과를 "
+                       "담을 수 없는 형태 → 이 대상에는 해당 없음(미해당). "
+                       "(컴포넌트/버전이 다르거나 취약 경로가 없는 경우입니다)",
+                "checked": _cchecked,
+                "evidence": f"{_reason} (HTTP {status_code} · {len(body or '')}B)",
+            })
+            cve_non_applicable = True
+
     # ③ 타이밍 (time-based)
     n = _extract_sleep_seconds(payload)
     if n:
@@ -2877,20 +3286,6 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                              "why": f"{n}s 지연 payload지만 응답 {response_time:.0f}ms — 미영향/필터",
                              "evidence": f"{response_time:.0f}ms"})
 
-    # ④ 베이스라인 Diff
-    if baseline:
-        b_status = baseline.get("status_code")
-        b_body = baseline.get("body") or ""
-        dl = len(body or "") - len(b_body)
-        changed = []
-        if b_status is not None and b_status != status_code:
-            changed.append(f"상태 {b_status}→{status_code}")
-        if abs(dl) >= 32:
-            changed.append(f"본문 {'+' if dl > 0 else ''}{dl}B")
-        if changed:
-            findings.append({"name": "베이스라인 대비 변화", "verdict": "미확정", "confidence": 55,
-                             "why": "정상 대비 응답이 달라짐 — boolean/인증우회 판단 근거: " + ", ".join(changed),
-                             "evidence": ", ".join(changed)})
 
     # ⑤ 차단 신호
     blocked = status_code in (403, 406, 429, 503) or _body_signals_block(status_code, body, body_lower)
@@ -2900,6 +3295,10 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     if success:
         outcome = "success"
         conf = max(f["confidence"] for f in success)
+    elif cve_non_applicable:
+        # 401/403 도 '차단' 이 아니라 'CVE 미해당' 이 더 정확한 서술이라 차단보다 우선한다.
+        outcome = "safe"
+        conf = max((f["confidence"] for f in findings if f["verdict"] == "안전"), default=75)
     elif blocked:
         outcome = "blocked"
         conf = 70
@@ -2910,6 +3309,11 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             why += " (정상 파라미터로 baseline 비교 시 payload 특정 차단인지 구분 가능)"
         findings.append({"name": "차단됨", "verdict": "차단", "confidence": 70,
                          "why": why, "evidence": f"HTTP {status_code}"})
+    elif any(f["verdict"] == "의심" for f in findings):
+        # tier-2 차분/이상 신호 — 단일 응답 시그니처론 못 봤지만 대조군 대비 유의미한 차이가
+        # 있음. '성공(확증)'도 '판정 불가(inconclusive)'도 아닌 중간 등급 — 추가 확인 대상.
+        outcome = "suspicious"
+        conf = max((f["confidence"] for f in findings if f["verdict"] == "의심"), default=60)
     elif any(f["verdict"] == "안전" for f in findings) and \
             not any(f["verdict"] in ("미확정", "미확인") for f in findings):
         # 시그니처 기반 검사가 '미노출/영향 없음'을 정의적으로 확인(예: 404 파일 미노출) →
@@ -2943,6 +3347,7 @@ _DET_PRIORITY = {
     "success":      "공격 성공 신호 확인 — 취약점을 재현·검증하고 패치를 우선 적용",
     "safe":         "이 검사 한정 영향 없음 — 다른 파라미터/벡터로 범위를 넓혀 점검",
     "blocked":      "차단 확인 — 정상 파라미터로 baseline 비교해 '경로 자체 거부'인지 'payload 차단'인지 구분",
+    "suspicious":   "의심 신호(대조군 대비 차이) — 확증 스캔으로 재현하거나 대조군을 넓혀 확인",
     "inconclusive": "단일 응답으로 판정 불가 — 확증 스캔(대조군 비교)·baseline·수동 확인 수행",
 }
 
@@ -2967,6 +3372,10 @@ def _deterministic_narrative(result: dict) -> dict:
             summary = (safe[0].get("name") if safe else "취약 신호 미검출 — 영향 없음(이 검사 한정)")
         elif outcome == "blocked":
             summary = "요청이 차단됨 — WAF/필터 또는 경로 접근제한"
+        elif outcome == "suspicious":
+            _sus = [f for f in findings if f.get("verdict") == "의심"]
+            summary = ("의심 신호 — " + (_sus[0].get("name", "") if _sus else "대조군 대비 차이") +
+                       " (확증 필요)")
         else:
             summary = "자동 판정 불가 — 수동 확인 필요(단일 응답 증거 없음)"
 
@@ -3008,11 +3417,25 @@ def analyze_response(
     url: Optional[str] = None,
     req_body: Optional[str] = None,
     method: Optional[str] = None,
+    redirect_chain: Optional[list] = None,
+    body_truncated: bool = False,
+    full_body_len: Optional[int] = None,
+    custom_alert_rules: Optional[list] = None,
+    req_headers: Optional[dict] = None,   # 요청 헤더 — 헤더에 실린 공격(Log4Shell 등) 분류용
 ) -> dict:
     """HTTP 응답을 분석하여 보안 판정 결과 반환.
 
     url: 요청 URL(경로+쿼리). payload 를 고르지 않고 주소만으로 민감 파일을
          직접 GET 한 경우(예: /public/.git/config)도 탐지하기 위해 함께 검사한다.
+    redirect_chain: 클라이언트가 따라간 리다이렉트 홉 목록
+         [{status_code, location, url}, …] (따라가지 않았으면 None/[]).
+         따라간 경우 최종 응답엔 Location 이 없어 오픈 리다이렉트를 판정할 수 없으므로,
+         첫 홉을 여기로 넘겨야 한다.
+    body_truncated / full_body_len: body 가 상한으로 잘렸는지와 원본 길이.
+         잘린 채로 낸 '미검출(안전/미확인)' 판정에 그 사실을 명시하기 위함
+         — 앞부분만 보고 '없다'고 단정하면 위음성을 안전으로 보고하게 된다.
+    custom_alert_rules: 사용자 정의 Alert 룰. 예전엔 브라우저에서만 돌아 단일 전송
+         화면에만 반영됐다 — 여기서 평가해 일괄 테스트·리포트에도 똑같이 적용한다.
     """
 
     result = {
@@ -3032,11 +3455,15 @@ def analyze_response(
         "attack_outcome": None,  # success | blocked | inconclusive
         "reflection": None,
         "spa_shell": None,     # SPA 껍데기면 {framework, visible_len}
+        "body_truncated": False,   # 상한으로 본문이 잘렸는지(‘미검출’ 판정의 신뢰 범위)
+        "body_len_seen": 0,        # 실제로 검사한 길이
+        "body_len_full": 0,        # 원본 길이
     }
 
     body = body or ""
     body_lower = body.lower()
-    headers_lower = {k.lower(): v.lower() for k, v in headers.items()}
+    # 매칭은 소문자, 증거 표시는 원본 — HeaderView 가 둘 다 들고 있다.
+    headers_lower = HeaderView(headers)
 
     # 1. 상태코드 분석
     if status_code in [403, 406, 429, 503]:
@@ -3104,8 +3531,12 @@ def analyze_response(
     if len(body) < 50 and status_code == 200:
         result["response_anomalies"].append("비정상적으로 짧은 200 응답")
 
-    # 8. ZAP 스타일 Alert 실행
+    # 8. ZAP 스타일 Alert 실행 (+ 사용자 정의 룰 — 모든 경로에서 같은 엔진으로)
     result["alerts"] = run_alert_rules(headers_lower, body, body_lower, status_code)
+    result["alerts"] += run_custom_alert_rules(custom_alert_rules, headers_lower, body,
+                                               body_lower, status_code)
+    _risk_order = {"high": 0, "medium": 1, "low": 2, "informational": 3}
+    result["alerts"].sort(key=lambda a: _risk_order.get(a.get("risk"), 9))
 
     # 9. Alert 위험도를 종합 risk_level에 반영
     alert_risks = [a["risk"] for a in result["alerts"]]
@@ -3117,7 +3548,8 @@ def analyze_response(
     # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반.
     #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
-        status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body, method
+        status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body, method,
+        redirect_chain, req_headers,
     )
     result["reflection"] = _detect_reflection(body, payload)
     result["spa_shell"] = _detect_spa_shell(body, headers_lower)
@@ -3127,10 +3559,17 @@ def analyze_response(
     # 단일 응답으로 판정 못 하는 유형이 거짓 안심을 주지 않도록.)
     # payload/URL 로 실제 공격 유형을 추론(카테고리 라벨이 틀릴 수 있음) — 서술·AI 판정에 사용
     _probe_all = f"{payload or ''} {url or ''} {req_body or ''}"
-    result["attack_type"] = infer_attack_type(_probe_all, category)
+    # 요청 헤더까지 넘겨 헤더에 실린 공격(Log4Shell·Shellshock 등)도 분류한다.
+    # 헤더 공격은 "요청" 헤더에 있다(응답 헤더가 아니라). SOC 붙여넣기의 Log4Shell·Shellshock 대응.
+    # url·body·headers 를 구조화해 넘겨야 classify 가 대상 host 를 분류에서 제외한다
+    # (내부 IP 대상이 SSRF 로 오분류되는 것 방지).
+    _req_hv = HeaderView(req_headers or {})
+    result["attack_type"] = _classify.classify(
+        payload=payload, url=url, req_body=req_body, headers=_req_hv, category=category
+    ).primary or (category or "").lower()
 
     is_attack_attempt = bool((payload and payload.strip()) or category)
-    has_signal = any(f.get("verdict") in ("성공", "안전", "미확정") for f in findings)
+    has_signal = any(f.get("verdict") in ("성공", "안전", "미확정", "의심") for f in findings)
     if (is_attack_attempt and outcome == "inconclusive" and not has_signal
             and not result["sensitive_data"] and not result["error_leaks"]):
         _mprobe = _probe_all
@@ -3145,6 +3584,16 @@ def analyze_response(
             "evidence": f"응답에서 성공 시그니처 [{_sigs}]를 검색 → 미검출; 반사·시간지연·baseline 변화도 없음 "
                         f"(HTTP {status_code} · {len(body)}B · {response_time:.0f}ms{_bn})",
         })
+
+    # 본문이 잘렸으면 '미검출' 계열 판정에 검사 범위를 명시(위음성을 안전으로 보고하지 않도록)
+    _seen = len(body)
+    _full = int(full_body_len) if full_body_len else _seen
+    result["body_truncated"] = bool(body_truncated and _full > _seen)
+    result["body_len_seen"], result["body_len_full"] = _seen, _full
+    if result["body_truncated"]:
+        _note_body_truncated(findings, _seen, _full)
+        result["response_anomalies"].append(
+            f"응답 본문 절단 — 전체 {_full:,}자 중 앞 {_seen:,}자만 분석(뒷부분 미검사)")
 
     result["findings"] = _enrich_verification(findings)   # 전 finding에 검증 내역(method/where) 부여
     result["attack_outcome"] = outcome
@@ -3163,7 +3612,7 @@ def analyze_response(
         #  처리하고, 증거가 없으면 미확정 신호 유무로만 위험도를 나눠 오탐을 막는다.
         if outcome == "success":
             pass   # 성공 격상 블록에서 risk/score 확정
-        elif any(f.get("verdict") in ("성공", "미확정") for f in findings):
+        elif any(f.get("verdict") in ("성공", "미확정", "의심") for f in findings):
             result["risk_level"] = "medium"   # 반사·베이스라인 변화 등 추가 확인 필요 신호
             result["score"] = 40
         else:
@@ -3176,7 +3625,7 @@ def analyze_response(
     else:
         # 상태코드로 판정 불가(404/405/410 등) — '차단 안 됨'이 아니라 '증거 신호'로 위험도 결정.
         # 404 처럼 대상이 없거나 '안전(미노출)' 신호만 있으면 medium 이 아니라 낮게 잡아 오탐 방지.
-        if any(f.get("verdict") in ("성공", "미확정") for f in findings):
+        if any(f.get("verdict") in ("성공", "미확정", "의심") for f in findings):
             result["risk_level"] = "medium"
             result["score"] = 40
         else:
