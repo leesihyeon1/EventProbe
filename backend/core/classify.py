@@ -66,6 +66,11 @@ _XSS_HINT = re.compile(
 _LOG4SHELL_HINT = re.compile(r"\$\{jndi:(?:ldap|ldaps|rmi|dns|nis|iiop|corba|nds|http)s?:", re.I)
 _SHELLSHOCK_HINT = re.compile(r"\(\s*\)\s*\{\s*[:_a-z].*?;\s*\}\s*;", re.I)
 _NOSQL_HINT = re.compile(r"\$ne\b|\$gt\b|\$lt\b|\$where\b|\$regex\b|\$or\b|\[\$", re.I)
+# 헤더로 미들웨어의 인증·인가 단계를 건너뛰는 우회 — 정상 트래픽엔 없는 마커.
+#   X-Middleware-Subrequest: Next.js 미들웨어 우회(CVE-2025-29927) — 미들웨어 인가 스킵.
+# 주: X-Original-Url·X-Rewrite-Url 은 값에 트래버설이 실리면 lfi 로 잡히는 게 더 구체적이라
+#     분류에선 제외한다(기존 판정 유지). 이들 헤더의 '접근제어 우회'는 detectors 가 별도로 판정.
+_AUTHBYPASS_HINT = re.compile(r"x-middleware-subrequest\s*:", re.I)
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,7 @@ class AttackClass:
 #   - SSTI: ${ 가 일부 정상 헤더에 있을 수 있음 → 본문/URL 만
 # 헤더_스캔_허용=True 는 정상 헤더엔 거의 없는 마커(jndi·shellshock·<script·UNION SELECT 등).
 _RULES = [
+    ("authbypass", _AUTHBYPASS_HINT, True, "middleware"),  # X-Middleware-Subrequest 등 — 헤더 전용
     ("cmdi", _LOG4SHELL_HINT,  True,  "log4shell"),   # ${jndi:...} — 헤더 최빈
     ("cmdi", _SHELLSHOCK_HINT, True,  "shellshock"),  # () { :;}; — 헤더
     ("lfi",  _FILE_READ_HINT,  True,  ""),

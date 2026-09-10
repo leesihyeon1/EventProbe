@@ -3568,7 +3568,7 @@ _DET_PRIORITY = {
 # 정확히 제시한다. confirm(확증 스캔)으로 되는 것 / OOB 콜백이 필요한 것 / 브라우저 확증이
 # 필요한 것을 구분해 분석가가 바로 다음 행동을 고르게 한다.
 _CONFIRM_SCAN = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor",
-                 "business", "ldap", "auth", "xpath"}       # 확증 스캔(대조군 프로브) 가능
+                 "business", "ldap", "auth", "xpath", "authbypass"}  # 확증 스캔(대조군 프로브) 가능
 _OOB_FAMILIES = {"cmdi", "ssrf", "xxe", "log4shell", "email", "deserial"}  # 블라인드/OOB 콜백 필요
 _BROWSER_FAMILIES = {"xss", "prototype", "domclob", "cssinj", "csti"}      # 브라우저 DOM 확증
 
@@ -3586,6 +3586,8 @@ _UNDETERMINED_NEXT = {
     "jwt":  "토큰 변형으로 재시도하세요(alg=none·약한 서명·kid 주입) — 서버 수용 여부는 대조군 상태전이로 확증됩니다.",
     "ldap": "error-based(파서 에러 유발) 또는 참/거짓 필터 차이로 확증하세요.",
     "xpath": "error-based(XPath 파서 에러) 또는 참/거짓 표현식 차이로 확증하세요.",
+    "authbypass": "우회 헤더(X-Middleware-Subrequest 등)를 뺀 정상 요청과 비교하세요 — 정상이 거부"
+                  "(401/403·로그인 리다이렉트)인데 우회 요청이 보호 리소스를 200 으로 제공하면 인가 우회 확증.",
 }
 
 

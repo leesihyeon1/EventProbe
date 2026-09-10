@@ -291,6 +291,91 @@ register(JwtNoneAlgDetector())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# tier-1 미들웨어/게이트웨이 인가 우회 탐지기 — 요청 헤더 '구조'로 판정
+# ══════════════════════════════════════════════════════════════════════════════
+# 시그니처(응답 문자열)로는 잡히지 않는 '고아' 공격. 인가 단계를 헤더로 건너뛰는 계열:
+#   X-Middleware-Subrequest  : Next.js 미들웨어 인가 우회(CVE-2025-29927). 미들웨어가 인증·
+#                              리다이렉트를 강제하는 앱에서, 이 헤더가 있으면 미들웨어가 스킵돼
+#                              보호 리소스가 그대로 제공된다.
+#   X-Original-Url / X-Rewrite-Url : 프록시/서버가 재작성 경로로 접근제어를 재평가해 우회(IIS 등).
+#
+# 판정: 헤더만으로는 '시도'다(의심). '통했는가'는 대조군(우회 헤더 없는 정상 요청) 대비 차분으로
+# 확증한다 — 정상은 거부(401/403·로그인 리다이렉트)인데 우회 요청은 보호 리소스가 제공(200)되면
+# 우회 성공. 우회 요청도 여전히 거부되면 이 검사 한정 '미우회(안전)'로 정직하게 내린다.
+_MW_BYPASS_HEADERS = ("x-middleware-subrequest", "x-original-url", "x-rewrite-url")
+
+
+class MiddlewareAuthBypassDetector(Detector):
+    id = "middleware_auth_bypass"
+    tier = 1
+    attack_types = frozenset({"authbypass"})
+
+    def _hit(self, ctx: DetectionContext):
+        for h in _MW_BYPASS_HEADERS:
+            v = _hdr(ctx.req_headers, h)
+            if v:
+                return h, v
+        return None, None
+
+    def applies(self, ctx: DetectionContext) -> bool:
+        return self._hit(ctx)[0] is not None
+
+    def detect(self, ctx: DetectionContext) -> list:
+        header, value = self._hit(ctx)
+        if not header:
+            return []
+        if header == "x-middleware-subrequest":
+            name = "Next.js 미들웨어 인가 우회(CVE-2025-29927)"
+            what = ("요청에 X-Middleware-Subrequest 헤더가 실려 있음 — Next.js 미들웨어(인증·"
+                    "리다이렉트 강제)를 건너뛰게 만드는 CVE-2025-29927 우회 시도")
+        else:
+            name = f"접근제어 우회 헤더({header})"
+            what = (f"요청에 {header} 헤더가 실려 있음 — 프록시/서버가 재작성 경로로 접근제어를 "
+                    "재평가하게 만드는 우회 시도(경로 기반 인가 우회)")
+        evidence = f"{header}: {value[:60]}"
+        loc = _hdr(ctx.headers_lower, "location")
+
+        # 우회 요청 자체가 거부되면 이 검사 한정 미우회(안전) — 허위 의심 방지.
+        rejected = ctx.status_code in (401, 403) or (
+            ctx.status_code in (301, 302, 303, 307, 308) and _redirect_is_auth_reject(loc))
+        if rejected:
+            return [{"name": f"{name} — 미우회(거부됨)", "verdict": "안전", "confidence": 72,
+                     "why": f"{what}. 그러나 우회 요청도 HTTP {ctx.status_code} 로 거부됨 → 이 검사 "
+                            "한정 우회되지 않음(보호 유지).",
+                     "evidence": evidence, "method": "요청 헤더 구조 + 응답 상태",
+                     "where": "요청 헤더", "detector_id": self.id, "tier": self.tier}]
+
+        # 대조군 차분: 정상(헤더 없음) 거부 → 우회 요청은 제공(200/201·비거부 3xx) = 우회 성공.
+        served = ctx.status_code in (200, 201) or (
+            ctx.status_code in (301, 302, 303, 307, 308) and not _redirect_is_auth_reject(loc))
+        if ctx.has_control():
+            b_status = (ctx.baseline or {}).get("status_code")
+            b_loc = (ctx.baseline or {}).get("location") or ""
+            b_rejected = b_status in (401, 403) or (
+                b_status in (301, 302, 303, 307, 308) and _redirect_is_auth_reject(b_loc))
+            if b_rejected and served:
+                return [{"name": f"{name} — 우회 성공", "verdict": "성공", "confidence": 88,
+                         "why": f"{what}. 정상 요청(헤더 없음)은 거부(HTTP {b_status})인데 우회 헤더를 "
+                                f"넣자 HTTP {ctx.status_code} 로 보호 리소스가 제공됨 → 인가 우회 확증.",
+                         "evidence": evidence + f" · baseline HTTP {b_status} → 공격 HTTP {ctx.status_code}",
+                         "method": "요청 헤더 구조 + 대조군 상태전이", "where": "요청 헤더 vs 대조군",
+                         "detector_id": self.id, "tier": self.tier}]
+
+        # 대조군 없음/불충분 → 의심(시도 확인). 200 이면 우회 성공 가능성을 명시하되 확증은 대조군 필요.
+        why = (f"{what}. 응답이 HTTP {ctx.status_code}"
+               + (" 로 리소스가 제공됨 — 이 경로가 보호 대상이었다면 우회 성공."
+                  if served else " — ")
+               + " 확증하려면 이 헤더를 뺀 정상 요청과 비교하세요(정상이 거부·우회가 제공이면 우회 성공).")
+        return [{"name": f"{name} — 우회 시도", "verdict": "의심", "confidence": 60,
+                 "why": why, "evidence": evidence,
+                 "method": "요청 헤더 구조 분석(대조군 필요)", "where": "요청 헤더",
+                 "detector_id": self.id, "tier": self.tier}]
+
+
+register(MiddlewareAuthBypassDetector())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # tier-1 Canary(자가 마커) 탐지기 — 대조군 없이 '단일 응답'으로 실행을 확증
 # ══════════════════════════════════════════════════════════════════════════════
 # 원리(SSTI 7*7=49 의 일반화): payload 가 '자기 성공 표식을 품은' 표현식이면, 그 표식의
