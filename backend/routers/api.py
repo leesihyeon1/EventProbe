@@ -267,6 +267,33 @@ _CATEGORY_DESC = {
 }
 
 
+# 판정 결과(outcome)에 맞춰 RAG 질의 의도를 앵커링 — 같은 "참고 지식" 블록이 상황에 맞는
+# 자료를 보여주게 한다(새 UI 없이). blocked→우회기법, 막힘→기법·확증법, 성공→조치.
+# 설명(왜/원리) 중심 앵커 — 페이로드 문자열과 겹치지 않게 "무엇을·어떻게·왜·영향"을 끌어온다.
+_EXPLAIN_ANCHOR = ("웹 취약점 원리 영향 위험 how it works impact why vulnerable "
+                   "root cause consequence")
+_OUTCOME_INTENT = {
+    "blocked":      "왜 차단되었나 WAF 필터 동작 원리 우회가 가능한 이유 how WAF works and bypass",
+    "suspicious":   "이 신호가 왜 의심스러운가 어떻게 확증하나 what evidence confirms exploit",
+    "inconclusive": "왜 판정이 어려운가 무엇을 확인해야 하나 how to test and what proves it",
+    "success":      "성공하면 무엇이 가능한가 영향과 위험 impact consequence remediation",
+    "safe":         "왜 안전한가 방어 원리 secure configuration why not exploitable",
+}
+
+
+# 페이로드 덤프 청크 판별 — RAG 가 페이로드 뱅크와 겹치지 않게 설명 산문을 선호한다.
+_PAYLOAD_LINE = re.compile(r"""['"<>]|\bUNION\b|\bSELECT\b|--|/\*|\balert\(|%[0-9a-fA-F]{2}|\$\{|\{\{""")
+
+
+def _is_prose(text: str) -> bool:
+    """설명 산문이면 True, 페이로드 덤프성이면 False(줄의 40% 이상이 페이로드성)."""
+    lines = [l for l in (text or "").split("\n") if l.strip()]
+    if not lines:
+        return False
+    pl = sum(1 for l in lines if _PAYLOAD_LINE.search(l))
+    return pl / len(lines) < 0.4
+
+
 async def _retrieve_related(category: str, outcome: str, findings: list, probe: str = "") -> list:
     """RAG 검색 — 공격유형 의미 앵커 + 신호 이름(+요청 보조)으로 조회. AI 유무와 무관하게
     동작(관련 문서 표시 + AI 판정 근거 공용). 공개 문서라 유출 위험 없음."""
@@ -278,15 +305,20 @@ async def _retrieve_related(category: str, outcome: str, findings: list, probe: 
     whys = " ".join(str(f.get("why", "")) for f in specific)[:300]
     # 카테고리 서술 용어를 앞에 두어 의미 앵커로 삼고, 원시 probe 는 보조로만(노이즈 최소화).
     desc = _CATEGORY_DESC.get((category or "").lower(), category or "")
-    rag_q = " ".join(filter(None, [desc, names, whys, str(probe or "")[:120]])).strip()
+    intent = _OUTCOME_INTENT.get((outcome or "").lower(), "")   # 판정별 "왜" 의도
+    # 페이로드(probe)·why 는 질의에서 뺀다 — 넣으면 페이로드 덤프 청크가 끌려와 페이로드 뱅크와
+    # 겹친다. 대신 설명 앵커로 "왜/원리/영향" 산문을 끌어온다(중복 제거 + 설명 제공).
+    rag_q = " ".join(filter(None, [desc, _EXPLAIN_ANCHOR, intent, names])).strip()
     if not rag_q:
         return []
     try:
-        hits = await asyncio.to_thread(rag.search, rag_q, 4, category)
+        hits = await asyncio.to_thread(rag.search, rag_q, 6, category)   # 재정렬 여유로 6개
         if hits:
-            # 참고용(판정 불변)이므로 하한을 0.42 로. 약하거나 엉뚱한 스니펫은 여전히 버린다.
             top = hits[0]["score"]
-            hits = [h for h in hits if h["score"] >= max(0.42, top * 0.6)][:3]
+            hits = [h for h in hits if h["score"] >= max(0.42, top * 0.6)]
+            # 설명 산문을 앞으로, 페이로드 덤프는 뒤로(점수 근접 시 산문 우선)
+            hits.sort(key=lambda h: (not _is_prose(h.get("text", "")), -h.get("score", 0)))
+            hits = hits[:3]
         return hits
     except Exception:
         return []
