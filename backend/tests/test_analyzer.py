@@ -1246,3 +1246,59 @@ def test_nonstandard_method_scan_recognized():
 def test_get_post_no_method_finding():
     r = analyze_response(200, {}, "hello", 5, payload="", category="", url="https://t/", method="GET")
     assert not any("메소드" in f["name"] for f in r["findings"])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 판정 불가·의심 이벤트 개선 — 유형별 '다음 단계' 안내 + 확증 경로 플래그
+# ─────────────────────────────────────────────────────────────────────────────
+def test_inconclusive_has_next_action_by_type():
+    r = analyze_response(200, {"content-type": "text/html"}, "<html>ok</html>", 90,
+                         payload="1' OR '1'='1", category="sqli")
+    assert r["attack_outcome"] == "inconclusive"
+    na = r["next_action"]
+    assert na and na["outcome"] == "inconclusive"
+    assert "확증 스캔" in na["text"] or "baseline" in na["text"]
+    assert na["confirm_scan"] is True
+
+
+def test_ssti_inconclusive_suggests_other_engines():
+    r = analyze_response(200, {}, "you sent {{7*7}}", 60, payload="{{7*7}}", category="ssti")
+    assert r["attack_outcome"] == "inconclusive"
+    assert "${7*7}" in r["next_action"]["text"]
+
+
+def test_blind_cmdi_flags_oob():
+    r = analyze_response(200, {}, "ok", 60, payload=";sleep 5", category="cmdi")
+    na = r["next_action"]
+    assert na["oob"] is True
+
+
+def test_xss_inconclusive_flags_browser():
+    r = analyze_response(200, {}, "<html>no reflection</html>", 60,
+                         payload="<script>alert(1)</script>", category="xss")
+    if r["attack_outcome"] == "inconclusive":
+        assert r["next_action"]["browser"] is True
+
+
+def test_suspicious_has_next_action_with_lead():
+    r = analyze_response(200, {}, "row " * 900, 60, payload="1 AND 1=1", category="sqli",
+                         baseline={"status_code": 200, "body": "none"})
+    assert r["attack_outcome"] == "suspicious"
+    na = r["next_action"]
+    assert na and na["outcome"] == "suspicious"
+    assert na["lead"]
+    assert "확증" in na["text"]
+
+
+def test_fallback_finding_carries_next_action():
+    r = analyze_response(200, {"content-type": "text/html"}, "<html>ok</html>", 90,
+                         payload="1' OR '1'='1", category="sqli")
+    fb = [f for f in r["findings"] if "자동 판정 불가" in f["name"]]
+    assert fb and fb[0].get("next_action")
+    assert fb[0].get("confirm_scan") is True
+
+
+def test_definite_outcomes_have_no_next_action():
+    """성공/안전/차단은 다음 단계 CTA 가 없다(이미 판정됨)."""
+    succ = analyze_response(200, {}, "root:x:0:0:root:/root:/bin/bash", 60,
+                            payload="../../etc/passwd", category="lfi")
+    assert succ["attack_outcome"] == "success" and succ["next_action"] is None

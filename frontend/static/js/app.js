@@ -2191,6 +2191,34 @@ function _attackClassCard(a) {
     </div>`;
 }
 
+// 판정 불가/의심 이벤트를 '행동 가능'하게 — 왜 미확정인지 + 무엇을 하면 확증되는지 + 경로 버튼.
+function _nextActionCard(a, result) {
+  const na = a.next_action;
+  if (!na) return '';
+  const isSus = na.outcome === 'suspicious';
+  const color = isSus ? 'var(--warning)' : 'var(--text-muted)';
+  const title = isSus ? '의심 신호 — 확증 필요' : '판정 불가 — 다음 단계';
+  const paths = [];
+  if (na.confirm_scan) paths.push('<button class="btn btn-secondary" style="padding:3px 9px;font-size:11px" onclick="confirmScan()">확증 스캔 실행</button>');
+  if (na.oob) paths.push('<span class="tag tag-orange" style="font-size:10px">OOB 콜백 필요</span>');
+  if (na.browser) paths.push('<span class="tag tag-blue" style="font-size:10px">브라우저 DOM 확증</span>');
+  // baseline 이 아직 없으면 저장 버튼을 제안(차분 판정 가능케 함)
+  const baselineBtn = baseline ? '' :
+    '<button class="btn btn-secondary" style="padding:3px 9px;font-size:11px" onclick="saveBaseline()">📌 baseline 저장</button>';
+  return `
+    <div class="analysis-card" data-card-id="next-action" style="border-color:${isSus?'rgba(210,153,34,.5)':'var(--border)'}">
+      <div class="analysis-card-header" style="color:${color}">${title}</div>
+      <div class="analysis-card-body">
+        <div class="detail-item" style="color:var(--text-secondary)">${escapeHtml(na.lead || '')}</div>
+        <div class="detail-item"><b>다음 단계</b> — ${escapeHtml(na.text || '')}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+          ${paths.join('')}
+          ${baselineBtn}
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderAttackCard(a) {
   const findings = a.findings || [];
   if (!findings.length && !a.attack_outcome) return '';
@@ -2571,6 +2599,9 @@ function renderAnalysis(a, result) {
 
     <!-- 공격 유형 분류 (정규식 우선, miss 는 AI 보강) -->
     ${_attackClassCard(a)}
+
+    <!-- 판정 불가·의심 → 다음 단계 안내(확증 경로 CTA) -->
+    ${_nextActionCard(a, result)}
 
     <!-- 공격 결과 분석 (증거 기반) -->
     ${renderAttackCard(a)}

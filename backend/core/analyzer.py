@@ -3352,6 +3352,47 @@ _DET_PRIORITY = {
 }
 
 
+# ── 판정 불가·의심 이벤트의 '다음 단계' 안내(행동 가능하게) ─────────────────────
+# inconclusive/suspicious 는 "판정 못 했다"로 끝내지 않고, 유형별로 '무엇을 하면 확증되는지'를
+# 정확히 제시한다. confirm(확증 스캔)으로 되는 것 / OOB 콜백이 필요한 것 / 브라우저 확증이
+# 필요한 것을 구분해 분석가가 바로 다음 행동을 고르게 한다.
+_CONFIRM_SCAN = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor",
+                 "business", "ldap", "auth", "xpath"}       # 확증 스캔(대조군 프로브) 가능
+_OOB_FAMILIES = {"cmdi", "ssrf", "xxe", "log4shell", "email", "deserial"}  # 블라인드/OOB 콜백 필요
+_BROWSER_FAMILIES = {"xss", "prototype", "domclob", "cssinj", "csti"}      # 브라우저 DOM 확증
+
+_UNDETERMINED_NEXT = {
+    "sqli": "확증 스캔 실행(time-based SLEEP·error-based EXTRACTVALUE) 또는 정상값으로 baseline 저장 후 "
+            "재요청해 불리언(참/거짓) 차이를 비교하세요.",
+    "xss":  "payload 가 인코딩돼 반사됐는지(서버 방어) 확인하고, DOM 싱크가 있으면 브라우저로 실행을 확증하세요.",
+    "lfi":  "다른 대상 파일(/etc/hosts·win.ini·/proc/self/environ)과 인코딩 변형(%2e··..%2f·이중인코딩)으로 재시도하세요.",
+    "xxe":  "OOB DTD(외부 엔티티 콜백)나 error-based 파일읽기로 확증하세요 — 단일 응답으론 블라인드일 수 있습니다.",
+    "ssti": "다른 템플릿 엔진 구문으로 재시도하세요({{7*7}}·${7*7}·#{7*7}·<%= 7*7 %>·%{7*7}).",
+    "cmdi": "블라인드 계열 — time-based(;sleep 5) 또는 OOB 콜백(nslookup <마커>.oob)으로 확증하세요.",
+    "ssrf": "OOB 콜백 URL(interactsh 류)로 아웃바운드 요청을 확인하세요 — 응답에 마커가 없으면 블라인드입니다.",
+    "redirect": r"다양한 우회 표기로 재시도하세요(//evil·/\evil·https:evil·whitelisted.com@evil·인코딩).",
+    "nosql": "$where 에 time-based(sleep) 주입 또는 정상 대비 참/거짓 응답 차이를 비교하세요.",
+    "jwt":  "토큰 변형으로 재시도하세요(alg=none·약한 서명·kid 주입) — 서버 수용 여부는 대조군 상태전이로 확증됩니다.",
+    "ldap": "error-based(파서 에러 유발) 또는 참/거짓 필터 차이로 확증하세요.",
+    "xpath": "error-based(XPath 파서 에러) 또는 참/거짓 표현식 차이로 확증하세요.",
+}
+
+
+def _undetermined_next(attack_type: str) -> dict:
+    """판정 불가/의심 이벤트의 다음 단계 안내 — 문구 + 확증 경로 플래그."""
+    at = (attack_type or "").lower()
+    text = _UNDETERMINED_NEXT.get(at)
+    if not text:
+        text = ("확증 스캔(대조군 비교)을 실행하거나, 정상 파라미터로 baseline 을 저장한 뒤 재요청해 "
+                "차이를 비교하세요. 블라인드/OOB 계열이면 콜백 기반 확증이 필요합니다.")
+    return {
+        "text": text,
+        "confirm_scan": at in _CONFIRM_SCAN,     # '확증 스캔' 버튼으로 자동 확증 가능
+        "oob": at in _OOB_FAMILIES,              # OOB 콜백 필요(단일 응답 불가)
+        "browser": at in _BROWSER_FAMILIES,      # 브라우저 DOM 확증 필요
+    }
+
+
 def _deterministic_narrative(result: dict) -> dict:
     """outcome·findings·attack_type·alerts 로 판정 요약/우선확인/조치를 결정적으로 생성."""
     outcome = result.get("attack_outcome") or "inconclusive"
@@ -3575,12 +3616,15 @@ def analyze_response(
         _mprobe = _probe_all
         _sigs = _checked_desc_for(_mprobe, category)
         _bn = "" if baseline else " · baseline 없음"
+        _nx = _undetermined_next(result["attack_type"])
         findings.append({
-            "name": "자동 판정 불가 — 수동 확인 필요", "verdict": "미확인", "confidence": 30,
-            "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화 등)를 "
-                   "찾지 못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. "
-                   "응답 본문을 직접 확인하고, 확증 스캔 또는 baseline 비교로 검증하세요.",
+            "name": "자동 판정 불가 — 다음 단계로 확증 필요", "verdict": "미확인", "confidence": 30,
+            "why": "성공/실패를 단일 응답으로 판정할 근거(반사·에러·마커·시간차·베이스라인 변화)를 찾지 "
+                   "못했습니다. 블라인드/OOB/로직 계열이거나 이 대상에 취약하지 않을 수 있습니다. → "
+                   + _nx["text"],
             "checked": _sigs,
+            "next_action": _nx["text"],
+            "confirm_scan": _nx["confirm_scan"], "oob": _nx["oob"], "browser": _nx["browser"],
             "evidence": f"응답에서 성공 시그니처 [{_sigs}]를 검색 → 미검출; 반사·시간지연·baseline 변화도 없음 "
                         f"(HTTP {status_code} · {len(body)}B · {response_time:.0f}ms{_bn})",
         })
@@ -3640,6 +3684,20 @@ def analyze_response(
         result["score"] = max(result["score"], aconf)
 
     # 결정적 서술(AI 미설정/실패 시 폴백, AI 있어도 누락 항목 보강용) — 항상 생성
+    # 판정 불가·의심 이벤트의 '다음 행동' — UI 가 확증 스캔/OOB/브라우저 CTA 를 안내하도록 최상위 노출.
+    if outcome in ("inconclusive", "suspicious"):
+        _nxa = _undetermined_next(result["attack_type"])
+        if outcome == "suspicious":
+            _sus = [f for f in result["findings"] if f.get("verdict") == "의심"]
+            _lead = (_sus[0].get("why", "") if _sus else "대조군 대비 차이가 관측됨")
+            _nxa = dict(_nxa, text=f"의심 신호를 확증하세요 — {_nxa['text']}")
+            result["next_action"] = {"outcome": "suspicious", "lead": _lead[:160], **_nxa}
+        else:
+            result["next_action"] = {"outcome": "inconclusive", "lead":
+                "단일 응답으론 판정 근거가 없습니다", **_nxa}
+    else:
+        result["next_action"] = None
+
     result["det_verdict"] = _deterministic_narrative(result)
 
     return result
