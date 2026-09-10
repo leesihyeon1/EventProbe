@@ -3982,6 +3982,56 @@
           "description": "배칭 브루트",
           "risk": "medium",
           "reference": "https://book.hacktricks.xyz/network-services-pentesting/pentesting-web/graphql"
+        },
+        {
+          "id": "graphql_ep_graphql",
+          "name": "엔드포인트 탐색 — /graphql",
+          "payload": "/graphql",
+          "description": "GraphQL 엔드포인트 경로 탐색: 표준 GraphQL 엔드포인트. 선택 시 URL 경로가 설정됩니다(introspection·쿼리와 조합).",
+          "risk": "low",
+          "location": "path",
+          "param": "",
+          "reference": "https://graphql.org/learn/serving-over-http/"
+        },
+        {
+          "id": "graphql_ep_api",
+          "name": "엔드포인트 탐색 — /api",
+          "payload": "/api",
+          "description": "GraphQL 엔드포인트 경로 탐색: API 루트(GraphQL 마운트 흔한 위치). 선택 시 URL 경로가 설정됩니다(introspection·쿼리와 조합).",
+          "risk": "low",
+          "location": "path",
+          "param": "",
+          "reference": "https://graphql.org/learn/serving-over-http/"
+        },
+        {
+          "id": "graphql_ep_api_graphql",
+          "name": "엔드포인트 탐색 — /api/graphql",
+          "payload": "/api/graphql",
+          "description": "GraphQL 엔드포인트 경로 탐색: API 하위 GraphQL 엔드포인트. 선택 시 URL 경로가 설정됩니다(introspection·쿼리와 조합).",
+          "risk": "low",
+          "location": "path",
+          "param": "",
+          "reference": "https://graphql.org/learn/serving-over-http/"
+        },
+        {
+          "id": "graphql_ep_graphql_api",
+          "name": "엔드포인트 탐색 — /graphql/api",
+          "payload": "/graphql/api",
+          "description": "GraphQL 엔드포인트 경로 탐색: GraphQL 하위 API 경로. 선택 시 URL 경로가 설정됩니다(introspection·쿼리와 조합).",
+          "risk": "low",
+          "location": "path",
+          "param": "",
+          "reference": "https://graphql.org/learn/serving-over-http/"
+        },
+        {
+          "id": "graphql_ep_graphql_graphql",
+          "name": "엔드포인트 탐색 — /graphql/graphql",
+          "payload": "/graphql/graphql",
+          "description": "GraphQL 엔드포인트 경로 탐색: 중첩 GraphQL 경로. 선택 시 URL 경로가 설정됩니다(introspection·쿼리와 조합).",
+          "risk": "low",
+          "location": "path",
+          "param": "",
+          "reference": "https://graphql.org/learn/serving-over-http/"
         }
       ],
       "group": "server"

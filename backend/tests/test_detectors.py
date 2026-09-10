@@ -301,10 +301,13 @@ def test_graphql_introspection_exposed_is_success():
     assert out and out[0]["verdict"] == "성공"
 
 
-def test_graphql_no_schema_not_flagged():
+def test_graphql_data_return_is_recon_not_success():
+    """스키마는 없지만 data 봉투로 실제 데이터가 오면 '엔드포인트 활성(미확정 recon)' — 성공은 아님."""
     ctx = _ctx(status_code=200, body='{"data":{"user":{"id":1}}}', category="graphql",
                url="http://t/graphql", probe="{user{id}}")
-    assert _find(ctx, "graphql_introspection") == []
+    out = _find(ctx, "graphql_introspection")
+    assert out and out[0]["verdict"] == "미확정"
+    assert "활성" in out[0]["name"] and out[0]["verdict"] != "성공"
 
 
 # CRLF
@@ -600,3 +603,116 @@ def test_analyze_git_config_redirect_to_login_stays_safe():
     r = analyze_response(302, {"location": "/login"}, "", 60,
                          payload="/.git/config", category="cve", url="http://t/.git/config")
     assert r["attack_outcome"] == "safe"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GraphQL introspection — 프로브에 스키마가 안 오면 '영향 없음(안전)'으로 확정
+# (404·introspection 차단·미노출). 예전엔 아무것도 안 내고 inconclusive 로 빠졌다.
+# ─────────────────────────────────────────────────────────────────────────────
+_IQ = '{"query":"query IntrospectionQuery { __schema { queryType { name } types { name } } }"}'
+
+
+def _gql(status, body, req_body=_IQ, probe="__schema"):
+    ctx = _ctx(status_code=status, body=body, category="graphql", url="http://t/graphql",
+               req_body=req_body, probe=probe, method="POST")
+    return [f for f in run_registered(ctx) if f["detector_id"] == "graphql_introspection"]
+
+
+def test_graphql_schema_object_is_success():
+    out = _gql(200, '{"data":{"__schema":{"types":[{"name":"User"}]}}}')
+    assert out and out[0]["verdict"] == "성공"
+
+
+def test_graphql_schema_null_is_not_success():
+    """__schema:null = introspection 비활성 → 성공 아님, 안전."""
+    out = _gql(200, '{"data":{"__schema":null}}')
+    assert out and out[0]["verdict"] == "안전"
+
+
+def test_graphql_404_probe_is_safe():
+    out = _gql(404, "Not Found")
+    assert out and out[0]["verdict"] == "안전"
+    assert "404" in out[0]["evidence"]
+
+
+def test_graphql_introspection_disabled_error_is_safe():
+    out = _gql(200, '{"errors":[{"message":"GraphQL introspection is not allowed"}]}')
+    assert out and out[0]["verdict"] == "안전"
+
+
+def test_graphql_generic_error_no_schema_is_safe():
+    out = _gql(400, '{"errors":[{"message":"Syntax error"}]}')
+    assert out and out[0]["verdict"] == "안전"
+
+
+def test_graphql_non_introspection_error_not_judged():
+    """introspection 프로브가 아니고 데이터도 없으면(에러) 안전/노출 어느 쪽도 판정하지 않는다."""
+    out = _gql(400, '{"errors":[{"message":"Syntax error"}]}',
+               req_body='{"query":"{user{id}}"}', probe="{user{id}}")
+    assert out == []
+
+
+def test_graphql_empty_response_is_inconclusive():
+    """빈 응답은 불명확 → 판정 보류(안전이라 단정하지 않음)."""
+    assert _gql(200, "") == []
+
+
+def test_analyze_graphql_404_outcome_safe():
+    r = analyze_response(404, {}, "Not Found", 60, category="graphql", url="http://t/graphql",
+                         req_body=_IQ, method="POST")
+    assert r["attack_outcome"] == "safe"
+    assert not any("자동 판정 불가" in f["name"] for f in r["findings"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GraphQL data 봉투 — 쿼리가 실제 데이터를 반환하면 '엔드포인트 활성(공격 표면 확인)'
+# (예시 1: 단일 객체, 예시 2: 배열=다건 나열). __schema 없이도 API 가 쿼리에 응답함을 확인.
+# ─────────────────────────────────────────────────────────────────────────────
+def test_graphql_data_object_envelope_detected():
+    body = '{"data":{"product":{"id":3,"name":"Product 3","listed":true}}}'
+    out = _gql(200, body, req_body='{"query":"{product(id:3){id name listed}}"}', probe="{product}")
+    assert out and out[0]["verdict"] == "미확정"
+    assert "활성" in out[0]["name"]
+
+
+def test_graphql_data_array_envelope_flags_enumeration():
+    body = ('{"data":{"products":[{"id":1,"name":"P1","listed":true},'
+            '{"id":2,"name":"P2","listed":true},{"id":4,"name":"P4","listed":true}]}}')
+    out = _gql(200, body, req_body='{"query":"{products{id name listed}}"}', probe="{products}")
+    assert out and out[0]["verdict"] == "미확정"
+    assert "배열" in out[0]["evidence"] or "list" in out[0]["evidence"]
+
+
+def test_graphql_data_null_is_not_data_return():
+    """data:null(빈 결과)은 데이터 반환이 아니다 → 활성 신호 안 냄."""
+    out = _gql(200, '{"data":null}', req_body='{"query":"{user{id}}"}', probe="{user{id}}")
+    assert out == []
+
+
+def test_graphql_data_all_null_is_not_data_return():
+    out = _gql(200, '{"data":{"user":null}}', req_body='{"query":"{user{id}}"}', probe="{user{id}}")
+    assert out == []
+
+
+def test_graphql_data_envelope_truncated_json():
+    """잘린 JSON 도 보수적으로 data 봉투를 인식(필드가 있고 null 아님)."""
+    body = '{"data":{"products":[{"id":1,"name":"Product 1","listed":tr'   # 잘림
+    out = _gql(200, body, req_body='{"query":"{products{id name}}"}', probe="{products}")
+    assert out and out[0]["verdict"] == "미확정"
+
+
+def test_graphql_schema_beats_data_envelope():
+    """__schema 노출이면 데이터 봉투보다 introspection 노출(성공)이 우선."""
+    body = '{"data":{"__schema":{"types":[{"name":"User"}]},"products":[{"id":1}]}}'
+    out = _gql(200, body, req_body='{"query":"{__schema{types{name}}}"}', probe="__schema")
+    assert out and out[0]["verdict"] == "성공"
+
+
+def test_graphql_data_helper_units():
+    from core.detectors import _graphql_returned_data
+    assert _graphql_returned_data('{"data":{"x":1}}') == "dict"
+    assert _graphql_returned_data('{"data":[{"x":1}]}') == "list"
+    assert _graphql_returned_data('{"data":null}') == ""
+    assert _graphql_returned_data('{"data":{}}') == ""
+    assert _graphql_returned_data('{"errors":[{"message":"x"}]}') == ""
+    assert _graphql_returned_data('{"data":{"__schema":null}}') == ""

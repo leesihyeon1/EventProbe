@@ -230,6 +230,14 @@ SENSITIVE_PATTERNS = [
     # JWT 만 정밀 탐지(eyJ...=base64 '{"'). 과거의 '60자+ base64 전부' 규칙은
     # PNG/폰트/번들/SRI 해시까지 '토큰'으로 오탐해 제거함(구체 토큰은 secret Alert 룰이 커버).
     (r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", "JWT 토큰 노출"),
+    # ── 정밀 추출형 클라우드/서비스 시크릿(구조가 명확 → 오탐 거의 없음) ──
+    (r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[0-9A-Z]{16}\b", "AWS Access Key ID 노출"),
+    (r"aws_secret_access_key\s*[=:,]\s*['\"]?[A-Za-z0-9/+]{40}", "AWS Secret Access Key 노출"),
+    (r"\bAIza[0-9A-Za-z_\-]{35}\b",                 "Google API 키 노출"),
+    (r"\bgh[pousr]_[0-9A-Za-z]{36,}\b",             "GitHub 토큰 노출"),
+    (r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b",           "Slack 토큰 노출"),
+    (r"\bsk_live_[0-9A-Za-z]{24,}\b",               "Stripe 라이브 시크릿키 노출"),
+    (r"-----BEGIN (?:OPENSSH|DSA|PGP) PRIVATE KEY-----", "개인키 노출"),
     (r"\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+\b",
                                                    "내부 IP 주소 노출"),
 ]
@@ -1884,6 +1892,15 @@ _SENSITIVE_FILE_PROBES = [
     (r"web\.config",   r"<configuration[\s>]|<system\.web",                    "IIS web.config", "<configuration> / <system.web>"),
     (r"\.htaccess",    r"RewriteEngine|RewriteRule|AuthType|Require\s",        ".htaccess", "RewriteEngine / AuthType"),
     (r"id_rsa",        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY",             "SSH 개인키(id_rsa)", "BEGIN … PRIVATE KEY"),
+    (r"accessKeys?\.csv|credentials\.csv|/\.aws/credentials|aws[_-]?credentials",
+     r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|aws_secret_access_key|Access key ID\s*,\s*Secret access key",
+     "AWS 자격증명(accessKeys.csv/credentials)",
+     "AKIA…/ASIA… · aws_secret_access_key · CSV 헤더(Access key ID,Secret access key)"),
+    (r"service[_-]?account\.json|/\.gcp/", r'"type"\s*:\s*"service_account"|"private_key"\s*:\s*"-----BEGIN',
+     "GCP 서비스계정 키(service_account.json)", '"type":"service_account" / "private_key"'),
+    (r"\.npmrc",       r"_authToken\s*=|//[^/]+/:_authToken",                   "npm 인증토큰(.npmrc)", "_authToken="),
+    (r"\.dockercfg|\.docker/config\.json", r'"auths"\s*:|"auth"\s*:\s*"[A-Za-z0-9+/]{16,}', "Docker 레지스트리 인증", '"auths" / "auth":"…"'),
+    (r"\.pypirc",      r"\[(?:pypi|distutils)\]|password\s*=",                  "PyPI 자격증명(.pypirc)", "[pypi] password="),
     (r"\.DS_Store",    r"Bud1",                                                ".DS_Store", "Bud1 매직바이트"),
     (r"phpinfo",       r"<title>phpinfo\(\)|>PHP Version\s*<",                 "phpinfo()", "<title>phpinfo() / PHP Version"),
     (r"/actuator/(?:env|configprops|heapdump|gateway)",
@@ -2446,6 +2463,183 @@ def _detect_dom_xss(body: str):
             s = max(0, m.start() - 30)
             return {"source": src.group(0), "sink": lbl, "evidence": js[s:m.end() + 40]}
     return None
+
+
+# ── DOM 기반 취약점 싱크 → 보안 Alert ────────────────────────────────────────────
+# PortSwigger 분류: 응답 스크립트에 '위험 싱크'가 있고 '오염 가능 소스'가 함께 있으면
+# (source→sink 흐름 가능) 해당 DOM 취약점 클래스로 Alert 을 낸다. 정적 휴리스틱이라
+# 실제 흐름은 브라우저 확인이 필요함을 명시하고, 소스 부재 시 흔한 싱크(JSON.parse 등)로
+# 오탐하지 않도록 '소스 동시 존재'를 게이트로 둔다.
+_DOM_ALERT_SOURCES = [
+    r"document\.URL\b", r"document\.documentURI", r"document\.URLUnencoded", r"document\.baseURI",
+    r"\blocation\b", r"document\.cookie", r"document\.referrer", r"window\.name",
+    r"history\.(?:push|replace)State", r"localStorage", r"sessionStorage",
+    r"(?:moz|webkit|ms)?IndexedDB", r"URLSearchParams", r"\.searchParams",
+    r"event\.data\b", r"postMessage",
+]
+# (싱크 정규식, 싱크 라벨, 취약점 클래스, 위험도). 정규식은 '구별 가능한(저오탐)' 싱크만 담는다.
+# 의도적으로 제외한 고오탐 싱크(정적 정규식으로 정상 코드와 구분 불가 → 알림 폭주):
+#   element.value/text/textContent/innerText/outerText/name/type/target/method/search/
+#   backgroundImage/cssText/codebase, script.text/textContent/innerText, document.title,
+#   XMLHttpRequest.open()/.send(), 맨몸 open() — 모든 페이지에 흔해 source 게이트로도 억제 불가.
+_DOM_ALERT_SINKS = [
+    (r"document\.write(?:ln)?\s*\(|\.innerHTML\s*=|\.outerHTML\s*=|\.insertAdjacentHTML\s*\(|"
+     r"\.srcdoc\s*=|\.execCommand\s*\(|createContextualFragment\s*\(|createHTMLDocument\s*\(",
+     "document.write/innerHTML/srcdoc", "DOM XSS", "high"),
+    (r"\beval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*[\"'`]|setInterval\s*\(\s*[\"'`]|"
+     r"(?:ms)?[sS]etImmediate\s*\(\s*[\"'`]|\bexecScript\s*\(|\bglobalEval\s*\(|"
+     r"generateCRMFRequest\s*\(",
+     "eval/Function/globalEval", "JavaScript 주입", "high"),
+    (r"\blocation\s*(?:\.(?:href|host|hostname|pathname|search|protocol|assign|replace)\s*)?=(?!=)|"
+     r"location\.(?:assign|replace)\s*\(|window\.open\s*\(",
+     "window.location/open", "오픈 리디렉션", "medium"),
+    (r"document\.cookie\s*=(?!=)", "document.cookie", "쿠키 조작", "medium"),
+    (r"document\.domain\s*=(?!=)", "document.domain", "문서 도메인 조작", "medium"),
+    (r"new\s+WebSocket\s*\(", "WebSocket()", "WebSocket URL 포이즈닝", "medium"),
+    (r"\.(?:src|href|action)\s*=(?!=)", "element.src/href/action", "링크 조작", "medium"),
+    (r"\.postMessage\s*\(", "postMessage()", "웹 메시지 조작", "medium"),
+    (r"\.setRequestHeader\s*\(", "setRequestHeader()", "Ajax 요청 헤더 조작", "low"),
+    (r"FileReader|\.readAs(?:Text|DataURL|ArrayBuffer|BinaryString|File)\s*\(|"
+     r"\.root\.getFile\s*\(|requestFileSystem\s*\(",
+     "FileReader.readAs*()", "로컬 파일 경로 조작", "medium"),
+    (r"\.executeSql\s*\(|openDatabase\s*\(", "executeSql()", "클라이언트측 SQL 인젝션", "medium"),
+    (r"(?:session|local)Storage\.setItem\s*\(", "sessionStorage.setItem()", "HTML5 저장소 조작", "low"),
+    (r"\.evaluate\s*\(", "document.evaluate()", "클라이언트측 XPath 주입", "medium"),
+    (r"JSON\.parse\s*\(|\.parseJSON\s*\(", "JSON.parse()", "클라이언트측 JSON 주입", "low"),
+    (r"\.setAttribute\s*\(", "element.setAttribute()", "DOM 데이터 조작", "low"),
+    (r"new\s+RegExp\s*\(", "RegExp()", "서비스 거부(ReDoS)", "low"),
+]
+_DOM_SINK_SOLUTION = {
+    "DOM XSS": "출력 인코딩·안전한 DOM API(textContent) 사용, innerHTML/document.write 에 신뢰 안 된 입력 금지",
+    "JavaScript 주입": "eval·new Function·문자열 setTimeout 제거, 동적 코드 실행 금지",
+    "오픈 리디렉션": "location 대입 값 화이트리스트·상대경로만 허용",
+    "쿠키 조작": "쿠키 값에 사용자 입력 직접 대입 금지·검증",
+    "문서 도메인 조작": "document.domain 설정 제거(레거시), 대체 격리 사용",
+    "WebSocket URL 포이즈닝": "WebSocket URL 을 사용자 입력으로 구성 금지·화이트리스트",
+    "링크 조작": "src/href 대입 값 스킴·도메인 검증(javascript: 등 차단)",
+    "웹 메시지 조작": "postMessage 수신 시 origin 검증·데이터 스키마 검증",
+    "Ajax 요청 헤더 조작": "setRequestHeader 값에 사용자 입력 직접 사용 금지",
+    "로컬 파일 경로 조작": "FileReader 대상 경로/이름 검증",
+    "클라이언트측 SQL 인젝션": "executeSql 파라미터 바인딩 사용",
+    "HTML5 저장소 조작": "저장 값 검증·읽을 때 재검증",
+    "클라이언트측 XPath 주입": "document.evaluate 식에 사용자 입력 연결 금지·이스케이프",
+    "클라이언트측 JSON 주입": "신뢰 안 된 JSON 파싱 결과 검증, 스키마 확인",
+    "DOM 데이터 조작": "setAttribute 값/속성명 검증(on*·href·src 주의)",
+    "서비스 거부(ReDoS)": "사용자 입력으로 RegExp 생성 금지·복잡도 제한",
+}
+
+
+def run_dom_alerts(body: str) -> list:
+    """응답 스크립트의 DOM 위험 싱크를 취약점 클래스별 Alert 으로. 소스가 함께 있을 때만(오탐↓)."""
+    if not body:
+        return []
+    scripts = re.findall(r"<script\b[^>]*>([\s\S]*?)</script>", body, re.I)
+    js = "\n".join(scripts)
+    if not js:
+        return []
+    src = next((m.group(0) for pat in _DOM_ALERT_SOURCES for m in [re.search(pat, js)] if m), None)
+    if not src:
+        return []   # 오염 가능 소스가 없으면 DOM 흐름 취약점으로 보지 않음(오탐 억제)
+    out, seen = [], set()
+    for pat, sink_lbl, vuln, risk in _DOM_ALERT_SINKS:
+        if vuln in seen:
+            continue
+        m = re.search(pat, js)
+        if not m:
+            continue
+        seen.add(vuln)
+        st = max(0, m.start() - 30)
+        out.append({
+            "id": "dom_sink_" + re.sub(r"\W+", "_", vuln).strip("_").lower(),
+            "name": f"DOM 기반 {vuln} 가능 싱크",
+            "risk": risk,
+            "confidence": "tentative",
+            "description": f"응답 스크립트에 위험 싱크({sink_lbl})와 오염 가능 소스({src})가 함께 존재 → "
+                           f"source→sink 흐름 시 {vuln} 가능(정적 휴리스틱). 브라우저에서 실제 흐름을 확인하세요.",
+            "solution": _DOM_SINK_SOLUTION.get(vuln, "사용자 입력이 이 싱크로 흐르지 않도록 검증·이스케이프"),
+            "reference": "https://portswigger.net/web-security/dom-based",
+            "evidence": _clip_evidence(js[st:m.end() + 40], 120),
+            "_dom": True,
+        })
+    return out
+
+
+# ── API 문서/스펙·엔드포인트 식별 노출 → 보안 Alert ──────────────────────────────
+# Swagger UI·OpenAPI 스펙·GraphiQL·WSDL 등이 노출되면 전체 API 공격 표면이 열거된다.
+# 응답 본문 시그니처(강한 확증) + 알려진 문서 경로(맥락)로 식별한다.
+_API_DOC_SIGS = [
+    (r"SwaggerUIBundle|swagger-ui-bundle|swagger-ui\.css|id=[\"']swagger-ui[\"']|<title>[^<]*Swagger UI",
+     "Swagger UI"),
+    (r'"openapi"\s*:\s*"3\.|"swagger"\s*:\s*"2\.', "OpenAPI/Swagger 스펙"),
+    (r"\bRedoc\b|redoc\.standalone|<redoc\b", "ReDoc"),
+    (r"GraphQL Playground|graphiql", "GraphiQL/Playground"),
+    (r"<wsdl:definitions|<definitions[^>]+xmlns[^>]+wsdl", "WSDL(SOAP)"),
+    (r"<application[^>]+xmlns[^>]+wadl", "WADL"),
+    (r"(?m)^#%RAML\s", "RAML"),
+    (r"(?m)^FORMAT:\s*1A\b", "API Blueprint"),
+]
+# 알려진 API 문서/디스커버리 경로(요청 URL 경로 매칭용). 사용자 요청분 + 흔한 위치.
+_API_DOC_PATHS = re.compile(
+    r"/(?:swagger(?:-ui)?(?:/index\.html|/v1|\.json)?|api[-/]?docs?|v[23]/api-docs|"
+    r"openapi(?:\.json|\.yaml|\.yml)?|api/swagger(?:/v\d+)?|redoc|graphiql|"
+    r"swagger/v\d+/swagger\.json|\.well-known/openapi|wsdl|soap)\b", re.I)
+
+
+def _looks_json(body: str, headers_lower) -> bool:
+    ct = (headers_lower or {}).get("content-type", "")
+    if "json" in ct:
+        return True
+    h = (body or "").lstrip()[:1]
+    return h in ("{", "[")
+
+
+def run_api_doc_alerts(url: str, body: str, headers_lower=None, status_code: int = 200) -> list:
+    """API 문서/스펙·엔드포인트 식별 노출 Alert. 응답 시그니처 우선, 없으면 알려진 경로+200 으로 보강."""
+    body = body or ""
+    out = []
+    # ① 응답 본문에 API 문서/스펙 시그니처 → 강한 확증
+    for pat, kind in _API_DOC_SIGS:
+        m = re.search(pat, body, re.I)
+        if m:
+            out.append({
+                "id": "api_doc_" + re.sub(r"\W+", "_", kind).strip("_").lower(),
+                "name": f"API 문서/스펙 노출 — {kind}",
+                "risk": "medium", "confidence": "firm",
+                "description": f"응답에 {kind} 가 노출됨 → 전체 API 엔드포인트·파라미터·스키마가 열거되어 "
+                               "공격 표면이 드러납니다(정보 노출). 운영 환경에서는 접근 제한을 권장합니다.",
+                "solution": "운영 환경에서 API 문서(Swagger/OpenAPI/GraphiQL 등) 비활성화 또는 인증 뒤로 이동",
+                "reference": "https://owasp.org/API-Security/editions/2023/en/0xa9-improper-inventory-management/",
+                "evidence": _clip_evidence(m.group(0), 100),
+                "_apidoc": True,
+            })
+            break   # 문서 유형 하나면 충분(중복 알림 방지)
+    if out:
+        return out
+    # ② 시그니처는 없지만 요청 경로가 알려진 API 문서/디스커버리 경로 + 2xx JSON/HTML → 엔드포인트 응답
+    try:
+        from urllib.parse import urlsplit
+        path = urlsplit(url or "").path or (url or "")
+    except Exception:
+        path = url or ""
+    # bare /api 는 실제 API 호출과 구분 어려워 오탐 크므로, 디스커버리 인덱스 마커가 있을 때만.
+    api_root = re.search(r"/api/?$", path) is not None
+    api_index_marker = bool(re.search(r'"_links"|"routes"\s*:|"endpoints"\s*:', body))
+    known_doc_path = _API_DOC_PATHS.search(path) is not None
+    if status_code in (200, 201) and body.strip() and (known_doc_path or (api_root and api_index_marker)):
+        json_hint = _looks_json(body, headers_lower)
+        out.append({
+            "id": "api_doc_endpoint",
+            "name": "API 문서/디스커버리 엔드포인트 응답",
+            "risk": "low", "confidence": "tentative",
+            "description": f"알려진 API 문서/디스커버리 경로({path[:60]})가 HTTP {status_code} 로 응답 → "
+                           "API 엔드포인트 식별에 이용될 수 있습니다. 노출 내용을 확인하세요."
+                           + ("(JSON 응답)" if json_hint else ""),
+            "solution": "필요 없으면 해당 경로 차단, 문서는 인증 뒤로 이동",
+            "reference": "https://owasp.org/API-Security/editions/2023/en/0xa9-improper-inventory-management/",
+            "evidence": f"경로 {path[:60]} · HTTP {status_code}",
+            "_apidoc": True,
+        })
+    return out
 
 
 def _detect_csti(body: str, payload: str):
@@ -3576,6 +3770,8 @@ def analyze_response(
     result["alerts"] = run_alert_rules(headers_lower, body, body_lower, status_code)
     result["alerts"] += run_custom_alert_rules(custom_alert_rules, headers_lower, body,
                                                body_lower, status_code)
+    result["alerts"] += run_dom_alerts(body)   # DOM 기반 취약점 싱크(소스 동시 존재 시)
+    result["alerts"] += run_api_doc_alerts(url, body, headers_lower, status_code)  # API 문서/엔드포인트 노출
     _risk_order = {"high": 0, "medium": 1, "low": 2, "informational": 3}
     result["alerts"].sort(key=lambda a: _risk_order.get(a.get("risk"), 9))
 

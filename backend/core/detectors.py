@@ -408,14 +408,84 @@ class CorsDetector(Detector):
 register(CorsDetector())
 
 
-_GRAPHQL_INTROSPECT = re.compile(r'"__schema"|"queryType"|"__type"|"types"\s*:\s*\[', re.I)
+_GRAPHQL_INTROSPECT = re.compile(
+    r'"__schema"\s*:\s*\{|"queryType"\s*:\s*\{|"__type"\s*:\s*\{|"types"\s*:\s*\[\s*\{', re.I)
+# introspection 이 명시적으로 차단됐음을 알리는 오류 문구(→ 확정적 '영향 없음')
+_GRAPHQL_INTROSPECT_OFF = re.compile(
+    r"introspection\s+(?:is\s+)?(?:not\s+allowed|disabled|forbidden)|"
+    r"GraphQL introspection is not allowed|"
+    r'(?:Cannot|Field)\s+["\']?__schema["\']?', re.I)
+
+
+def _graphql_returned_data(body: str):
+    """GraphQL 응답이 '실제 데이터를 담은 data 봉투'면 "dict"/"list" 반환, 아니면 "".
+
+    {"data":{...실제 값...}} 또는 {"data":[...]} 를 인식한다. data 가 null·{}·[]·전부 null 이면
+    데이터 반환이 아니다(introspection off·빈 결과와 구분). 잘린 JSON 은 정규식으로 보수적 판정.
+    """
+    b = (body or "").strip()
+    if '"data"' not in b:
+        return ""
+    try:
+        d = _json.loads(b)
+        data = d.get("data") if isinstance(d, dict) else None
+    except Exception:
+        # 파싱 실패(잘림 등) → 보수적 정규식: "data":{ 또는 [ 뒤에 필드가 있고 null 아님
+        if re.search(r'"data"\s*:\s*null', b):
+            return ""
+        m = re.search(r'"data"\s*:\s*(\{|\[)', b)
+        if not m:
+            return ""
+        seg = b[m.start():m.start()+600]
+        if not re.search(r'"[A-Za-z_][A-Za-z0-9_]*"\s*:', seg):
+            return ""
+        # data 값이 배열이거나, 내부에 객체 배열( [ { )이 있으면 다건 나열
+        return "list" if (m.group(1) == "[" or re.search(r':\s*\[\s*\{', seg)) else "dict"
+    if data is None:
+        return ""
+    if isinstance(data, list):
+        return "list" if any(_has_value(x) for x in data) else ""
+    if isinstance(data, dict):
+        # __schema:null 만 있는 경우 등은 데이터 반환이 아니다
+        real = {k: v for k, v in data.items() if k not in ("__schema", "__type")}
+        if not _has_value(real):
+            return ""
+        return "list" if _has_enumeration(real) else "dict"   # 중첩 배열이면 다건 나열
+    return ""
+
+
+def _has_enumeration(x) -> bool:
+    """중첩 어디에든 실제 값이 든 배열(레코드 나열)이 있으면 True."""
+    if isinstance(x, list):
+        return any(_has_value(v) for v in x)
+    if isinstance(x, dict):
+        return any(_has_enumeration(v) for v in x.values())
+    return False
+
+
+def _has_value(x) -> bool:
+    """null/빈 컨테이너가 아닌 '실제 값'이 하나라도 있으면 True."""
+    if x is None:
+        return False
+    if isinstance(x, dict):
+        return any(_has_value(v) for v in x.values())
+    if isinstance(x, list):
+        return any(_has_value(v) for v in x)
+    if isinstance(x, str):
+        return x.strip() != ""
+    return True   # 숫자·bool 등
 
 
 class GraphqlDetector(Detector):
-    """GraphQL introspection 활성 — 응답에 스키마가 실리면 정보 노출 확증."""
+    """GraphQL introspection — 응답에 스키마가 실리면 노출(성공), introspection 프로브인데
+    스키마가 안 오면(404·차단·미노출) 이 검사 한정 '영향 없음(안전)'으로 확정한다."""
     id = "graphql_introspection"
     tier = 1
     attack_types = frozenset({"graphql"})
+
+    def _is_introspection_probe(self, ctx):
+        blob = f"{ctx.probe or ''} {ctx.req_body or ''}".lower()
+        return "__schema" in blob or "introspectionquery" in blob
 
     def applies(self, ctx):
         pl = (ctx.probe or "").lower()
@@ -424,14 +494,51 @@ class GraphqlDetector(Detector):
                 or "introspectionquery" in pl or (ctx.category or "").lower() == "graphql")
 
     def detect(self, ctx):
-        if _GRAPHQL_INTROSPECT.search(ctx.body or ""):
+        body = ctx.body or ""
+        # ① 스키마 노출 = introspection 활성(성공)
+        if _GRAPHQL_INTROSPECT.search(body):
             return [{"name": "GraphQL introspection 노출", "verdict": "성공", "confidence": 80,
                      "why": "introspection 질의에 스키마(__schema/queryType/types)가 응답에 노출됨 → "
                             "전체 API 구조 열람 가능(공격 표면 정보 노출)",
                      "evidence": "응답에 __schema/queryType/types",
                      "method": "응답 시그니처", "where": "응답 본문(GraphQL 스키마)",
                      "detector_id": self.id, "tier": self.tier}]
-        return []
+        # ② GraphQL 쿼리가 데이터를 반환({"data":{...}}) → 엔드포인트 활성·쿼리 가능(공격 표면 확인).
+        #    __schema 노출은 아니지만, 예시처럼 실제 레코드가 돌아오면 introspection 없이도 API 가
+        #    살아있고 데이터를 내준다는 확정 신호(배열이면 다건 나열 = 열람 범위 점검 대상).
+        gd = _graphql_returned_data(body)
+        if gd:
+            enum = " · 배열(다건 레코드 나열)" if gd == "list" else ""
+            return [{"name": "GraphQL 엔드포인트 활성 — 쿼리 데이터 반환", "verdict": "미확정",
+                     "confidence": 45,
+                     "why": "GraphQL 질의에 데이터가 반환됨(\"data\":{...}) → 엔드포인트가 활성이고 쿼리에 "
+                            "응답함(공격 표면 확인)" + enum + ". 반환 필드에 민감정보·과다노출·IDOR 여부와 "
+                            "필드 단위 인가를 점검하세요. (introspection 스키마는 미노출)",
+                     "checked": "응답의 GraphQL 데이터 봉투(\"data\":{…})",
+                     "evidence": f"data 봉투 반환({gd}) (HTTP {ctx.status_code} · {len(body)}B)",
+                     "method": "응답 시그니처(GraphQL data)", "where": "응답 본문(GraphQL data 봉투)",
+                     "detector_id": self.id, "tier": self.tier}]
+        # ③ introspection '스캔 프로브'였는데 스키마도 데이터도 안 옴 → 이 검사 한정 영향 없음(안전).
+        #    (introspection 프로브가 아니면 판정하지 않음 — 무관한 요청을 안전이라 하지 않도록)
+        if not self._is_introspection_probe(ctx):
+            return []
+        if ctx.status_code in (404, 400, 405, 501):
+            reason = f"HTTP {ctx.status_code} — GraphQL 엔드포인트가 없거나 introspection 질의를 거부"
+        elif _GRAPHQL_INTROSPECT_OFF.search(body):
+            reason = "introspection 비활성화(오류로 명시적 차단)"
+        elif '"errors"' in body or '"error"' in body:
+            reason = "introspection 질의가 오류로 거부됨(스키마 미노출)"
+        elif body.strip():
+            reason = "응답에 스키마(__schema)가 없음 → introspection 비활성/제한"
+        else:
+            return []   # 빈 응답 등 불명확 → 판정 보류(inconclusive)
+        return [{"name": "GraphQL introspection 비활성 — 영향 없음", "verdict": "안전", "confidence": 78,
+                 "why": f"introspection 질의를 보냈으나 응답에 스키마가 없음({reason}) → introspection 이 "
+                        "노출되지 않음(이 검사 한정 영향 없음).",
+                 "checked": "응답의 __schema/queryType/types 및 introspection 차단 오류",
+                 "evidence": f"{reason} (HTTP {ctx.status_code} · {len(body)}B)",
+                 "method": "응답 시그니처(미검출)", "where": "응답 본문(GraphQL 스키마 부재)",
+                 "detector_id": self.id, "tier": self.tier}]
 
 
 register(GraphqlDetector())

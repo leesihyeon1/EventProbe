@@ -15,6 +15,7 @@ AI 상세 분석 - NVIDIA NIM (OpenAI 호환 API)로 요청/응답을 LLM 분석
 import os
 import json
 import re
+import asyncio
 import httpx
 
 from core import classify as _classify
@@ -37,6 +38,27 @@ def _apply_model_opts(payload: dict) -> dict:
     if ("nemotron" in model.lower() or "reason" in model.lower()) and not thinking_on:
         payload["chat_template_kwargs"] = {"thinking": False}
     return payload
+
+# 일시적 실패 재시도 — NVIDIA NIM 서버리스는 콜드스타트/용량 시 간헐적으로 404(빈 본문,
+# "Function '<uuid>': Not found for account")·429·5xx 를 뱉었다가 곧 회복한다. 짧은 백오프로
+# 몇 번 재시도해 'AI 판정 실패' 폴백 빈도를 낮춘다. 400/401/403 같은 확정 오류는 즉시 반환.
+_RETRY_STATUS = {404, 408, 409, 429, 500, 502, 503, 504}
+
+
+async def _post_chat(base_url: str, headers: dict, payload: dict, tries: int = 3):
+    """chat/completions POST(+_apply_model_opts) 를 일시 오류에 한해 재시도. 마지막 응답 반환."""
+    last = None
+    async with httpx.AsyncClient(timeout=_timeout()) as client:
+        for i in range(tries):
+            r = await client.post(f"{base_url}/chat/completions", headers=headers,
+                                  json=_apply_model_opts(payload))
+            if r.status_code == 200 or r.status_code not in _RETRY_STATUS:
+                return r
+            last = r
+            if i < tries - 1:
+                await asyncio.sleep(0.6 * (i + 1))
+    return last
+
 
 _BODY_LIMIT = 4000   # LLM 에 보낼 응답 본문 최대 길이(토큰/비용 관리)
 
@@ -130,8 +152,7 @@ async def ai_analyze(ctx: dict) -> dict | None:
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
+        r = await _post_chat(base_url, headers, payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}", "model": model}
         content = r.json()["choices"][0]["message"]["content"]
@@ -188,8 +209,7 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
+        r = await _post_chat(base_url, headers, payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
         content = r.json()["choices"][0]["message"]["content"].strip()
@@ -394,8 +414,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
         last_err = "AI 후보 응답 파싱 실패"
         # 소형 모델은 간헐적으로 파싱 불가/빈 응답을 냄 → 최대 2회 시도
         for attempt in range(2):
-            async with httpx.AsyncClient(timeout=_timeout()) as client:
-                r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
+            r = await _post_chat(base_url, headers, payload)
             if r.status_code != 200:
                 return {"error": f"NVIDIA API {r.status_code}: {r.text[:200]}"}
             content = r.json()["choices"][0]["message"]["content"]
@@ -596,8 +615,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers, json=_apply_model_opts(payload))
+        r = await _post_chat(base_url, headers, payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}", "model": model}
         content = r.json()["choices"][0]["message"]["content"]
@@ -675,9 +693,7 @@ async def ai_classify_attack(ctx: dict) -> dict | None:
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            r = await client.post(f"{base_url}/chat/completions", headers=headers,
-                                  json=_apply_model_opts(payload))
+        r = await _post_chat(base_url, headers, payload)
         if r.status_code != 200:
             return {"error": f"NVIDIA API {r.status_code}", "model": model}
         parsed = _extract_json(r.json()["choices"][0]["message"]["content"])

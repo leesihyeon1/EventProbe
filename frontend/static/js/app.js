@@ -313,11 +313,21 @@ function parseWget(tokens) {
 // Raw HTTP 파서
 function parseRawHttp(raw) {
   const text = raw.replace(/\r\n?/g, '\n');
-  const sep = text.indexOf('\n\n');
-  const head = sep === -1 ? text : text.slice(0, sep);
-  const body = sep === -1 ? '' : text.slice(sep + 2);
-  const lines = head.split('\n');
-  const reqLine = (lines.shift() || '').trim();
+  const allLines = text.split('\n');
+  const reqLine = (allLines.shift() || '').trim();
+  // 헤더/본문 경계: 빈 줄이 있으면 그 줄에서, 없으면 '유효한 헤더 형식이 아닌 첫 줄'에서 본문 시작.
+  // JSON 본문 {"query":"..."} 처럼 ':' 를 포함해도 헤더 이름 토큰 형식이 아니면 본문으로 처리한다
+  // (빈 줄이 collapse 된 붙여넣기에서도 본문이 헤더로 잘못 파싱되지 않도록).
+  const HDR = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+:/;
+  const headerLines = [];
+  let bodyStart = allLines.length;
+  for (let i = 0; i < allLines.length; i++) {
+    const t = allLines[i].trim();
+    if (t === '') { bodyStart = i + 1; break; }
+    if (!HDR.test(t)) { bodyStart = i; break; }
+    headerLines.push(t);
+  }
+  const body = allLines.slice(bodyStart).join('\n');
   // 요청 라인: METHOD URI [HTTP/x.x]. URI 에 인코딩 안 된 공백(SQLi 페이로드의 ' AND ...',
   // '-- -' 등)이 있거나 HTTP 버전이 없을 수 있으므로, 첫 토큰=메서드 / 마지막 토큰이
   // HTTP/x.x 면 버전 / 그 사이 전체(공백 포함)=URI 로 파싱한다(\S+ 로는 공백에서 끊긴다).
@@ -329,7 +339,6 @@ function parseRawHttp(raw) {
     if (/^HTTP\/[\d.]+$/i.test(tokens[end - 1])) { state._importedHttpVersion = tokens[end - 1]; end -= 1; }
     target = tokens.slice(1, end).join(' ') || '/';
   }
-  const headerLines = lines.map(l => l.trim()).filter(l => l && l.includes(':'));
   const hostLine = headerLines.find(h => /^host:/i.test(h));
   const host = hostLine ? hostLine.slice(hostLine.indexOf(':') + 1).trim() : '';
   let url;
