@@ -2469,7 +2469,6 @@ function renderVerdictCard(a, confidenceColor) {
           ${(ai.reasoning || det.summary) ? `<div class="detail-item">${escapeHtml(ai.reasoning || det.summary)}</div>` : ''}
           ${(ai.priority || det.priority) ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority || det.priority)}</div>` : ''}
           ${(ai.remediation || det.remediation) ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation || det.remediation)}</div>` : ''}
-          ${_findingEvidenceBlock(a.findings)}
         </div>
       </div>`;
   }
@@ -2497,7 +2496,6 @@ function renderVerdictCard(a, confidenceColor) {
         ${(outLabel || det.summary) ? `<div class="detail-item" style="margin-top:6px">${outLabel ? `<span class="tag ${outCls}" style="font-size:9px;margin-right:4px">${outLabel}</span>` : ''}${escapeHtml(det.summary || '')}</div>` : ''}
         ${det.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(det.priority)}</div>` : ''}
         ${det.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(det.remediation)}</div>` : ''}
-        ${_findingEvidenceBlock(a.findings)}
       </div>
     </div>`;
 }
@@ -2640,44 +2638,19 @@ function renderAnalysis(a, result) {
       </div>
     </div>` : ''}
 
-    <!-- 응답 메타 -->
-    <div class="analysis-card" data-card-id="res-info">
-      <div class="analysis-card-header">응답 정보</div>
-      <div class="analysis-card-body">
-        <div class="meta-grid">
-          <div class="meta-item">
-            <div class="meta-label">상태코드</div>
-            <div class="meta-value" style="color:${httpColor(result?.status_code)}">${result?.status_code || '-'}</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">응답 시간</div>
-            <div class="meta-value">${result?.response_time || 0}ms</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">WAF 탐지</div>
-            <div class="meta-value" style="font-size:11px;color:${a.waf_detected ? 'var(--warning)' : 'var(--text-muted)'}">${a.waf_detected || '없음'}</div>
-          </div>
-          <div class="meta-item">
-            <div class="meta-label">응답 크기${a.body_truncated ? ' <span style="color:var(--warning)">(절단)</span>' : ''}</div>
-            <div class="meta-value" title="${a.body_truncated ? `분석 범위: 앞 ${a.body_len_seen}자 / 전체 ${a.body_len_full}자` : ''}">${formatBytes(result?.body_size)}</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- ── 판정 & 근거 그룹 ── -->
+    <!-- 공격 결과 분석(증거 기반) — 판정의 '왜'. findings 유일 표시처(판정 카드 중복 제거) -->
+    ${renderAttackCard(a)}
 
-    <!-- 리다이렉트 체인 — 따라간 경우 '무엇을 보고 판정했는지'를 숨기지 않는다 -->
-    ${_redirectChainCard(result)}
+    <!-- 관련 문서(RAG) — 판정 근처로. AI 유무와 무관하게 참고용(판정 불변) -->
+    ${(() => {
+      const docs = (a.related_docs && a.related_docs.length) ? a.related_docs
+                 : ((a.ai_verdict && a.ai_verdict.rag_context) || []);
+      return docs.length ? _ragContextBlock(docs, docs.length) : '';
+    })()}
 
-    <!-- 기술 스택/인프라 지문 (Envoy, Next.js 등) -->
-    ${a.tech_stack?.length ? `
-    <div class="analysis-card" data-card-id="tech-stack">
-      <div class="analysis-card-header">감지된 기술 스택</div>
-      <div class="analysis-card-body">
-        <div class="tag-list">
-          ${a.tech_stack.map(s => `<span class="tag tag-blue" title="${escapeHtml(s.evidence || '')}">${escapeHtml(s.name)} · ${escapeHtml(s.kind)}</span>`).join('')}
-        </div>
-      </div>
-    </div>` : ''}
+    <!-- 판정 불가·의심 → 다음 단계 안내(확증 경로 CTA) -->
+    ${_nextActionCard(a, result)}
 
     <!-- 차단 이유 -->
     ${a.block_reason?.length ? `
@@ -2726,18 +2699,45 @@ function renderAnalysis(a, result) {
     <!-- 공격 유형 분류 (정규식 우선, miss 는 AI 보강) -->
     ${_attackClassCard(a)}
 
-    <!-- 판정 불가·의심 → 다음 단계 안내(확증 경로 CTA) -->
-    ${_nextActionCard(a, result)}
+    <!-- ── 응답 상세 그룹 (판정 근거 아님, 참고 컨텍스트 — 판정·근거 아래로) ── -->
+    <!-- 응답 메타 -->
+    <div class="analysis-card" data-card-id="res-info">
+      <div class="analysis-card-header">응답 정보</div>
+      <div class="analysis-card-body">
+        <div class="meta-grid">
+          <div class="meta-item">
+            <div class="meta-label">상태코드</div>
+            <div class="meta-value" style="color:${httpColor(result?.status_code)}">${result?.status_code || '-'}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">응답 시간</div>
+            <div class="meta-value">${result?.response_time || 0}ms</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">WAF 탐지</div>
+            <div class="meta-value" style="font-size:11px;color:${a.waf_detected ? 'var(--warning)' : 'var(--text-muted)'}">${a.waf_detected || '없음'}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">응답 크기${a.body_truncated ? ' <span style="color:var(--warning)">(절단)</span>' : ''}</div>
+            <div class="meta-value" title="${a.body_truncated ? `분석 범위: 앞 ${a.body_len_seen}자 / 전체 ${a.body_len_full}자` : ''}">${formatBytes(result?.body_size)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <!-- 공격 결과 분석 (증거 기반) -->
-    ${renderAttackCard(a)}
+    <!-- 리다이렉트 체인 — 따라간 경우 '무엇을 보고 판정했는지'를 숨기지 않는다 -->
+    ${_redirectChainCard(result)}
 
-    <!-- 관련 문서(RAG) — AI 유무와 무관하게 항상 표시(참고용, 판정 불변) -->
-    ${(() => {
-      const docs = (a.related_docs && a.related_docs.length) ? a.related_docs
-                 : ((a.ai_verdict && a.ai_verdict.rag_context) || []);
-      return docs.length ? _ragContextBlock(docs, docs.length) : '';
-    })()}
+    <!-- 기술 스택/인프라 지문 (Envoy, Next.js 등) -->
+    ${a.tech_stack?.length ? `
+    <div class="analysis-card" data-card-id="tech-stack">
+      <div class="analysis-card-header">감지된 기술 스택</div>
+      <div class="analysis-card-body">
+        <div class="tag-list">
+          ${a.tech_stack.map(s => `<span class="tag tag-blue" title="${escapeHtml(s.evidence || '')}">${escapeHtml(s.name)} · ${escapeHtml(s.kind)}</span>`).join('')}
+        </div>
+      </div>
+    </div>` : ''}
 
     <!-- AI 상세 분석 (NVIDIA NIM) -->
     ${a.ai ? renderAiCard(a.ai) : ''}
