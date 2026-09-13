@@ -879,12 +879,55 @@ function _setKv(arr, key, value, mode) {
   return 'added';
 }
 
+// CVE(알려진취약점) 페이로드는 자체 method·경로·body·headers 를 가진 '완성된 PoC 요청'이다.
+// URL 로 삽입할 때는 기존 요청 내용(파라미터·바디·메소드)을 비우고 이 PoC 로 통째 교체한다.
+// 단, 대상 호스트(origin)와 사용자 헤더(테스트 태그 등)는 유지한다.
+function applyCveRequest(p) {
+  const urlInput = document.getElementById('urlInput');
+  const cur = urlInput.value || '';
+  const m = cur.match(/^([a-z][a-z0-9+.-]*:\/\/[^\/?#]+)/i);
+  const origin = m ? m[1] : cur.replace(/[\/?#].*$/, '');
+  const pathPart = String(p.payload || '/');
+  // 경로의 '#'·공백은 서버 전송을 위해 인코딩(프래그먼트로 잘리지 않게)
+  const safePath = (pathPart.startsWith('/') ? pathPart : '/' + pathPart).replace(/#/g, '%23').replace(/ /g, '%20');
+  urlInput.value = origin + safePath;
+  state.injectUrlBase = null; state.injectUrlLast = null;   // URL 누적방지 상태 리셋
+
+  // 기존 요청 내용 초기화 — 쿼리 파라미터·바디는 CVE PoC 로 대체
+  state.kvParams = [];
+  renderKvEditor('paramsKv', state.kvParams);
+
+  const ms = document.getElementById('methodSelect');
+  if (ms) { ms.value = String(p.method || 'GET').toUpperCase(); ms.dispatchEvent(new Event('change')); }
+
+  const bodyEl = document.getElementById('bodyEditor');
+  if (bodyEl) bodyEl.value = (p.body != null) ? String(p.body) : '';
+
+  // CVE 지정 헤더는 덮어쓰기로 반영(사용자의 기존 헤더·테스트 태그는 유지)
+  if (p.headers && typeof p.headers === 'object') {
+    Object.entries(p.headers).forEach(([k, v]) => _setKv(state.kvHeaders, k, String(v), 'replace'));
+    renderKvEditor('headersKv', state.kvHeaders);
+  }
+  // 분석 시 category/payload 전달용 선택 상태 유지
+  switchReqTab(p.body != null && String(p.body) !== '' ? 'body' : 'params');
+  toast(`${p.cve || 'CVE'} PoC 로 요청 교체됨 (${String(p.method || 'GET').toUpperCase()} · 기존 요청 초기화)`, 'success');
+}
+
 function injectPayload() {
   if (!state.selectedPayload) return;
   const payload = state.selectedPayload.payload;
   const target  = document.getElementById('injectTarget').value;
   const mode    = document.getElementById('injectMode').value;   // replace | append
   const key     = (document.getElementById('injectKey').value || '').trim();
+
+  // CVE PoC(자체 method/body/headers 보유)를 URL 로 삽입 → 기존 요청 비우고 통째 교체
+  const _p = state.selectedPayload;
+  const _isCveReq = _p && (_p.cve || _p.method || _p.body ||
+                           (_p.headers && Object.keys(_p.headers).length));
+  if (target === 'url' && _isCveReq) {
+    applyCveRequest(_p);
+    return;
+  }
 
   if (target === 'url') {
     const urlInput = document.getElementById('urlInput');
