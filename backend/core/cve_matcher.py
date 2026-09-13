@@ -104,6 +104,10 @@ def match_cve_payloads(payloads_data: dict, path: str, params: Optional[dict] = 
             cand["body"] = p["body"]
         if p.get("headers"):
             cand["headers"] = p["headers"]
+        # 취약 경로 힌트 — header/param location CVE 는 payload 가 경로가 아니므로, 후보 카드로
+        # 적용할 때 올바른 경로(예: Shellshock=/cgi-bin/)를 세팅하도록 path_contains 를 전달.
+        if ap.get("path_contains"):
+            cand["applies_to"] = {"path_contains": ap["path_contains"]}
         if not cand["payload"]:
             continue
         strong.append(cand)

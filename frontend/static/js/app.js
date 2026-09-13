@@ -205,14 +205,24 @@ function renderKvEditor(containerId, rows) {
   el.appendChild(add);
 }
 
+// 주입 대상 파라미터 자동완성(datalist) 갱신 — URL/그리드 어디서 파라미터가 바뀌어도 반영.
+function _syncInjectParamList() {
+  if (document.getElementById('injectTarget')?.value !== 'param') return;
+  const dl = document.getElementById('injectKeyList');
+  if (!dl) return;
+  dl.innerHTML = existingKeys('param').map(k => `<option value="${escapeHtml(k)}">`).join('');
+}
+
 function updateKv(id, idx, field, val) {
   (id === 'headersKv' ? state.kvHeaders : state.kvParams)[idx][field] = val;
+  if (id === 'paramsKv' && field === 'key') _syncInjectParamList();   // 그리드 키 편집 시 자동완성 갱신
 }
 
 function removeKv(id, idx) {
   const arr = id === 'headersKv' ? state.kvHeaders : state.kvParams;
   arr.splice(idx, 1);
   renderKvEditor(id, arr);
+  if (id === 'paramsKv') _syncInjectParamList();
 }
 
 function kvToObj(arr) {
@@ -4553,13 +4563,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // URL 편집 시 주입 파라미터 자동완성(datalist) 갱신 — 두번째 이상의 쿼리 파라미터
   // (?id=..&pw=..)를 추가해도 대상 목록에 즉시 반영되도록. injectKey 입력값은 건드리지 않음.
-  document.getElementById('urlInput').addEventListener('input', () => {
-    if (document.getElementById('injectTarget')?.value === 'param') {
-      const keys = existingKeys('param');
-      document.getElementById('injectKeyList').innerHTML =
-        keys.map(k => `<option value="${escapeHtml(k)}">`).join('');
-    }
-  });
+  document.getElementById('urlInput').addEventListener('input', _syncInjectParamList);
 
   // 메서드 변경 시 페이로드 삽입 위치 자동 전환
   document.getElementById('methodSelect').addEventListener('change', e => {
