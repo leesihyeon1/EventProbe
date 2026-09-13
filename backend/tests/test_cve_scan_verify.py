@@ -83,8 +83,10 @@ def test_cve_probe_403_is_non_applicable_not_blocked():
 
 
 def test_cve_probe_200_with_body_and_no_matcher_stays_inconclusive():
-    """200 + 내용 있는 응답인데 확증 매처가 없으면 '미해당' 이라 단정하지 않는다(미확인 유지)."""
-    r = _cve(200, {"content-type": "text/html"}, "<html><body>hello</body></html>")
+    """200 + 내용 있는 응답인데 확증 매처가 없으면 '미해당' 이라 단정하지 않는다(미확인 유지).
+    (CVE 커버리지가 없는 고유 경로 사용 — matcher 백필 후에도 매칭되지 않도록)"""
+    r = _cve(200, {"content-type": "text/html"}, "<html><body>hello</body></html>",
+             payload="/zzq-uncovered-path-9999", url="https://t.example.com/zzq-uncovered-path-9999")
     assert r["attack_outcome"] == "inconclusive"
     assert not _f(r, "CVE 프로브 — 취약 징후 없음(미해당)")
     unk = _f(r, "자동 판정 불가")

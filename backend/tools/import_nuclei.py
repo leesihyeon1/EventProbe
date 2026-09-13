@@ -305,6 +305,8 @@ def main():
     ap.add_argument("--severity", default="critical,high",
                     help="쉼표구분 심각도 필터 (기본 critical,high). 'all' 이면 전체")
     ap.add_argument("--limit", type=int, default=0, help="추가 최대 개수(0=무제한)")
+    ap.add_argument("--backfill-only", action="store_true",
+                    help="신규 CVE 추가 없이 기존 항목의 확증 매처만 보강(뱅크 크기 불변)")
     ap.add_argument("--dry-run", action="store_true", help="파일 미변경, 요약만 출력")
     ap.add_argument("--exposures", action="store_true",
                     help="http/exposures 매처를 exposure_signatures.json 으로 임포트(노출 탐지 룰). "
@@ -371,14 +373,18 @@ def main():
             if tgt is not None and backfill_matchers(tgt, e):
                 backfilled += 1
             continue
+        # 신규 CVE — backfill-only 거나 추가 한도 도달이면 '추가'만 멈추고, 나머지 템플릿의
+        # 기존 항목 매처 보강은 계속되도록 continue(예전엔 break 라 백필이 끊겼다).
+        if args.backfill_only:
+            continue
+        if args.limit and added >= args.limit:
+            continue
         have_ids.add(e["id"])
         if e["cve"]:
             have_cves.add(e["cve"])
         have_keys.add(key)
         new_entries.append(e)
         added += 1
-        if args.limit and added >= args.limit:
-            break
 
     print(f"스캔 파일: {len(files)} | 추가: {added} | 중복스킵: {skipped_dup} "
           f"(매처 보강: {backfilled}) | 변환불가: {skipped_conv} | 심각도필터: {skipped_sev}")
