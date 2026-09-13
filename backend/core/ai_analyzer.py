@@ -4,13 +4,16 @@ AI 상세 분석 - NVIDIA NIM (OpenAI 호환 API)로 요청/응답을 LLM 분석
 정규식 기반 analyzer 의 얕은 details 를 보강한다:
 요청+응답+기존 판정을 함께 넘겨 "공격이 실제로 통했는지"를 추론하게 한다.
 
-설정(환경변수):
-  NVIDIA_API_KEY   필수. 없으면 기능 자동 비활성(도구는 그대로 동작).
-  NVIDIA_MODEL     선택. 기본 meta/llama-3.2-11b-vision-instruct
-  NVIDIA_BASE_URL  선택. 기본 https://integrate.api.nvidia.com/v1
+설정(환경변수) — 제공자 무관(OpenAI 호환 API면 무엇이든). 로컬 모델로 갈아끼우려면
+AI_BASE_URL 을 로컬 서버(예: http://localhost:11434/v1 ollama, http://localhost:8000/v1 vLLM)
+로 바꾸고 AI_MODEL 을 지정하면 된다. 코드 수정 불필요.
+  AI_API_KEY / NVIDIA_API_KEY   API 키(로컬 서버는 아무 값이나. 없으면 AI 기능 자동 비활성).
+  AI_MODEL   / NVIDIA_MODEL      모델 ID. 기본 meta/llama-3.2-11b-vision-instruct
+  AI_BASE_URL/ NVIDIA_BASE_URL   OpenAI 호환 엔드포인트. 기본 NVIDIA NIM.
+(AI_* 가 우선, 없으면 NVIDIA_* 로 폴백 — 기존 설정 그대로 동작.)
 
-⚠️ 클라우드 API 사용 시 분석 대상 응답이 NVIDIA로 전송된다.
-   내부/민감 대상은 로컬 NIM(NVIDIA_BASE_URL 변경)으로 돌리는 것을 권장.
+⚠️ 클라우드 API 사용 시 분석 대상 응답이 외부(NVIDIA 등)로 전송된다.
+   내부/민감 대상은 로컬 모델(AI_BASE_URL 변경)로 돌리는 것을 권장.
 """
 import os
 import json
@@ -19,11 +22,13 @@ import asyncio
 import httpx
 
 from core import classify as _classify
+from core import prompts as _prompts
 
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
-def _api_key():  return os.getenv("NVIDIA_API_KEY", "").strip()
-def _model():    return os.getenv("NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct").strip()
-def _base_url(): return os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+# AI_* 를 우선 보고 없으면 NVIDIA_* 로 폴백해, 제공자(로컬/클라우드)를 env 만으로 바꾼다.
+def _api_key():  return (os.getenv("AI_API_KEY") or os.getenv("NVIDIA_API_KEY", "")).strip()
+def _model():    return (os.getenv("AI_MODEL") or os.getenv("NVIDIA_MODEL") or "meta/llama-3.2-11b-vision-instruct").strip()
+def _base_url(): return (os.getenv("AI_BASE_URL") or os.getenv("NVIDIA_BASE_URL") or "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 def _timeout():
     try: return max(10.0, float(os.getenv("AI_TIMEOUT", "120")))
     except ValueError: return 120.0
@@ -62,19 +67,8 @@ async def _post_chat(base_url: str, headers: dict, payload: dict, tries: int = 3
 
 _BODY_LIMIT = 4000   # LLM 에 보낼 응답 본문 최대 길이(토큰/비용 관리)
 
-_SYSTEM_PROMPT = (
-    "You are a senior web application penetration tester. "
-    "Given an HTTP request (possibly carrying an attack payload) and the server's response, "
-    "decide whether the attack actually SUCCEEDED — not merely whether it was blocked. "
-    "A 200 status alone does NOT mean success; look for payload reflection, SQL/error output, "
-    "data leakage, timing, or behavioral changes. Be skeptical and flag false positives. "
-    "Respond ONLY with a single JSON object, no prose, using exactly these keys: "
-    '{"attack_success":"yes|no|inconclusive","vulnerability":"short name or null",'
-    '"severity":"critical|high|medium|low|info","confidence":0-100,'
-    '"reasoning":"1-3 sentences","evidence":["concrete observations from the response"],'
-    '"reproduction":"how to reproduce, or null","remediation":"short fix","false_positive_risk":"low|medium|high"}. '
-    "Write reasoning/remediation in Korean."
-)
+# 기능별 시스템 프롬프트는 backend/prompts/*.md 로 분리(_prompts.load). 배포 없이 튜닝하고
+# 로컬 모델에 맞춰 조정하기 쉽게 하기 위함. 여기선 이름으로만 참조한다.
 
 
 def is_enabled() -> bool:
@@ -144,7 +138,7 @@ async def ai_analyze(ctx: dict) -> dict | None:
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": _prompts.load("analyze")},
             {"role": "user", "content": _build_user_prompt(ctx)},
         ],
         "temperature": 0.2,
@@ -163,16 +157,6 @@ async def ai_analyze(ctx: dict) -> dict | None:
         return {"error": "AI 응답 JSON 파싱 실패", "model": model}
     except Exception as e:
         return {"error": f"AI 분석 오류: {e}", "model": model}
-
-
-_VARIANT_SYSTEM = (
-    "You are a WAF-evasion payload generator for AUTHORIZED security testing. "
-    "Given a base attack payload that was blocked, produce evasion variants that keep the "
-    "same attack semantics but may bypass signature/pattern filters — using techniques like "
-    "case toggling, inline comments, encoding (URL/double-URL/unicode/hex), whitespace tricks, "
-    "keyword splitting, and equivalent syntax. "
-    "Respond ONLY with a JSON array of strings (the payloads), no prose, no numbering."
-)
 
 
 async def ai_generate_variants(base_payload: str, category: str = "", waf: str = "",
@@ -201,7 +185,7 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _VARIANT_SYSTEM},
+            {"role": "system", "content": _prompts.load("variants")},
             {"role": "user", "content": user},
         ],
         "temperature": 0.7,
@@ -223,41 +207,6 @@ async def ai_generate_variants(base_payload: str, category: str = "", waf: str =
         return {"error": "AI 변형 응답 파싱 실패"}
     except Exception as e:
         return {"error": f"AI 변형 오류: {e}"}
-
-
-_SUGGEST_SYSTEM = '''You are a web app pentest planner (authorized testing). Given one HTTP request (Host removed), propose payload candidates as JSON. HARD RULES:
-- Each "payload" MUST be a CONCRETE, literal, ready-to-send string that actually triggers the test. NEVER a description or placeholder. FORBIDDEN examples: "shell command", "{{shell command}}", "PAYLOAD", "your payload", "<command>", "[payload]". Use REAL values from the PAYLOAD BANK below.
-- location MUST be "param" (existing query/body param), "path" (append to URL path), or "body". Use "header" ONLY for Host / X-Forwarded-For / X-Forwarded-Host / X-Original-URL / Referer.
-- NEVER use User-Agent, Content-Type, Accept, or Accept-* as an injection target.
-- Identify the app from the path and pick fitting tests: /manager* = Tomcat Manager; /autodiscover* = MS Exchange (ProxyLogon path); /.env /.git = secret file read; /actuator* = Spring Boot; /wp-* = WordPress; /GponForm/diag_Form = GPON router RCE (inject cmdi into body param dest_host, e.g. dest_host=;id;); /cgi-bin/* = CGI/Shellshock; /boaform/* /goform/* = router admin. If a query/body param exists, inject the payload INTO that param.
-- CRITICAL — do NOT invent parameter names. Use param ONLY if it appears in "query params" or "body". If there is NO usable param, set location="path" (param="") or location="body" and target the app's REAL known field (e.g. dest_host for GPON). Never emit a made-up param like "images/", "input", "data".
-- PRIORITIZE by param name / endpoint and put the BEST-FIT category FIRST. Map:
-    numeric value OR name in {id,uid,pid,user,userid,order,orderid,account,no,seq} -> sqli (first) + idor;
-    login/signin/auth/session/token endpoints -> sqli AND nosql AUTH-BYPASS on the credential fields (' OR '1'='1 , {"$ne":""});
-    name in {url,uri,next,return,returnurl,redirect,callback,dest,continue,link,site} -> ssrf + redirect;
-    name in {file,path,page,doc,document,template,include,view,lang,dir} -> lfi + ssti;
-    name in {cmd,command,exec,run,ping,host,domain,ip,addr} -> cmdi;
-    free-text search/comment/message/q/query/name -> xss + sqli.
-  ALWAYS include the obvious high-signal category for the endpoint — NEVER omit sqli on an id/login, ssrf on a url param, or lfi on a file param.
-- 6-8 DISTINCT candidates. Ensure CATEGORY DIVERSITY: at most 2 per category (more only if the endpoint strongly implies one, e.g. a login page), and never repeat near-identical payloads.
-
-PAYLOAD BANK (use these exact styles; pick real values, never placeholders):
-  sqli: ' OR '1'='1     1' ORDER BY 5-- -     ' UNION SELECT NULL,NULL-- -     1 AND SLEEP(5)-- -
-  xss:  <script>alert(1)</script>     "><img src=x onerror=alert(1)>     '-alert(1)-'
-  cmdi: ;id     | id     $(id)     `id`     ;cat /etc/passwd     & whoami
-  ssti: {{7*7}}     ${7*7}     #{7*7}     <%= 7*7 %>     {{7*'7'}}
-  lfi:  ../../../../etc/passwd     ....//....//etc/passwd     /etc/passwd%00
-  ssrf: http://127.0.0.1:80/     http://169.254.169.254/latest/meta-data/     file:///etc/passwd
-  redirect: //evil.example.com     https://evil.example.com     @evil.example.com
-  nosql: ' || '1'=='1     [$ne]=     {"$gt":""}
-  path/authbypass: /..;/     ..%2f..%2f     /%2e%2e/     /manager/html/..;/
-
-Output ONLY this JSON (no prose):
-{"test_type":"app/endpoint","summary":"Korean 1 sentence","candidates":[{"category":"sqli|xss|lfi|ssrf|cmdi|ssti|redirect|idor|nosql|authbypass|other","location":"param|path|body|header","param":"name or empty for path","payload":"string","why":"Korean short","rag_ref":0}]}
-- "rag_ref": if a candidate was derived from a numbered RETRIEVED snippet (shown in the user message), set it to that number; otherwise 0 or omit. Do NOT invent a number when no RETRIEVED block is present.
-
-EXAMPLE for POST with body {"q":"test"} (param q exists):
-{"test_type":"검색 파라미터 q","summary":"검색 파라미터 q에 대한 인젝션 점검","candidates":[{"category":"sqli","location":"body","param":"q","payload":"' OR '1'='1","why":"불린 기반 SQL 인젝션"},{"category":"xss","location":"body","param":"q","payload":"<script>alert(1)</script>","why":"반사형 XSS"},{"category":"cmdi","location":"body","param":"q","payload":";id","why":"OS 명령 주입"},{"category":"ssti","location":"body","param":"q","payload":"{{7*7}}","why":"템플릿 평가 결과 49 확인"}]}'''
 
 
 def _salvage_candidates(text: str) -> list:
@@ -396,7 +345,7 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SUGGEST_SYSTEM},
+            {"role": "system", "content": _prompts.load("suggest")},
             {"role": "user", "content": user},
         ],
         "temperature": 0.3,
@@ -502,64 +451,6 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
         return {"error": f"AI 후보 오류: {type(e).__name__} {e}"}
 
 
-_VERDICT_SYSTEM = (
-    "당신은 웹 보안 분석가입니다. 결정적 스캐너가 뽑은 라벨/결과(공격 성공 신호, 알림 이름·위험도, "
-    "상태코드, 응답시간)만 받습니다 — 원본 응답 데이터는 없습니다. 당신의 일은 재판정이 아니라, 이 신호들을 "
-    "사람이 읽기 좋은 자연스러운 한국어로 요약·우선순위화·조치 제안하는 것입니다.\n"
-    "규칙:\n"
-    "1) outcome 은 주어진 '확정_판정'을 그대로 따른다(뒤집지 말 것). 공격 성공 신호가 있으면 success, "
-    "없으면 inconclusive. 보안 헤더/쿠키 같은 '응답 위생' 문제는 별개이며 '공격이 차단됐다'는 뜻이 아니다.\n"
-    "1-b) 이번 공격의 결과가 판정의 중심이다. '응답 위생'은 이번 공격 결과가 아니므로 주된 발견처럼 "
-    "앞세우지 말 것 — 공격 결과를 먼저 서술하고, 위생 문제는 있으면 뒤에 한 문장으로만 덧붙인다.\n"
-    "1-b-2) outcome 이 blocked 여도 WAF 지문이나 baseline 근거 없이 '공격이 성공적으로 차단/방어됐다'고 "
-    "단정하지 말 것. 차단 상태코드(403 등)는 payload 를 막은 것일 수도, 경로 자체가 원래 거부되는 것일 "
-    "수도 있다. 반드시 '주어진 상태코드' 를 그대로 언급하고(임의로 403 이라 쓰지 말 것), '요청이 <상태코드>"
-    "로 거부됨(WAF 필터인지 경로 자체 제한인지 미확인)' 수준으로 서술하고, priority 에 '정상 파라미터로 "
-    "baseline 비교'를 제안한다. 이때 confidence 는 80 을 넘기지 말 것.\n"
-    "1-c) 각 공격_신호에는 verdict 가 붙어 있다(성공/안전/미확정). 반드시 그 verdict 대로 서술한다: "
-    "'성공'=실제로 뚫림, '안전'=그 항목은 안전함(예: 요청한 파일이 응답에 노출되지 않음), '미확정'=추가 확인 필요. "
-    "verdict 가 '안전'인 항목을 '노출됨/성공'처럼 쓰지 말 것. 신호 이름의 글자(예: '미노출'에 든 '노출')만 보고 "
-    "반대로 해석하지 말고, 반드시 verdict 와 why 를 근거로 삼는다. '노출됐지만 성공 아님' 같은 모순 문장 금지.\n"
-    "1-d) 세 상태를 분명히 구분한다: (성공)취약 확인 / (안전·차단)안전 확인 / (미확인)자동 판정 불가. "
-    "verdict 가 '미확인'이거나 신호가 전혀 없는 inconclusive 는 '안전/취약하지 않음/노출되지 않음'이라고 단정하지 "
-    "말 것 — 이는 '판정 불가'이지 '안전'이 아니다. 이 경우 '자동 판정 불가 — 응답을 직접 확인하거나 확증 스캔/"
-    "baseline 비교 필요'로 서술하고 priority 에 그 확인 방법을 넣는다. '안전/미노출' 이라는 표현은 verdict 가 "
-    "실제로 '안전'(또는 outcome=blocked)인 신호가 있을 때만 쓴다.\n"
-    "2) severity 는 공격 결과와 알림 위험도 중 가장 높은 값.\n"
-    "3) 문장은 자연스러운 한국어로 쓰고, 내부 필드명·변수명(attack_signals, security_alerts, outcome 등)을 "
-    "그대로 노출하지 말 것. 무엇을 확인해서 무엇을 확인한다는 식의 동어반복·순환 문장 금지. 신호가 실제로 "
-    "의미하는 바를 구체적으로 서술한다.\n"
-    "4) confidence(0-100)는 이 판정을 얼마나 확신하는지. 반사·파일읽기·명령출력·시간지연 일치 등 직접 증거가 "
-    "있으면 85-100, 성공 신호가 전혀 없어 미확인이면 50-70. 미확인(inconclusive)에 100 을 주지 말 것.\n"
-    "5) reasoning 은 무엇이 관찰됐고 그래서 어떤 상태인지 1-2문장. 각 신호에는 evidence(관찰된 근거: "
-    "상태코드·응답크기·검출/미검출한 시그니처·시간차 등)가 붙어 있으니, 결론만 말하지 말고 그 evidence 를 "
-    "구체적으로 인용해 근거를 밝힌다(예: 'HTTP 200·84KB 응답에 .env 시그니처가 없어 미노출'). priority 는 다음에 "
-    "실제로 확인/수행할 구체적 행동(없으면 빈 문자열). remediation 은 구체적 수정(없으면 빈 문자열). 지어내지 말 것.\n"
-    "6) remediation 에서 누락된 보안 헤더/쿠키 플래그를 하나하나 나열하지 말 것. 여러 개면 "
-    "'여러 보안 헤더 누락(CSP·HSTS 등) 및 쿠키 플래그 미설정 보완' 처럼 한 구절로 요약한다. 공격이 실제로 "
-    "성공(verdict 성공/outcome success)했다면 remediation 은 그 취약점 수정에 집중하고 위생은 덧붙이지 않는다.\n"
-    "오직 JSON 객체 하나만 출력(그 외 설명 금지): "
-    '{"outcome":"success|blocked|inconclusive","severity":"critical|high|medium|low|info",'
-    '"confidence":0-100,"reasoning":"한국어 1-2문장","priority":"한국어 짧게 또는 빈 문자열",'
-    '"remediation":"한국어 짧게 또는 빈 문자열"}\n'
-    "7) reasoning 은 반드시 '공격_신호'의 evidence/verdict 에 근거해 그 공격 유형에 맞게 쓴다. 파일/노출 "
-    "공격이 아니면(예: 명령 주입·SQLi·SSTI) '파일이 노출되지 않았다'고 쓰지 말 것 — evidence 가 '명령 실행 "
-    "출력 검색 → 미검출'이면 '명령 실행 흔적이 확인되지 않음'처럼 그 내용을 그대로 반영한다.\n"
-    "좋은 예(명령 주입이 미확인으로 끝난 경우 — 공격 유형에 맞춰, 위생은 뒤에 한 문장): "
-    '{"outcome":"inconclusive","severity":"low","confidence":75,'
-    '"reasoning":"주입한 명령의 실행 출력(uid= 등)이 응답에서 확인되지 않아 명령 주입 성공은 미확인입니다(200 일반 페이지). 블라인드일 수 있으니 확증 스캔/OOB 로 재확인하세요. 별개로 CSP 등 보안 헤더 누락이 있습니다.",'
-    '"priority":"확증 스캔 또는 OOB(콜백)로 blind 실행 여부 재확인",'
-    '"remediation":"응답 위생 개선이 필요하면 여러 보안 헤더 누락(CSP·HSTS 등) 보완"}\n'
-    "9) '공격_요청'(payload·경로·파라미터·헤더 이름)이 주어지면, 그걸로 이 요청이 어떤 공격을 노리는지 "
-    "구체적으로 식별하고 영향도(성공 시 무엇이 가능한가 — 데이터 유출·원격코드실행·인증우회·계정탈취 등)를 "
-    "reasoning 에 짧게 담는다. 단, 성공/실패 판정(outcome/verdict)은 여전히 '공격_신호'로만 결정한다 — "
-    "요청이 위험해 보인다는 이유만으로 성공으로 단정하지 말 것(신호 없으면 미확인). 요청과 신호가 어긋나면 "
-    "신호를 우선한다.\n"
-    "8) RETRIEVED(참고문서) 블록이 있으면 이 공격 유형에 대한 검증된 지식이다. priority(다음 확인 방법)와 "
-    "remediation(수정 방안)을 그 문서 내용에 근거해 더 구체적으로 쓴다(예: SSRF 성공 → URL 파서 불일치 확인 "
-    "기법을 priority 에 반영). 단, 판정(outcome/verdict)을 뒤집는 근거로는 쓰지 말 것 — 판정은 실제 신호로만 "
-    "결정한다. 문서에 없는 내용을 지어내거나 문서 제목/페이지를 그대로 인용하지 말고, 내용을 녹여 서술한다."
-)
 
 
 async def ai_verdict(ctx: dict) -> dict | None:
@@ -606,7 +497,7 @@ async def ai_verdict(ctx: dict) -> dict | None:
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": _VERDICT_SYSTEM},
+            {"role": "system", "content": _prompts.load("verdict")},
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
@@ -646,17 +537,6 @@ async def ai_verdict(ctx: dict) -> dict | None:
 # AI 분류(classify) 화이트리스트 — 카테고리 레지스트리 단일 소스에서 파생.
 from core.categories import AI_CLASSIFY_TYPES as _KNOWN_ATTACK_TYPES
 
-_CLASSIFY_SYS = (
-    "당신은 웹 보안 분석가입니다. 주어진 HTTP 요청(대상 호스트는 제거됨)이 '어떤 공격 시도'인지 "
-    "분류하세요. 판정이 아니라 분류입니다 — 공격이 성공했는지는 묻지 않습니다. 요청의 payload·"
-    "파라미터·경로·헤더(값 포함)를 근거로, 아래 유형 중에서 고르세요. 헤더에 실린 공격(User-Agent·"
-    "Referer·X-* 등의 Log4Shell ${jndi:...}, Shellshock () { :;}, 헤더 SQLi 등)도 반드시 살피세요. "
-    "난독화·인코딩(base64·유니코드 등)은 의미로 해석하세요. 공격 징후가 없으면 types 를 빈 배열로 두세요.\n"
-    f"유형: {', '.join(sorted(set(_KNOWN_ATTACK_TYPES)))}\n"
-    "JSON 만 출력:\n"
-    '{"types":["<유형>",...],"primary":"<가장 가능성 높은 유형 또는 빈 문자열>",'
-    '"confidence":0-100,"header_borne":true|false,"reason":"<한국어 한 문장 근거>"}'
-)
 
 
 async def ai_classify_attack(ctx: dict) -> dict | None:
@@ -679,9 +559,11 @@ async def ai_classify_attack(ctx: dict) -> dict | None:
         f"headers:\n{hdr_lines or '  (none)'}\n"
         "이 요청이 어떤 공격 시도인지 분류해 JSON 으로 주세요."
     )
+    classify_sys = _prompts.load("classify").replace(
+        "__ATTACK_TYPES__", ", ".join(sorted(set(_KNOWN_ATTACK_TYPES))))
     payload = {
         "model": model,
-        "messages": [{"role": "system", "content": _CLASSIFY_SYS},
+        "messages": [{"role": "system", "content": classify_sys},
                      {"role": "user", "content": user}],
         "temperature": 0.0,
         "max_tokens": 400,
