@@ -880,37 +880,59 @@ function _setKv(arr, key, value, mode) {
 }
 
 // CVE(알려진취약점) 페이로드는 자체 method·경로·body·headers 를 가진 '완성된 PoC 요청'이다.
-// URL 로 삽입할 때는 기존 요청 내용(파라미터·바디·메소드)을 비우고 이 PoC 로 통째 교체한다.
-// 단, 대상 호스트(origin)와 사용자 헤더(테스트 태그 등)는 유지한다.
+// 삽입 시 기존 요청(파라미터·바디)을 비우고 location(path/param/body/header)에 맞게 PoC 로
+// 통째 교체한다. 대상 호스트(origin)와 사용자 헤더(테스트 태그 등)는 유지한다.
 function applyCveRequest(p) {
+  const loc = String(p.location || 'path').toLowerCase();
   const urlInput = document.getElementById('urlInput');
   const cur = urlInput.value || '';
-  const m = cur.match(/^([a-z][a-z0-9+.-]*:\/\/[^\/?#]+)/i);
-  const origin = m ? m[1] : cur.replace(/[\/?#].*$/, '');
-  const pathPart = String(p.payload || '/');
-  // 경로의 '#'·공백은 서버 전송을 위해 인코딩(프래그먼트로 잘리지 않게)
-  const safePath = (pathPart.startsWith('/') ? pathPart : '/' + pathPart).replace(/#/g, '%23').replace(/ /g, '%20');
-  urlInput.value = origin + safePath;
+  const origin = (cur.match(/^([a-z][a-z0-9+.-]*:\/\/[^\/?#]+)/i) || [,''])[1] || cur.replace(/[\/?#].*$/, '');
+  const curPath = (cur.match(/^[a-z][a-z0-9+.-]*:\/\/[^\/?#]+(\/[^?#]*)?/i) || [,,''])[2] || '';
+  const enc = s => String(s).replace(/#/g, '%23').replace(/ /g, '%20');
+
+  // 경로 결정: location=path 면 payload 가 경로. 그 외엔 취약경로(applies_to.path_contains)
+  // 우선, 없으면 현재 경로 유지.
+  let path;
+  if (loc === 'path') {
+    path = String(p.payload || '/');
+  } else {
+    const ac = p.applies_to && p.applies_to.path_contains;
+    path = (ac && ac.length) ? String(ac[0]) : (curPath || '/');
+  }
+  if (!path.startsWith('/')) path = '/' + path;
+
+  // location=param 이면 payload 를 쿼리 파라미터로 붙인다(경로에 쿼리가 없을 때)
+  let query = '';
+  if (loc === 'param' && p.param && !path.includes('?')) {
+    query = '?' + encodeURIComponent(p.param) + '=' + encodeURIComponent(p.payload || '');
+  }
+  urlInput.value = origin + enc(path) + query;
   state.injectUrlBase = null; state.injectUrlLast = null;   // URL 누적방지 상태 리셋
 
-  // 기존 요청 내용 초기화 — 쿼리 파라미터·바디는 CVE PoC 로 대체
+  // 기존 쿼리 파라미터 초기화(경로/쿼리로 대체됨)
   state.kvParams = [];
   renderKvEditor('paramsKv', state.kvParams);
 
   const ms = document.getElementById('methodSelect');
   if (ms) { ms.value = String(p.method || 'GET').toUpperCase(); ms.dispatchEvent(new Event('change')); }
 
+  // 바디: location=body 면 payload(또는 p.body)를 바디로, 그 외엔 p.body 만
   const bodyEl = document.getElementById('bodyEditor');
-  if (bodyEl) bodyEl.value = (p.body != null) ? String(p.body) : '';
+  if (bodyEl) {
+    if (loc === 'body') bodyEl.value = (p.body != null && String(p.body) !== '') ? String(p.body) : String(p.payload || '');
+    else bodyEl.value = (p.body != null) ? String(p.body) : '';
+  }
 
-  // CVE 지정 헤더는 덮어쓰기로 반영(사용자의 기존 헤더·테스트 태그는 유지)
+  // 헤더: location=header 면 param=헤더명/payload=값. 추가로 p.headers 도 반영.
+  if (loc === 'header' && p.param) _setKv(state.kvHeaders, p.param, String(p.payload || ''), 'replace');
   if (p.headers && typeof p.headers === 'object') {
     Object.entries(p.headers).forEach(([k, v]) => _setKv(state.kvHeaders, k, String(v), 'replace'));
-    renderKvEditor('headersKv', state.kvHeaders);
   }
-  // 분석 시 category/payload 전달용 선택 상태 유지
-  switchReqTab(p.body != null && String(p.body) !== '' ? 'body' : 'params');
-  toast(`${p.cve || 'CVE'} PoC 로 요청 교체됨 (${String(p.method || 'GET').toUpperCase()} · 기존 요청 초기화)`, 'success');
+  renderKvEditor('headersKv', state.kvHeaders);
+
+  const tab = (bodyEl && bodyEl.value) ? 'body' : (loc === 'header' ? 'headers' : 'params');
+  switchReqTab(tab);
+  toast(`${p.cve || 'CVE'} PoC 로 요청 교체됨 (${String(p.method || 'GET').toUpperCase()} · ${loc} · 기존 요청 초기화)`, 'success');
 }
 
 function injectPayload() {
@@ -920,11 +942,12 @@ function injectPayload() {
   const mode    = document.getElementById('injectMode').value;   // replace | append
   const key     = (document.getElementById('injectKey').value || '').trim();
 
-  // CVE PoC(자체 method/body/headers 보유)를 URL 로 삽입 → 기존 요청 비우고 통째 교체
+  // CVE PoC(자체 method/경로/body/headers 보유)는 location(path/param/body/header) 무관하게
+  // 기존 요청 비우고 통째 교체 — location=param/body/header 도 전체 교체.
   const _p = state.selectedPayload;
   const _isCveReq = _p && (_p.cve || _p.method || _p.body ||
                            (_p.headers && Object.keys(_p.headers).length));
-  if (target === 'url' && _isCveReq) {
+  if (_isCveReq) {
     applyCveRequest(_p);
     return;
   }
