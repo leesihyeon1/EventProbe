@@ -39,7 +39,8 @@ def _fake_llm(monkeypatch, content):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Python 3.14 에서 get_event_loop() 는 실행 중 루프가 없으면 예외 → asyncio.run 사용
+    return asyncio.run(coro)
 
 
 def test_classify_returns_normalized(monkeypatch):
