@@ -3195,10 +3195,10 @@ function renderAlerts(alerts) {
       <div class="alert-filter-bar">${filterTabHtml}</div>
       <!-- Alert 목록 -->
       <div id="alertList"></div>
-      <!-- Informational 더보기 버튼 -->
+      <!-- 저위험·정보성 더보기/접기 버튼 -->
       <div id="alertInfoMore" style="display:none;text-align:center;padding:6px 0">
         <button class="alert-more-btn" onclick="toggleInfoAlerts()">
-          정보성 ${counts.informational}건 더보기 ▼
+          저위험·정보성 ${counts.low + counts.informational}건 더보기 ▼
         </button>
       </div>
     </div>`;
@@ -3225,20 +3225,20 @@ function renderAlertList(section, alerts, filter) {
   // 필터 적용
   const filtered = filter === 'all' ? alerts : alerts.filter(a => a.risk === filter);
 
-  // 필터가 'all'일 때: informational은 기본 숨김 (D안)
-  const showAll = filter !== 'all' || section._showInfo;
+  // 필터가 'all'일 때: 저위험 위생 항목(low)·정보성(informational)은 기본 숨김 —
+  // 공격 성공/고위험 판정이 위생 노이즈에 묻히지 않게 뒤로 접는다.
+  const isSecondary = a => a.risk === 'low' || a.risk === 'informational';
+  const secondaryCount = counts.low + counts.informational;
   const mainAlerts = filter === 'all' && !section._showInfo
-    ? filtered.filter(a => a.risk !== 'informational')
+    ? filtered.filter(a => !isSecondary(a))
     : filtered;
-  const infoAlerts = filter === 'all' && !section._showInfo
-    ? filtered.filter(a => a.risk === 'informational')
-    : [];
 
-  // 더보기 버튼 표시 여부
-  if (filter === 'all' && counts.informational > 0 && !section._showInfo) {
+  // 더보기/접기 버튼
+  if (filter === 'all' && secondaryCount > 0) {
     moreBtn.style.display = 'block';
-    moreBtn.querySelector('.alert-more-btn').textContent =
-      `정보성 ${counts.informational}건 더보기 ▼`;
+    moreBtn.querySelector('.alert-more-btn').textContent = section._showInfo
+      ? '저위험·정보성 항목 접기 ▲'
+      : `저위험·정보성 ${secondaryCount}건 더보기 ▼`;
   } else {
     moreBtn.style.display = 'none';
   }
