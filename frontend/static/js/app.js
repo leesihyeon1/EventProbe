@@ -4471,6 +4471,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') sendRequest();
   });
 
+  // URL 편집 시 주입 파라미터 자동완성(datalist) 갱신 — 두번째 이상의 쿼리 파라미터
+  // (?id=..&pw=..)를 추가해도 대상 목록에 즉시 반영되도록. injectKey 입력값은 건드리지 않음.
+  document.getElementById('urlInput').addEventListener('input', () => {
+    if (document.getElementById('injectTarget')?.value === 'param') {
+      const keys = existingKeys('param');
+      document.getElementById('injectKeyList').innerHTML =
+        keys.map(k => `<option value="${escapeHtml(k)}">`).join('');
+    }
+  });
+
   // 메서드 변경 시 페이로드 삽입 위치 자동 전환
   document.getElementById('methodSelect').addEventListener('change', e => {
     const bodyMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
