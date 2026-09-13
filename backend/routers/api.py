@@ -272,6 +272,10 @@ _OUTCOME_INTENT = {
     "success":      "성공하면 무엇이 가능한가 영향과 위험 impact consequence remediation",
     "safe":         "왜 안전한가 방어 원리 secure configuration why not exploitable",
 }
+# 확증/승격 제안 질의의 의도 앵커 — 카테고리 설명 뒤에 붙여 "어떻게 확증·승격·우회하나"
+# 로 초점을 맞춘다(경로 토큰 같은 노이즈를 빼고 카테고리 중심으로 검색되게).
+_CONFIRM_ANCHOR = ("확증 방법 익스플로잇 승격 필터 우회 how to confirm the vulnerability "
+                   "exploit escalate bypass filter")
 
 
 # 페이로드 덤프 청크 판별 — RAG 가 페이로드 뱅크와 겹치지 않게 설명 산문을 선호한다.
@@ -772,10 +776,14 @@ async def followup_suggest(req: FollowupRequest):
     # RAG: 확증·승격 방법을 코퍼스에서 검색(AI 유무와 무관하게 근거로 표시). 근거 있을 때만.
     retrieved = []
     if has_evidence:
+        # 카테고리 중심 질의: 계열 설명(의미 앵커) + 확증/승격 의도 + 발견이름(가벼운 신호).
+        # raw path 는 경로 토큰이 검색을 희석시켜(관련도 저하) 넣지 않는다.
+        _primary = (families[0] if families else req.category) or ""
+        _fam_desc = " ".join(_CATEGORY_DESC.get(f.lower(), f) for f in (families[:3] or [req.category]) if f)
+        _names = " ".join(req.finding_names or [])[:120]
         retrieved = await _rag_lookup(
-            " ".join(filter(None, [path, " ".join(families), " ".join(req.finding_names or []),
-                                   req.category, "확증 승격 우회 exploit escalate confirm bypass"])),
-            5, (families[0] if families else req.category), floor=0.42)
+            " ".join(filter(None, [_fam_desc, _CONFIRM_ANCHOR, _names])),
+            5, _primary, floor=0.42)
     if req.use_ai and ai_enabled() and has_evidence:
         fp = req.fingerprint or {}
         tech = ", ".join(x for x in [fp.get("server"), fp.get("powered_by")] if x)
