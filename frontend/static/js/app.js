@@ -1512,6 +1512,20 @@ function applyAiCandidate(idx) {
   if (!c) return;
   // 매번 원본 기준(깊은 복사로 복원 — 스냅샷이 이후 주입으로 오염되지 않게)
   if (state.aiBaseSnapshot) restoreRequestForm(JSON.parse(JSON.stringify(state.aiBaseSnapshot)));
+
+  // CVE 후보는 완성된 PoC — 삽입 바(applyCveRequest)와 동일하게 요청 전체 교체.
+  // (기존 오버레이 방식은 payload 의 쿼리(?images/)에 원래 쿼리가 덧붙어 URL 이 깨지고,
+  //  잔여 파라미터가 남아 PoC 가 오염되던 문제가 있었음.)
+  if (c.cve || c.source === 'cve') {
+    applyCveRequest(c);
+    state.selectedPayload = { payload: c.payload, name: c.cve || c.category };
+    state.selectedCategory = { id: c.category || 'cve', icon: _CAT_ICON[c.category] || '🔎' };
+    document.querySelectorAll('#aiCandidateList .ai-cand-item').forEach(el => el.classList.remove('selected'));
+    const row0 = document.querySelector(`#aiCandidateList .ai-cand-item[data-idx="${idx}"]`);
+    if (row0) row0.classList.add('selected');
+    return;
+  }
+
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   if (c.location === 'path') {
