@@ -74,6 +74,13 @@ _XSS_HINT = re.compile(
 # 예전 프로브는 헤더를 안 봤다.
 _LOG4SHELL_HINT = re.compile(r"\$\{jndi:(?:ldap|ldaps|rmi|dns|nis|iiop|corba|nds|http)s?:", re.I)
 _SHELLSHOCK_HINT = re.compile(r"\(\s*\)\s*\{\s*[:_a-z].*?;\s*\}\s*;", re.I)
+# OGNL/Struts(S2-*) 식 표현식 주입 — Java 리플렉션·OGNL 컨텍스트 마커(정상 트래픽엔 거의 없음)
+_OGNL_HINT = re.compile(
+    r"\$\{\s*\(#|%\{\s*\(#|\(#[a-z_]+\s*=|"                       # ${(#..  %{(#..  (#a=
+    r"@java\.lang\.(?:runtime|processbuilder)|getruntime\(\)|"    # Java 리플렉션 RCE
+    r"@org\.apache\.(?:commons|struts)|com\.opensymphony|"        # Struts/WebWork 클래스
+    r"ognl|#_memberaccess|#context\[|#application\[|"             # OGNL 컨텍스트
+    r"freemarker\.template\.utility", re.I)
 _NOSQL_HINT = re.compile(r"\$ne\b|\$gt\b|\$lt\b|\$where\b|\$regex\b|\$or\b|\[\$", re.I)
 # 헤더로 미들웨어의 인증·인가 단계를 건너뛰는 우회 — 정상 트래픽엔 없는 마커.
 #   X-Middleware-Subrequest: Next.js 미들웨어 우회(CVE-2025-29927) — 미들웨어 인가 스킵.
@@ -106,6 +113,14 @@ class AttackClass:
                 out.append(c.attack_type)
         return out
 
+    @property
+    def subtype(self) -> str:
+        """세부 이름(log4shell·shellshock·ognl·middleware 등) — 첫 매칭 기준. 없으면 ''."""
+        for c in self.candidates:
+            if c.subtype:
+                return c.subtype
+        return ""
+
 
 # 규칙: (유형, 정규식, 헤더_스캔_허용, 세부이름). 순서 = 우선순위(첫 매칭이 primary).
 # 헤더_스캔_허용=False 인 규칙은 payload/url/body 만 본다(정상 헤더 오탐 방지):
@@ -117,6 +132,7 @@ _RULES = [
     ("authbypass", _AUTHBYPASS_HINT, True, "middleware"),  # X-Middleware-Subrequest 등 — 헤더 전용
     ("cmdi", _LOG4SHELL_HINT,  True,  "log4shell"),   # ${jndi:...} — 헤더 최빈
     ("cmdi", _SHELLSHOCK_HINT, True,  "shellshock"),  # () { :;}; — 헤더
+    ("cmdi", _OGNL_HINT,       True,  "ognl"),        # OGNL/Struts(S2-*) 표현식 RCE
     ("lfi",  _FILE_READ_HINT,  True,  ""),
     ("xss",  _XSS_HINT,        True,  ""),
     ("cmdi", _CMDI_HINT,       False, ""),

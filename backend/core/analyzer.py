@@ -3823,9 +3823,11 @@ def analyze_response(
     # url·body·headers 를 구조화해 넘겨야 classify 가 대상 host 를 분류에서 제외한다
     # (내부 IP 대상이 SSRF 로 오분류되는 것 방지).
     _req_hv = HeaderView(req_headers or {})
-    result["attack_type"] = _classify.classify(
+    _kl = _classify.classify(
         payload=payload, url=url, req_body=req_body, headers=_req_hv, category=category
-    ).primary or (category or "").lower()
+    )
+    result["attack_type"] = _kl.primary or (category or "").lower()
+    result["attack_subtype"] = _kl.subtype   # log4shell·shellshock·ognl·middleware 등(표시용)
 
     is_attack_attempt = bool((payload and payload.strip()) or category)
     has_signal = any(f.get("verdict") in ("성공", "안전", "미확정", "의심") for f in findings)

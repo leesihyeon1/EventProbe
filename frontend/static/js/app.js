@@ -2291,10 +2291,14 @@ const _ATTACK_TYPE_KO = {
   shellshock:'Shellshock', header:'헤더 주입', cache:'캐시 포이즈닝', other:'기타',
 };
 function _typeKo(t){ return _ATTACK_TYPE_KO[t] || (t || ''); }
+// 세부 유형(subtype) — 같은 cmdi 라도 무엇인지 구체화(스캔 시도 인식용)
+const _SUBTYPE_KO = { log4shell:'Log4Shell', shellshock:'Shellshock', ognl:'OGNL/Struts(S2)', middleware:'미들웨어 인가우회' };
 function _attackClassCard(a) {
   const t = a.attack_type || '';
   const cls = a.attack_class;   // AI 분류(있으면)
   if (!t && !cls) return '';
+  const sub = a.attack_subtype
+    ? `<span class="tag tag-red" style="font-size:11px" title="세부 공격 유형">${escapeHtml(_SUBTYPE_KO[a.attack_subtype] || a.attack_subtype)}</span>` : '';
   const aiBadge = (cls && cls.source === 'ai')
     ? `<span class="tag" style="background:rgba(188,140,255,.18);color:var(--purple);border:1px solid rgba(188,140,255,.4)" title="정규식 미분류 → AI 분류">AI 분류</span>` : '';
   const conf = (cls && cls.confidence != null) ? `<span style="font-size:10px;color:var(--text-muted)">신뢰도 ${escapeHtml(String(cls.confidence))}</span>` : '';
@@ -2309,6 +2313,7 @@ function _attackClassCard(a) {
       <div class="analysis-card-body">
         <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
           <span class="tag tag-blue" style="font-size:12px">${escapeHtml(_typeKo(t) || '유형 미상')}</span>
+          ${sub}
           ${others.map(x=>`<span class="tag tag-gray" style="font-size:10px">${escapeHtml(_typeKo(x))}</span>`).join('')}
         </div>
         ${reason}

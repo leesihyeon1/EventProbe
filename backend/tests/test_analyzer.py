@@ -1317,3 +1317,15 @@ def test_ognl_echo_canary_rce_detected():
     r2 = analyze_response(200, {}, "Error: ${(exec(%22echo GSCAN_CF%22)) invalid", 80,
                           payload=p, url="http://t" + p)
     assert not any("echo canary" in f["name"] for f in r2["findings"])
+
+
+def test_ognl_struts_recognized_as_subtype():
+    """OGNL/Struts(S2-*) 표현식 주입을 cmdi + subtype=ognl 로 인식(스캔 시도 인식)."""
+    from core.classify import classify
+    p = ("/${(#a=@org.apache.commons.io.IOUtils@toString(@java.lang.Runtime@getRuntime()"
+         ".exec(%22echo X%22).getInputStream()))}")
+    k = classify(payload=p, url="/" + p)
+    assert k.primary == "cmdi" and k.subtype == "ognl"
+    # analyze_response 가 subtype 을 노출
+    r = analyze_response(200, {}, "<html>ok</html>" * 10, 60, payload=p, url="http://t" + p)
+    assert r.get("attack_subtype") == "ognl"
