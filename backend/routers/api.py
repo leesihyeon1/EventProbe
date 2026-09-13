@@ -199,15 +199,21 @@ def find_payload_by_id(payload_id: str):
 
 
 _SENSITIVE_HDRS = ("host", "authorization", "cookie", "proxy-authorization")
+# 도구가 스스로 붙이는 헤더(테스트 태그·기본 브라우저 프로파일) — 대상 서버 설정이 아니므로
+# AI 판정/조치에서 제외한다(예: "디버그 헤더 ncits_log_test 제거" 같은 엉뚱한 조치 방지).
+_TOOL_NOISE_HDRS = {"ncits_log_test", "accept", "accept-language", "accept-encoding",
+                    "upgrade-insecure-requests", "sec-ch-ua", "sec-ch-ua-mobile",
+                    "sec-ch-ua-platform", "connection", "cache-control"}
 
 
 def _blurred_request(req) -> dict:
     """AI 분석/판정에 넘길 '호스트 제외' 요청 패킷(응답 본문 아님, ai-suggest 와 동일 정책)."""
     parts = urlsplit(req.url or "")
     path = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
-    # SingleRequest 는 header 이름 목록이 아니라 headers dict 를 가진다 — 키에서 뽑아 민감 헤더 제외
+    # SingleRequest 는 header 이름 목록이 아니라 headers dict 를 가진다 — 키에서 뽑아 민감·도구 헤더 제외
+    _excl = set(_SENSITIVE_HDRS) | _TOOL_NOISE_HDRS
     hdr_names = [h for h in (getattr(req, "headers", None) or {}).keys()
-                 if str(h).lower() not in _SENSITIVE_HDRS]
+                 if str(h).lower() not in _excl]
     return {
         "method": (req.method or "GET").upper(),
         "path": path,
