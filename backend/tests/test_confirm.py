@@ -372,3 +372,23 @@ def test_decide_method_no_false_confirm():
     assert decide_method({"Allow": "GET, POST"}, 200, 404, "", m) == []
     # 안전한 메소드만 + 업로드 없음 → 빈 목록
     assert decide_method({"Allow": "GET, HEAD, POST, OPTIONS"}, None, None, "", m) == []
+
+
+def test_decide_authbypass_confirms_on_transition():
+    from core.confirm import decide_authbypass
+    # 정상(헤더 제거)=403 거부, 우회(헤더 포함)=200 제공 → 확증
+    t = decide_authbypass({"status": 403, "location": "", "body": ""},
+                          {"status": 200, "location": "", "body": "secret"})
+    assert t and "인가 우회" in t[0]["name"]
+    # 로그인 리다이렉트 거부 → 우회 200 도 확증
+    t2 = decide_authbypass({"status": 302, "location": "/login", "body": ""},
+                           {"status": 200, "location": "", "body": "ok"})
+    assert t2
+
+
+def test_decide_authbypass_no_false_positive():
+    from core.confirm import decide_authbypass
+    # 정상도 200 이면(보호 안 됨) 확증 아님
+    assert decide_authbypass({"status": 200}, {"status": 200}) == []
+    # 우회도 거부면 확증 아님
+    assert decide_authbypass({"status": 403}, {"status": 403}) == []

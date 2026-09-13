@@ -1054,6 +1054,37 @@ async def _run_file_exposure_confirm(req: "ConfirmRequest", headers_base: dict):
     return tech, probes
 
 
+async def _run_authbypass_probe(req: "ConfirmRequest", headers_base: dict):
+    """인가 우회 헤더 차분 — 우회 헤더를 '제거한 정상 요청'과 '포함한 우회 요청'을 보내
+    상태 전이(거부→제공)로 확증. 리다이렉트 거부를 봐야 하므로 따라가지 않는다."""
+    present = [h for h in headers_base if h.lower() in confirm_scan._BYPASS_HEADERS]
+    if not present:
+        return [], []
+    normal_headers = {k: v for k, v in headers_base.items()
+                      if k.lower() not in confirm_scan._BYPASS_HEADERS}
+    url = _url_with_params(req.url, req.params)
+    body = req.body.encode() if req.body else None
+    out = {}
+    probes = []
+    async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        for role, hdrs in (("normal", normal_headers), ("bypass", dict(headers_base))):
+            try:
+                r = await client.request(req.method.upper(), url, headers=hdrs,
+                                         content=body, timeout=req.timeout)
+                out[role] = {"status": r.status_code, "location": r.headers.get("location", ""),
+                             "body": r.text[:20000]}
+                probes.append({"role": f"authbypass:{role}",
+                               "label": ("우회 헤더 제거(정상)" if role == "normal"
+                                         else f"우회 헤더 포함({', '.join(present)})"),
+                               "value": req.url, "status": r.status_code, "time_ms": 0, "len": len(r.text)})
+            except Exception as e:
+                out[role] = {"status": 0, "location": "", "body": ""}
+                probes.append({"role": f"authbypass:{role}", "label": role, "value": req.url,
+                               "status": 0, "time_ms": 0, "error": str(e)[:120]})
+    techniques = confirm_scan.decide_authbypass(out.get("normal", {}), out.get("bypass", {}))
+    return techniques, probes
+
+
 @router.post("/confirm-scan")
 async def confirm_scan_endpoint(req: ConfirmRequest):
     """대상 파라미터에 오라클 프로브 세트를 순차 전송해 취약 여부를 확증한다.
@@ -1091,6 +1122,14 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         techniques += mtech
         all_probes += mprobes
         ran.append("메소드")
+
+    # 3-b) 인가 우회 헤더 차분 — 우회 헤더(X-Middleware-Subrequest 등)가 있으면 제거 vs 포함 비교.
+    if cat == "authbypass" or any(h.lower() in confirm_scan._BYPASS_HEADERS for h in sent_headers_base):
+        atech, aprobes = await _run_authbypass_probe(req, sent_headers_base)
+        if aprobes:
+            techniques += atech
+            all_probes += aprobes
+            ran.append("인가우회(헤더)")
 
     # 4) 파일 노출 catch-all 차분 확증 — 대상 경로가 민감/설정 파일일 때만(그 외 추가 요청 없음)
     fx = await _run_file_exposure_confirm(req, sent_headers_base)

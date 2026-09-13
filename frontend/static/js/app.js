@@ -367,6 +367,14 @@ function parseRawHttp(raw) {
 
 function _safeDecode(s) { try { return decodeURIComponent(String(s).replace(/\+/g, ' ')); } catch (e) { return s; } }
 
+// 대소문자 무시 헤더 값 조회(응답 헤더 dict)
+function _headerVal(headers, name) {
+  if (!headers) return '';
+  const n = String(name).toLowerCase();
+  for (const k in headers) { if (k.toLowerCase() === n) return headers[k] || ''; }
+  return '';
+}
+
 // 공통 정규화: URL 쿼리 분리 -> params, 데이터 결합, method 결정
 function normalizeParsed(p) {
   let url = p.url || '';
@@ -1103,6 +1111,20 @@ async function confirmScan() {
     });
     if (res.supported === false) { toast(res.message || '이 카테고리는 확증 미지원', 'info'); return; }
     if (res.error) { toast('확증 실패: ' + res.error, 'error'); return; }
+    // 확증된 취약을 분석 findings 에 '성공'으로 병합 → 결과기반 후속이 이 확증을 근거로 승격한다.
+    // (기존엔 확증 결과가 카드로만 표시되고 후속으로 흐르지 않아 '확증→후속'이 끊겨 있었음.)
+    if (res.confirmed && Array.isArray(res.techniques) && res.techniques.length
+        && state.lastResult && state.lastResult.analysis) {
+      const a = state.lastResult.analysis;
+      a.findings = a.findings || [];
+      res.techniques.forEach(t => {
+        if (t && t.name && !a.findings.some(x => x.name === t.name)) {
+          a.findings.push({ name: t.name, verdict: '성공', confidence: 95,
+                            why: '확증 스캔으로 확인됨', evidence: t.evidence || '' });
+        }
+      });
+      a.attack_outcome = 'success';
+    }
     renderConfirmResult(res, param);
     switchView('request');
     toast(res.confirmed ? '✅ 취약점 확증됨' : '깨끗 — 확증되지 않음', res.confirmed ? 'success' : 'info');
@@ -1778,7 +1800,12 @@ async function sendRequest() {
       http_version: getHttpVersion(),
       follow_redirects: getFollowRedirects(),
       custom_alert_rules: getCustomAlertRules(),
-      baseline: baseline ? { status_code: baseline.status_code, body: baseline.body } : null,
+      baseline: baseline ? {
+        status_code: baseline.status_code, body: baseline.body,
+        // 차분 탐지기(인가우회 등)가 정상 요청의 거부 형태를 정확히 보도록 헤더·Location 도 전달
+        headers: baseline.headers || {},
+        location: _headerVal(baseline.headers, 'location'),
+      } : null,
     };
 
     const result = await API.request(reqPayload);

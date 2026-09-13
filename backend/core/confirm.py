@@ -76,6 +76,33 @@ _DANGEROUS_HTTP_METHODS = {"PUT", "DELETE", "PATCH", "CONNECT", "TRACE",
                            "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE",
                            "LOCK", "UNLOCK", "SEARCH"}
 
+# 인가 우회에 악용되는 요청 헤더 — 확증 시 이 헤더들을 '제거한 정상 요청'과 차분한다.
+# (CVE-2025-29927 X-Middleware-Subrequest, X-Original-URL/X-Rewrite-URL 경로 우회 등)
+_BYPASS_HEADERS = {"x-middleware-subrequest", "x-original-url", "x-rewrite-url",
+                   "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto",
+                   "x-forwarded-server", "x-http-method-override", "x-original-host",
+                   "x-custom-ip-authorization", "x-real-ip"}
+
+
+def decide_authbypass(normal: dict, bypass: dict) -> list[dict]:
+    """인가 우회 헤더 차분 판정 — 헤더 제거(정상)는 거부인데 헤더 포함(우회)이 리소스를
+    제공하면 인가 우회 확증. normal/bypass: {status, location, body}."""
+    def rej(r):
+        s = int(r.get("status") or 0)
+        return s in (401, 403) or (s in (301, 302, 303, 307, 308)
+                                   and _redirect_is_auth_reject(r.get("location", "")))
+
+    def served(r):
+        s = int(r.get("status") or 0)
+        return s in (200, 201) or (s in (301, 302, 303, 307, 308)
+                                   and not _redirect_is_auth_reject(r.get("location", "")))
+
+    if rej(normal) and served(bypass):
+        return [{"name": "인가 우회 확증 (헤더 차분)",
+                 "evidence": f"우회 헤더 제거 시 HTTP {normal.get('status')}(거부) → 헤더 포함 시 "
+                             f"HTTP {bypass.get('status')}(보호 리소스 제공) → 인가 우회 확증"}]
+    return []
+
 
 def decide_method(options_headers: Optional[dict], put_status, get_status,
                   get_body: str, marker: str, del_status=None) -> list[dict]:

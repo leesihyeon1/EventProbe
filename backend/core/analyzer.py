@@ -13,6 +13,10 @@ from core import classify as _classify
 from core.classify import (_FILE_READ_HINT, _SSRF_HINT, _SQLI_HINT, _REDIRECT_HINT,
                            _DANGEROUS_SCHEME, _CMDI_HINT, _XSS_HINT)
 from core import detectors as _detectors
+from core.confirm import SUPPORTED as _CONFIRM_SUPPORTED
+# '확증 스캔' 버튼 노출 = confirm 파라미터 오라클(SUPPORTED) + authbypass(헤더 차분 오라클).
+# confirm.SUPPORTED 를 단일 소스로 삼아 버튼 노출과 실제 지원이 어긋나지 않게 한다.
+_CONFIRM_SCAN = _CONFIRM_SUPPORTED | {"authbypass"}
 
 
 def _ver_lt(body: str, pattern: str, target: tuple) -> bool:
@@ -3567,8 +3571,7 @@ _DET_PRIORITY = {
 # inconclusive/suspicious 는 "판정 못 했다"로 끝내지 않고, 유형별로 '무엇을 하면 확증되는지'를
 # 정확히 제시한다. confirm(확증 스캔)으로 되는 것 / OOB 콜백이 필요한 것 / 브라우저 확증이
 # 필요한 것을 구분해 분석가가 바로 다음 행동을 고르게 한다.
-_CONFIRM_SCAN = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor",
-                 "business", "ldap", "auth", "xpath", "authbypass"}  # 확증 스캔(대조군 프로브) 가능
+# _CONFIRM_SCAN 은 confirm.SUPPORTED 를 그대로 import(위) — 버튼 노출과 실제 지원이 어긋나지 않게.
 _OOB_FAMILIES = {"cmdi", "ssrf", "xxe", "log4shell", "email", "deserial"}  # 블라인드/OOB 콜백 필요
 _BROWSER_FAMILIES = {"xss", "prototype", "domclob", "cssinj", "csti"}      # 브라우저 DOM 확증
 
