@@ -1,5 +1,37 @@
-"""ASP.NET VIEWSTATE 자동 갱신 헬퍼 단위 테스트 — 네트워크 없이 순수 함수만 검증."""
-from routers.api import _extract_hidden, _is_aspnet_form, _merge_tokens
+"""요청 자동 보정(ASP.NET VIEWSTATE 갱신 · Content-Type 추론) 헬퍼 단위 테스트 —
+네트워크 없이 순수 함수만 검증."""
+from routers.api import (_extract_hidden, _is_aspnet_form, _merge_tokens,
+                         _infer_content_type, _ensure_content_type)
+
+
+def test_infer_content_type():
+    assert _infer_content_type("tbUsername=admin'--&tbPassword=") == "application/x-www-form-urlencoded"
+    assert _infer_content_type('{"user":"admin"}') == "application/json"
+    assert _infer_content_type('[1,2,3]') == "application/json"
+    assert _infer_content_type('<xml/>') == "application/xml"
+    assert _infer_content_type("") == ""
+    assert _infer_content_type("   ") == ""
+
+
+def test_ensure_content_type_adds_when_missing():
+    """Content-Type 없는 POST 폼 body → 추론값 주입."""
+    h = {"User-Agent": "x"}
+    added = _ensure_content_type(h, "tbUsername=admin'--&tbPassword=", "POST")
+    assert added == "application/x-www-form-urlencoded"
+    assert h["Content-Type"] == "application/x-www-form-urlencoded"
+
+
+def test_ensure_content_type_respects_existing():
+    """이미 Content-Type 이 있으면(대소문자 무관) 건드리지 않는다."""
+    h = {"content-type": "text/plain"}
+    added = _ensure_content_type(h, "a=b", "POST")
+    assert added == ""
+    assert h["content-type"] == "text/plain"
+
+
+def test_ensure_content_type_skips_get_and_empty_body():
+    assert _ensure_content_type({}, "a=b", "GET") == ""
+    assert _ensure_content_type({}, "", "POST") == ""
 
 
 def test_extract_hidden_both_attr_orders():

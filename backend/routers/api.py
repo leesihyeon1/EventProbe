@@ -509,11 +509,41 @@ async def _refresh_aspnet_viewstate(client, url, headers, body):
         return body, ""
 
 
+def _infer_content_type(body: str) -> str:
+    """body 형태로 Content-Type 추론 — JSON/XML/폼. 모르면 빈 문자열."""
+    s = (body or "").strip()
+    if not s:
+        return ""
+    if s[0] in "{[":
+        return "application/json"
+    if s[0] == "<":
+        return "application/xml"
+    if re.match(r"^[^\s=&]+=", s):        # key=value(&…) 폼
+        return "application/x-www-form-urlencoded"
+    return ""
+
+
+def _ensure_content_type(headers: dict, body: str, method: str) -> str:
+    """body 가 있는 POST/PUT/PATCH 인데 Content-Type 이 없으면 추론해 넣는다.
+    Content-Type 없이 보내면 서버가 폼/JSON body 를 파싱하지 않아(예: ASP.NET 폼
+    로그인) 인젝션이 처리조차 안 되므로, 추론값을 채워 실제 테스트가 되게 한다.
+    추가한 Content-Type 값을 반환(없으면 '')."""
+    if not body or method.upper() not in ("POST", "PUT", "PATCH"):
+        return ""
+    if any(k.lower() == "content-type" for k in headers):
+        return ""
+    ct = _infer_content_type(body)
+    if ct:
+        headers["Content-Type"] = ct
+    return ct
+
+
 # ── 단일 요청 전송 ──────────────────────────────────────────
 @router.post("/request")
 async def send_request(req: SingleRequest):
     try:
         sent_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
+        ct_added = _ensure_content_type(sent_headers, req.body or "", req.method)
 
         # HTTP 버전 지정(비 HTTP/1.1) → raw 소켓 모드로 요청라인 버전 그대로 전송
         ver = (req.http_version or "").strip()
@@ -620,6 +650,7 @@ async def send_request(req: SingleRequest):
             "final_url": str(response.url),
             "viewstate_refreshed": bool(viewstate_note),
             "viewstate_note": viewstate_note,
+            "content_type_added": ct_added,
             "sent_body": eff_body,
         }
     except httpx.TimeoutException:

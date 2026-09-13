@@ -2730,14 +2730,17 @@ function renderAnalysis(a, result) {
       </div>
     </div>
 
-    <!-- ASP.NET VIEWSTATE 자동 갱신 안내 — 도구가 요청 body 를 수정했음을 투명하게 알림 -->
-    ${result && result.viewstate_refreshed ? `
-    <div class="analysis-card" data-card-id="viewstate">
-      <div class="analysis-card-header">ASP.NET 폼 자동 처리</div>
+    <!-- 요청 자동 보정 안내 — 도구가 요청을 수정했음을 투명하게 알림 -->
+    ${(result && (result.viewstate_refreshed || result.content_type_added)) ? `
+    <div class="analysis-card" data-card-id="request-fixups">
+      <div class="analysis-card-header">요청 자동 보정</div>
       <div class="analysis-card-body">
-        <div class="detail-item">이 요청은 <b>.aspx 폼</b>이라, 전송 직전 대상 페이지를 GET 해
-        <b>${escapeHtml(String(result.viewstate_note || 'VIEWSTATE 자동 갱신'))}</b> 후 body 에 주입했습니다
-        (같은 세션 쿠키 공유). 이 토큰이 없으면 서버가 폼만 다시 렌더해 인젝션이 처리되지 않습니다.</div>
+        ${result.content_type_added ? `<div class="detail-item">Content-Type 헤더가 없어
+        <b>${escapeHtml(String(result.content_type_added))}</b> 로 채웠습니다 — 없으면 서버가 body(폼/JSON)를
+        파싱하지 않아 인젝션이 처리되지 않습니다.</div>` : ''}
+        ${result.viewstate_refreshed ? `<div class="detail-item">이 요청은 <b>.aspx 폼</b>이라, 전송 직전 대상
+        페이지를 GET 해 <b>${escapeHtml(String(result.viewstate_note || 'VIEWSTATE 자동 갱신'))}</b> 후 body 에
+        주입했습니다(같은 세션 쿠키 공유). 이 토큰이 없으면 서버가 폼만 다시 렌더해 인젝션이 처리되지 않습니다.</div>` : ''}
       </div>
     </div>` : ''}
 
