@@ -10,7 +10,7 @@ from typing import Optional
 import sys, os, secrets
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary, file_exposure_looks_real, _sensitive_file_ext
-from urllib.parse import urlsplit, quote
+from urllib.parse import urlsplit, quote, quote_plus
 
 # 쿼리에서 RFC3986 상 합법이며 보안 페이로드에 흔히 쓰이는 문자는 보존하고
 # (@ / : ; + , = ! $ ( ) * 등), 구조를 깨는 문자(공백·&·#·%)만 인코딩한다.
@@ -452,6 +452,63 @@ async def analyze_enrich(req: EnrichRequest):
     return out
 
 
+# ── ASP.NET WebForms VIEWSTATE 자동 갱신 ────────────────────────────────────
+# ASP.NET 폼(.aspx)은 요청마다 __VIEWSTATE/__EVENTVALIDATION 토큰이 유효해야 로그인
+# 로직이 처리된다. 오래되거나 없는 토큰으로 보내면 서버는 폼만 다시 렌더 → 인젝션이
+# 처리조차 안 돼(우회가 발생하지 않아) 어떤 오라클로도 못 잡는다. 요청 직전 대상
+# 페이지를 GET 해 최신 토큰을 받아(같은 클라이언트=세션 쿠키 공유) body 에 주입한다.
+_ASPNET_TOKENS = ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION")
+
+
+def _extract_hidden(html: str, name: str) -> Optional[str]:
+    """ASP.NET 숨김 필드 값 추출(속성 순서 무관)."""
+    for pat in (rf'name="{re.escape(name)}"[^>]*?value="([^"]*)"',
+                rf'value="([^"]*)"[^>]*?name="{re.escape(name)}"'):
+        m = re.search(pat, html, re.I | re.S)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _is_aspnet_form(url: str, body: str, method: str) -> bool:
+    """.aspx 경로에 폼 body 를 POST/PUT 하거나, body 에 이미 __VIEWSTATE 가 있으면 대상."""
+    if not body or method.upper() not in ("POST", "PUT"):
+        return False
+    path = (urlsplit(url).path or "").lower()
+    return path.endswith(".aspx") or "__VIEWSTATE" in body
+
+
+def _merge_tokens(body: str, tokens: dict) -> str:
+    """urlencoded body 에서 토큰 필드만 최신값으로 치환(없으면 추가), 나머지는 보존."""
+    for name, val in tokens.items():
+        if val is None:
+            continue
+        enc = quote_plus(val)
+        pat = rf'(^|&){re.escape(name)}=[^&]*'
+        if re.search(pat, body):
+            body = re.sub(pat, lambda m: f"{m.group(1)}{name}={enc}", body, count=1)
+        else:
+            body = (body + "&" if body else "") + f"{name}={enc}"
+    return body
+
+
+async def _refresh_aspnet_viewstate(client, url, headers, body):
+    """대상 페이지를 GET(세션 쿠키 공유) 해 최신 VIEWSTATE 를 body 에 주입.
+    (refreshed_body, note) 반환 — 토큰을 못 찾으면 원본 body 그대로."""
+    try:
+        get_hdrs = {k: v for k, v in (headers or {}).items()
+                    if k.lower() not in ("content-type", "content-length")}
+        g = await client.get(url, headers=get_hdrs, timeout=15)
+        html = g.text
+        found = {n: _extract_hidden(html, n) for n in _ASPNET_TOKENS}
+        found = {n: v for n, v in found.items() if v is not None}
+        if not found:
+            return body, ""
+        return _merge_tokens(body, found), "ASP.NET VIEWSTATE 자동 갱신: " + ", ".join(found)
+    except Exception:
+        return body, ""
+
+
 # ── 단일 요청 전송 ──────────────────────────────────────────
 @router.post("/request")
 async def send_request(req: SingleRequest):
@@ -490,13 +547,19 @@ async def send_request(req: SingleRequest):
                 "followed_redirects": False,
             }
 
+        _eff_url = _url_with_params(req.url, req.params)
         async with httpx.AsyncClient(verify=False, follow_redirects=req.follow_redirects) as client:
+            # ASP.NET 폼이면 같은 클라이언트로 먼저 GET 해 VIEWSTATE 를 갱신(세션 쿠키 공유).
+            eff_body, viewstate_note = req.body, ""
+            if _is_aspnet_form(_eff_url, req.body or "", req.method):
+                eff_body, viewstate_note = await _refresh_aspnet_viewstate(
+                    client, _eff_url, sent_headers, req.body or "")
             start = time.time()
             response = await client.request(
                 method=req.method.upper(),
-                url=_url_with_params(req.url, req.params),
+                url=_eff_url,
                 headers=sent_headers,
-                content=req.body.encode() if req.body else None,
+                content=eff_body.encode() if eff_body else None,
                 timeout=req.timeout,
             )
             elapsed = (time.time() - start) * 1000
@@ -511,8 +574,8 @@ async def send_request(req: SingleRequest):
             payload=req.payload,
             category=req.category,
             baseline=req.baseline,
-            url=_url_with_params(req.url, req.params),
-            req_body=req.body,
+            url=_eff_url,
+            req_body=eff_body,
             method=req.method,
             redirect_chain=chain,
             body_truncated=body_cut,
@@ -555,6 +618,9 @@ async def send_request(req: SingleRequest):
             "redirect_chain": chain,
             "followed_redirects": bool(req.follow_redirects),
             "final_url": str(response.url),
+            "viewstate_refreshed": bool(viewstate_note),
+            "viewstate_note": viewstate_note,
+            "sent_body": eff_body,
         }
     except httpx.TimeoutException:
         return {

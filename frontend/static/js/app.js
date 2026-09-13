@@ -2730,6 +2730,17 @@ function renderAnalysis(a, result) {
       </div>
     </div>
 
+    <!-- ASP.NET VIEWSTATE 자동 갱신 안내 — 도구가 요청 body 를 수정했음을 투명하게 알림 -->
+    ${result && result.viewstate_refreshed ? `
+    <div class="analysis-card" data-card-id="viewstate">
+      <div class="analysis-card-header">ASP.NET 폼 자동 처리</div>
+      <div class="analysis-card-body">
+        <div class="detail-item">이 요청은 <b>.aspx 폼</b>이라, 전송 직전 대상 페이지를 GET 해
+        <b>${escapeHtml(String(result.viewstate_note || 'VIEWSTATE 자동 갱신'))}</b> 후 body 에 주입했습니다
+        (같은 세션 쿠키 공유). 이 토큰이 없으면 서버가 폼만 다시 렌더해 인젝션이 처리되지 않습니다.</div>
+      </div>
+    </div>` : ''}
+
     <!-- 리다이렉트 체인 — 따라간 경우 '무엇을 보고 판정했는지'를 숨기지 않는다 -->
     ${_redirectChainCard(result)}
 
