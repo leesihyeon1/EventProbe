@@ -432,6 +432,61 @@ class CanaryEvalDetector(Detector):
 register(CanaryEvalDetector())
 
 
+class CommandEchoCanaryDetector(Detector):
+    """명령 실행 canary — payload 의 echo <TOKEN>(OGNL/Struts·셸)이 응답에 '출력'으로 돌아오면 RCE.
+
+    OGNL(Struts S2-*)은 exec("echo TOKEN") 결과를 응답 헤더(setHeader)나 본문에 넣는다.
+    알려진 명령출력(uid= 등)이 아니라 사용자가 심은 canary 라, 이 토큰이 응답에 나타나는지로
+    확증한다. 요청 반사(에러 페이지가 URL 을 그대로 되비침)와 구분: 응답 '헤더'에 나오면
+    요청 URL 이 헤더에 반사되는 일은 없으므로 강한 확증. 본문은 명령 원문(echo/OGNL)이
+    함께 없을 때만 '출력'으로 인정.
+    """
+    id = "cmd_echo_canary"
+    tier = 1
+    attack_types = frozenset({"cmdi", "ssti"})
+    _ECHO_RE = re.compile(r"echo(?:%20|%2b|\s|\+)+([A-Za-z0-9_]{4,})", re.I)
+
+    def _tokens(self, ctx: DetectionContext):
+        return set(self._ECHO_RE.findall(ctx.probe or ""))
+
+    def applies(self, ctx: DetectionContext) -> bool:
+        return bool(self._tokens(ctx))
+
+    def detect(self, ctx: DetectionContext) -> list:
+        body = ctx.body or ""
+        bl = body.lower()
+        hdrs = ctx.headers_lower or {}
+        out = []
+        for tok in self._tokens(ctx):
+            t = tok.lower()
+            # 1) 응답 헤더에 토큰 → OGNL setHeader 등 실행 출력(요청은 응답 헤더에 반사 안 됨) = 강한 RCE
+            if any(t in str(v).lower() for v in hdrs.values()):
+                out.append({
+                    "name": "명령 실행 확증(echo canary — 응답 헤더)", "verdict": "성공", "confidence": 92,
+                    "why": f"주입한 echo 출력 '{tok}' 가 응답 헤더에 나타남 → OGNL/Struts 등 서버측 "
+                           "코드 실행(RCE) 확증. 요청 URL 은 응답 헤더로 반사되지 않으므로 실행 결과로 판단.",
+                    "evidence": f"echo {tok} → 응답 헤더에 '{tok}'",
+                    "method": "canary(echo 출력)", "where": "응답 헤더",
+                    "detector_id": self.id, "tier": self.tier})
+                continue
+            # 2) 본문에 토큰이 '출력'으로(명령 원문·OGNL 구문 반사 없이) 나오면 RCE
+            if t in bl:
+                reflected = (f"echo {tok}".lower() in bl or f"echo%20{tok}".lower() in bl
+                             or "${" in body or "getruntime" in bl or "exec(" in bl or "@java" in bl)
+                if not reflected:
+                    out.append({
+                        "name": "명령 실행 확증(echo canary — 응답 본문)", "verdict": "성공", "confidence": 84,
+                        "why": f"주입한 echo 출력 '{tok}' 가 응답 본문에 명령 원문 없이 나타남 → 서버측 "
+                               "코드 실행(RCE). (단순 요청 반사면 echo/OGNL 원문이 함께 보인다.)",
+                        "evidence": f"echo {tok} → 응답 본문에 '{tok}'(명령 원문 미반사)",
+                        "method": "canary(echo 출력)", "where": "응답 본문",
+                        "detector_id": self.id, "tier": self.tier})
+        return out
+
+
+register(CommandEchoCanaryDetector())
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # tier-1 응답 시그니처 탐지기 — 대조군 없이 '단일 응답의 확정 표식'으로 판정
 # ══════════════════════════════════════════════════════════════════════════════

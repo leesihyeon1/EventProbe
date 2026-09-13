@@ -1302,3 +1302,18 @@ def test_definite_outcomes_have_no_next_action():
     succ = analyze_response(200, {}, "root:x:0:0:root:/root:/bin/bash", 60,
                             payload="../../etc/passwd", category="lfi")
     assert succ["attack_outcome"] == "success" and succ["next_action"] is None
+
+
+def test_ognl_echo_canary_rce_detected():
+    """Struts/OGNL RCE — echo canary 출력이 응답 헤더/본문에 오면 성공, 요청 반사면 미확증."""
+    p = ('/${(#a=@java.lang.Runtime@getRuntime().exec(%22echo GSCAN_CF%22).getInputStream())'
+         '.(@com.opensymphony.webwork.ServletActionContext@getResponse().setHeader(...))}')
+    # 응답 헤더에 canary(OGNL setHeader) → RCE 성공
+    r = analyze_response(200, {"x-ognl": "GSCAN_CF"}, "<html>normal</html>" * 10, 80,
+                         payload=p, url="http://t" + p)
+    assert r["attack_outcome"] == "success"
+    assert any("echo canary" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+    # 요청 반사(에러 페이지가 payload 를 되비침) → 오탐 없음
+    r2 = analyze_response(200, {}, "Error: ${(exec(%22echo GSCAN_CF%22)) invalid", 80,
+                          payload=p, url="http://t" + p)
+    assert not any("echo canary" in f["name"] for f in r2["findings"])
