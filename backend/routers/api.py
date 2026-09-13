@@ -478,6 +478,21 @@ def _is_aspnet_form(url: str, body: str, method: str) -> bool:
     return path.endswith(".aspx") or "__VIEWSTATE" in body
 
 
+# 프레임워크 CSRF/상태 토큰 필드 — 세션에 묶여 매 요청 갱신이 필요. VIEWSTATE 와 같은
+# 메커니즘(폼 페이지 GET → 토큰 추출 → 주입)으로 갱신해 요청이 403/거절로 무효화되지 않게 한다.
+_CSRF_TOKEN_FIELDS = ("authenticity_token", "csrfmiddlewaretoken", "csrf_token",
+                      "_csrf_token", "_csrf", "_token")
+
+
+def _is_stateful_form(url: str, body: str, method: str) -> bool:
+    """VIEWSTATE(.aspx) 또는 body 에 CSRF 토큰 필드가 있는 폼 제출이면 대상."""
+    if not body or method.upper() not in ("POST", "PUT", "PATCH"):
+        return False
+    if _is_aspnet_form(url, body, method):
+        return True
+    return any(f + "=" in body for f in _CSRF_TOKEN_FIELDS)
+
+
 def _merge_tokens(body: str, tokens: dict) -> str:
     """urlencoded body 에서 토큰 필드만 최신값으로 치환(없으면 추가), 나머지는 보존."""
     for name, val in tokens.items():
@@ -492,19 +507,31 @@ def _merge_tokens(body: str, tokens: dict) -> str:
     return body
 
 
-async def _refresh_aspnet_viewstate(client, url, headers, body):
-    """대상 페이지를 GET(세션 쿠키 공유) 해 최신 VIEWSTATE 를 body 에 주입.
-    (refreshed_body, note) 반환 — 토큰을 못 찾으면 원본 body 그대로."""
+async def _refresh_form_tokens(client, url, headers, body):
+    """대상 폼 페이지를 GET(세션 쿠키 공유) 해 상태/CSRF 토큰을 최신값으로 body 에 주입.
+    - ASP.NET VIEWSTATE 계열: 없어도 추가(폼이 요구).
+    - CSRF 토큰(Rails/Django/일반): body 에 이미 쓰는 필드만 최신값으로 갱신.
+    (refreshed_body, note) 반환 — 아무 토큰도 못 찾으면 원본 body 그대로."""
     try:
         get_hdrs = {k: v for k, v in (headers or {}).items()
                     if k.lower() not in ("content-type", "content-length")}
         g = await client.get(url, headers=get_hdrs, timeout=15)
         html = g.text
-        found = {n: _extract_hidden(html, n) for n in _ASPNET_TOKENS}
-        found = {n: v for n, v in found.items() if v is not None}
+        found = {}
+        for n in _ASPNET_TOKENS:                       # VIEWSTATE 계열 — 없으면 추가
+            v = _extract_hidden(html, n)
+            if v is not None:
+                found[n] = v
+        for n in _CSRF_TOKEN_FIELDS:                    # CSRF — body 에 있는 필드만 갱신
+            if (n + "=") in body:
+                v = _extract_hidden(html, n)
+                if v is not None:
+                    found[n] = v
         if not found:
             return body, ""
-        return _merge_tokens(body, found), "ASP.NET VIEWSTATE 자동 갱신: " + ", ".join(found)
+        aspnet = [n for n in found if n in _ASPNET_TOKENS]
+        label = "ASP.NET VIEWSTATE 자동 갱신" if aspnet else "폼 CSRF 토큰 자동 갱신"
+        return _merge_tokens(body, found), f"{label}: " + ", ".join(found)
     except Exception:
         return body, ""
 
@@ -579,10 +606,10 @@ async def send_request(req: SingleRequest):
 
         _eff_url = _url_with_params(req.url, req.params)
         async with httpx.AsyncClient(verify=False, follow_redirects=req.follow_redirects) as client:
-            # ASP.NET 폼이면 같은 클라이언트로 먼저 GET 해 VIEWSTATE 를 갱신(세션 쿠키 공유).
+            # 상태/CSRF 토큰 폼이면 같은 클라이언트로 먼저 GET 해 토큰을 갱신(세션 쿠키 공유).
             eff_body, viewstate_note = req.body, ""
-            if _is_aspnet_form(_eff_url, req.body or "", req.method):
-                eff_body, viewstate_note = await _refresh_aspnet_viewstate(
+            if _is_stateful_form(_eff_url, req.body or "", req.method):
+                eff_body, viewstate_note = await _refresh_form_tokens(
                     client, _eff_url, sent_headers, req.body or "")
             start = time.time()
             response = await client.request(

@@ -2357,6 +2357,43 @@ function _nextActionCard(a, result) {
     </div>`;
 }
 
+// 테스트 유효성 경고 — '요청이 실제로 대상을 못 건드렸을' 가능성을 알려 거짓음성(안전 오판)을
+// 막는다. block = 판정이 '안전'으로 못 내려간 사유(대상 미도달), warn = 판정 신뢰도 저하.
+function _validityCard(a) {
+  const warns = (a.validity && a.validity.warnings) || [];
+  if (!warns.length) return '';
+  const hasBlock = warns.some(w => w.severity === 'block');
+  const border = hasBlock ? 'rgba(210,153,34,.55)' : 'var(--border)';
+  const rows = warns.map(w => {
+    const isBlock = w.severity === 'block';
+    const tag = isBlock
+      ? '<span class="tag tag-orange" style="font-size:10px">미도달</span>'
+      : '<span class="tag tag-blue" style="font-size:10px">신뢰도</span>';
+    return `
+      <div class="attack-finding">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${tag}
+          <b style="font-size:12px">${escapeHtml(w.why || '')}</b>
+        </div>
+        ${w.fix ? `<div style="font-size:11px;color:var(--text-secondary);margin-top:2px"><b>조치</b> — ${escapeHtml(w.fix)}</div>` : ''}
+      </div>`;
+  }).join('');
+  return `
+    <div class="analysis-card" data-card-id="validity" style="border-color:${border}">
+      <div class="analysis-card-header">테스트 유효성
+        <span style="margin-left:auto">
+          ${hasBlock
+            ? '<span class="tag tag-orange">대상 미도달 가능 — 판정불가</span>'
+            : '<span class="tag tag-blue">판정 신뢰도 주의</span>'}
+        </span>
+      </div>
+      <div class="analysis-card-body">
+        ${hasBlock ? '<div class="detail-item" style="color:var(--text-muted);margin-bottom:4px">아래 사유로 이 요청이 대상을 실제로 건드리지 못했을 수 있어, \'안전\'으로 단정하지 않았습니다.</div>' : ''}
+        ${rows}
+      </div>
+    </div>`;
+}
+
 function renderAttackCard(a) {
   const findings = a.findings || [];
   if (!findings.length && !a.attack_outcome) return '';
@@ -2649,6 +2686,9 @@ function renderAnalysis(a, result) {
         </div>
       </div>
     </div>` : ''}
+
+    <!-- 테스트 유효성 — '요청이 대상을 못 건드림' 경고(거짓음성 방지). 판정 위에 노출. -->
+    ${_validityCard(a)}
 
     <!-- ── 판정 & 근거 그룹 ── -->
     <!-- 공격 결과 분석(증거 기반) — 판정의 '왜'. findings 유일 표시처(판정 카드 중복 제거) -->

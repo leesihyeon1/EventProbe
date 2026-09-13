@@ -1,7 +1,17 @@
 """요청 자동 보정(ASP.NET VIEWSTATE 갱신 · Content-Type 추론) 헬퍼 단위 테스트 —
 네트워크 없이 순수 함수만 검증."""
-from routers.api import (_extract_hidden, _is_aspnet_form, _merge_tokens,
+from routers.api import (_extract_hidden, _is_aspnet_form, _is_stateful_form, _merge_tokens,
                          _infer_content_type, _ensure_content_type)
+
+
+def test_is_stateful_form_covers_csrf_tokens():
+    """VIEWSTATE(.aspx) 외에 Rails/Django/일반 CSRF 토큰 폼도 갱신 대상."""
+    assert _is_stateful_form("http://h/login.aspx", "u=a&p=b", "POST")          # aspnet
+    assert _is_stateful_form("http://h/users", "authenticity_token=x&u=a", "POST")   # Rails
+    assert _is_stateful_form("http://h/accounts/login/", "csrfmiddlewaretoken=x&u=a", "POST")  # Django
+    assert _is_stateful_form("http://h/x", "_csrf=x&a=1", "POST")               # 일반
+    assert not _is_stateful_form("http://h/api", '{"u":"a"}', "POST")           # 토큰 없음
+    assert not _is_stateful_form("http://h/x", "authenticity_token=x", "GET")   # GET 제외
 
 
 def test_infer_content_type():

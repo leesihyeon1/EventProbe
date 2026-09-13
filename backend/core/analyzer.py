@@ -13,6 +13,7 @@ from core import classify as _classify
 from core.classify import (_FILE_READ_HINT, _SSRF_HINT, _SQLI_HINT, _REDIRECT_HINT,
                            _DANGEROUS_SCHEME, _CMDI_HINT, _XSS_HINT)
 from core import detectors as _detectors
+from core import test_validity
 from core.confirm import SUPPORTED as _CONFIRM_SUPPORTED
 # '확증 스캔' 버튼 노출 = confirm 파라미터 오라클(SUPPORTED) + authbypass(헤더 차분 오라클).
 # confirm.SUPPORTED 를 단일 소스로 삼아 버튼 노출과 실제 지원이 어긋나지 않게 한다.
@@ -3908,6 +3909,27 @@ def analyze_response(
         _note_body_truncated(findings, _seen, _full)
         result["response_anomalies"].append(
             f"응답 본문 절단 — 전체 {_full:,}자 중 앞 {_seen:,}자만 분석(뒷부분 미검사)")
+
+    # 테스트 유효성 게이트 — '요청이 대상을 못 건드린' 거짓음성 방지. 심각(block)하면
+    # '안전'으로 안심시키지 않고 판정불가로 강등한다(방어장비·인증벽·레이트리밋 등).
+    _validity = test_validity.assess(
+        status_code=status_code, headers_lower=headers_lower, body=body, body_lower=body_lower,
+        url=url or "", method=method or "", req_headers=req_headers, req_body=req_body or "",
+        payload=payload or "", category=category or "", attack_type=result["attack_type"],
+        baseline=baseline, redirect_chain=redirect_chain,
+        followed_redirects=bool(redirect_chain), waf=result.get("waf_detected"))
+    result["validity"] = _validity
+    _has_block = any(w["severity"] == "block" for w in _validity["warnings"])
+    if _has_block and outcome == "safe":
+        outcome = "inconclusive"     # 테스트 무효 → '안전' 금지, 판정불가로
+    if _has_block:
+        _w = next(w for w in _validity["warnings"] if w["severity"] == "block")
+        findings.append({
+            "name": "테스트 유효성 경고 — 대상 미도달 가능", "verdict": "미확인", "confidence": 20,
+            "why": _w["why"] + " → " + _w["fix"],
+            "evidence": "; ".join(w["code"] for w in _validity["warnings"]),
+            "method": "테스트 유효성 검사", "where": "요청·응답 전제조건",
+        })
 
     result["findings"] = _enrich_verification(findings)   # 전 finding에 검증 내역(method/where) 부여
     result["attack_outcome"] = outcome
