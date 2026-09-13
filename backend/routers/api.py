@@ -308,7 +308,11 @@ async def _retrieve_related(category: str, outcome: str, findings: list, probe: 
         hits = await asyncio.to_thread(rag.search, rag_q, 6, category)   # 재정렬 여유로 6개
         if hits:
             top = hits[0]["score"]
-            hits = [h for h in hits if h["score"] >= max(0.42, top * 0.6)]
+            # 절대 문턱 0.50 — 관측상 실제로 관련있는 발췌는 0.52~0.68, 카테고리 앵커가
+            # 약한 질의에서 끌려오는 '리포트 작성법/취약점 확인 방법' 같은 일반론 메타
+            # 문단은 0.42 대역에 몰림. 0.50 미만이면 (전부 잘려) 섹션이 사라지는 편이
+            # 무관한 발췌를 억지로 보여주는 것보다 낫다.
+            hits = [h for h in hits if h["score"] >= max(0.50, top * 0.6)]
             # 설명 산문을 앞으로, 페이로드 덤프는 뒤로(점수 근접 시 산문 우선)
             hits.sort(key=lambda h: (not _is_prose(h.get("text", "")), -h.get("score", 0)))
             hits = hits[:3]
