@@ -622,10 +622,13 @@ async def ai_payloads(req: AiVariantRequest):
         raise HTTPException(status_code=400, detail="AI 미설정 (.env 의 NVIDIA_API_KEY 없음)")
     count = max(1, min(req.count, 20))
     # RAG: WAF/필터 우회 기법을 코퍼스에서 검색해 변형 생성 근거로 주입
+    # floor 0.42 — 우회 기법(주제가 좁아 점수가 낮게 흐름)은 0.42+ 면 관련성 있음.
+    # 생성은 검색 결과가 모델에 '근거'로 주입되므로 분석 표시용(0.50)보다 낮게 잡아
+    # 유용한 저점수 우회 기법이 잘리지 않게 하되, 0.42 미만 노이즈는 버린다.
     retrieved = await _rag_lookup(
         " ".join(filter(None, [req.base_payload, req.category, req.waf,
                                "WAF 필터 우회 인코딩 bypass filter evasion encoding"])),
-        5, req.category, floor=0.3)
+        5, req.category, floor=0.42)
     res = await ai_generate_variants(req.base_payload, req.category, req.waf, count, retrieved=retrieved)
     if isinstance(res, dict):
         res.update(_rag_ctx_fields(retrieved))
@@ -772,7 +775,7 @@ async def followup_suggest(req: FollowupRequest):
         retrieved = await _rag_lookup(
             " ".join(filter(None, [path, " ".join(families), " ".join(req.finding_names or []),
                                    req.category, "확증 승격 우회 exploit escalate confirm bypass"])),
-            5, (families[0] if families else req.category), floor=0.35)
+            5, (families[0] if families else req.category), floor=0.42)
     if req.use_ai and ai_enabled() and has_evidence:
         fp = req.fingerprint or {}
         tech = ", ".join(x for x in [fp.get("server"), fp.get("powered_by")] if x)
