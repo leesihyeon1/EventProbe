@@ -323,8 +323,7 @@ def _is_placeholder_payload(payload: str) -> bool:
     return False
 
 
-_KNOWN_CATS = {"sqli", "xss", "lfi", "ssrf", "cmdi", "ssti",
-               "redirect", "idor", "nosql", "authbypass", "other"}
+from core.categories import KNOWN_CATS as _KNOWN_CATS   # AI 생성 카테고리 정규화 화이트리스트
 
 # 민감 파일/VCS/설정/시크릿 직접 접근 — 정보 노출(파일읽기) 계열. authbypass 로 오분류되기 쉬워
 # 라벨보다 우선 적용한다(예: /.git/config, /.env, wp-config.php).
@@ -644,12 +643,8 @@ async def ai_verdict(ctx: dict) -> dict | None:
 # SOC 가 붙여넣은 패킷을 정규식(core.classify)이 분류하지 못했을 때만 호출한다.
 # 요청(호스트 제외)만 보내고 응답 본문은 보내지 않으므로 유출 위험이 낮다(is_enabled 게이트).
 # 분류만 담당 — '통했는가'(판정)는 여전히 analyzer 의 증거 기반 탐지기가 한다.
-_KNOWN_ATTACK_TYPES = [
-    "sqli", "xss", "cmdi", "lfi", "xxe", "ssrf", "ssti", "redirect", "nosql",
-    "xmlrpc", "jwt", "idor", "ldap", "xpath", "crlf", "cors", "graphql", "ssi",
-    "upload", "deserial", "prototype", "csrf", "xxe", "log4shell", "shellshock",
-    "header", "cache", "other",
-]
+# AI 분류(classify) 화이트리스트 — 카테고리 레지스트리 단일 소스에서 파생.
+from core.categories import AI_CLASSIFY_TYPES as _KNOWN_ATTACK_TYPES
 
 _CLASSIFY_SYS = (
     "당신은 웹 보안 분석가입니다. 주어진 HTTP 요청(대상 호스트는 제거됨)이 '어떤 공격 시도'인지 "

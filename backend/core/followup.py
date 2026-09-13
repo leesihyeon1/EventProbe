@@ -9,20 +9,8 @@
 from typing import Optional
 
 # 신호(취약 유형) → 페이로드 카테고리(family) 매핑. 이름/설명 키워드로 판별.
-_FAMILY_KEYWORDS = [
-    (("sql", "union", "블라인드", "sqli", "구문 오류", "quotation"), "sqli"),
-    (("반사", "reflect", "xss", "스크립트", "script"),               "xss"),
-    (("파일 읽기", "passwd", "lfi", "traversal", "경로 조작", "디렉터리"), "lfi"),
-    (("명령", "command", "cmd", "rce", "명령 실행"),                  "cmdi"),
-    (("템플릿", "ssti", "7*7", "=49", "template"),                    "ssti"),
-    (("메타데이터", "ssrf", "내부/", "internal", "metadata", "169.254"), "ssrf"),
-    (("리다이렉트", "redirect", "open redirect"),                    "redirect"),
-    (("xxe", "xml external", "외부 엔티티"),                          "xxe"),
-    (("nosql", "mongo"),                                             "nosql"),
-    (("crlf", "http 응답 분할"),                                     "crlf"),
-    (("ssi",),                                                       "ssi"),
-    (("xpath",),                                                     "xpath"),
-]
+# 신호(취약 유형) → 페이로드 카테고리(family) 매핑 — 카테고리 레지스트리 단일 소스에서 파생.
+from core.categories import FAMILY_KEYWORDS as _FAMILY_KEYWORDS
 
 # 승격으로 우선 노출할 페이로드 키워드(고급 변형). 매칭되면 앞으로.
 _ESCALATION_HINTS = (

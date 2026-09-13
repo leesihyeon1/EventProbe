@@ -48,10 +48,7 @@ class DetectionContext:
 
 
 # ── 인증 실패/차단 문구(차분에서 '실패 문구 소멸' 판정용) ──────────────────────
-_AUTH_FAIL_RE = re.compile(
-    r"(?:invalid|incorrect|wrong|failed|denied|unauthorized|forbidden|not\s+allowed|"
-    r"로그인\s*실패|인증\s*실패|권한\s*없|아이디\s*(?:또는|/)?\s*비밀번호|"
-    r"틀렸|잘못된\s*(?:자격|비밀번호|아이디))", re.I)
+from core.classify import AUTH_FAIL_RE as _AUTH_FAIL_RE   # 인증실패 문구 공용 단일 소스
 _ERROR_5XX = re.compile(r"\b(?:exception|stack\s*trace|traceback|fatal error|syntax error|"
                         r"sql\b.*error|odbc|jdbc)\b", re.I)
 

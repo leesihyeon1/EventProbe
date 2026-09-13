@@ -164,14 +164,22 @@ def test_cmdi_id_command_confirmed():
 
 
 def test_ssti_evaluation_confirmed():
-    results = [_r("baseline"), _r("e_curly", body="output 49 done")]
+    # 고유 곱(7*191=1337)이 계산 결과로 등장 → 확증
+    results = [_r("baseline"), _r("e_curly", body="output 1337 done")]
     d = confirm.decide("ssti", results)
     assert d["confirmed"]
 
 
 def test_ssti_not_confirmed_when_expression_echoed():
-    """응답에 '7*7' 원문이 그대로 있으면(미평가) 확증하지 않는다."""
-    results = [_r("baseline"), _r("e_curly", body="you typed 7*7 which is 49")]
+    """응답에 '7*191' 원문이 그대로 있으면(미평가) 확증하지 않는다."""
+    results = [_r("baseline"), _r("e_curly", body="you typed 7*191 which is 1337")]
+    d = confirm.decide("ssti", results)
+    assert not d["confirmed"]
+
+
+def test_ssti_not_confirmed_when_product_in_baseline():
+    """곱 결과가 baseline 에도 있으면(우연 등장) 확증하지 않는다."""
+    results = [_r("baseline", body="order 1337"), _r("e_curly", body="order 1337 result")]
     d = confirm.decide("ssti", results)
     assert not d["confirmed"]
 

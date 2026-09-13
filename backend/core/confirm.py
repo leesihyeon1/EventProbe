@@ -24,6 +24,11 @@ _TIME_DELTA_MIN = 3500    # SLEEP(5) - SLEEP(0) 이 이 이상이면 시간 기�
 _TIME_CTRL_MAX  = 2500    # 단, 대조(SLEEP 0)가 이보다 느리면 회선 지연으로 보고 기각(ms)
 _LEN_DELTA_MIN  = 40      # 본문 길이차가 이 이상이면 '유의미한 변화'(byte)
 
+# SSTI 확증용 고유 피연산자 — 7*191=1337. '49'(7*7)처럼 페이지에 흔한 값이 아니라
+# 우연 등장이 거의 없어 오탐을 줄인다(계산 결과가 응답에 뜨고 원문 표현식은 없어야 확증).
+_SSTI_A, _SSTI_B = 7, 191
+_SSTI_PROD = str(_SSTI_A * _SSTI_B)   # "1337"
+
 # XSS 반사 확인용 고유 마커(우연 반사와 구분)
 _XSS_MARKER = "zqx7k"
 _XSS_BREAK  = f'{_XSS_MARKER}"><svg onload=alert(1)>'
@@ -31,14 +36,11 @@ _XSS_BREAK  = f'{_XSS_MARKER}"><svg onload=alert(1)>'
 _PASSWD_RE = re.compile(r"root:.*?:0:0:", re.I)
 _UID_RE    = re.compile(r"uid=\d+\([^)]+\)")
 
-# 확증 프로브를 지원하는 카테고리
-SUPPORTED = {"sqli", "ssti", "xss", "lfi", "cmdi", "redirect", "nosql", "idor", "business",
-             "ldap", "auth"}
+# 확증 프로브를 지원하는 카테고리 — 카테고리 레지스트리 단일 소스에서 파생.
+from core.categories import CONFIRMABLE as SUPPORTED
 
-# 인증 실패를 가리키는 응답 키워드(대조군이 '실패'임을 확인하고, 우회 시 사라지는지 본다)
-_AUTH_FAIL_RE = re.compile(
-    r"invalid|incorrect|failed|failure|denied|wrong|not\s*found|unauthor|"
-    r"틀렸|실패|올바르지|일치하지|다시\s*시도|로그인\s*(?:실패|하세요)", re.I)
+# 인증 실패를 가리키는 응답 키워드 — classify 의 공용 정규식 사용(detectors 와 동일 인식)
+from core.classify import AUTH_FAIL_RE as _AUTH_FAIL_RE
 # 세션/인증 쿠키 이름 힌트
 _SESSION_COOKIE_RE = re.compile(r"(session|sess|auth|token|jwt|sid|login|connect\.sid)", re.I)
 
@@ -180,10 +182,11 @@ def probe_plan(category: str, base_value: str = "") -> list[dict]:
         ]
 
     if cat == "ssti":
+        # 고유 피연산자(7*191=1337) 사용 — '49' 처럼 페이지에 우연히 있는 값과 구분(오탐↓).
         return [
-            {"role": "baseline", "label": "원본",       "value": b},
-            {"role": "e_curly",  "label": "{{7*7}}",    "value": f"{b}{{{{7*7}}}}"},
-            {"role": "e_dollar", "label": "${7*7}",     "value": f"{b}${{7*7}}"},
+            {"role": "baseline", "label": "원본",              "value": b},
+            {"role": "e_curly",  "label": f"{{{{{_SSTI_A}*{_SSTI_B}}}}}", "value": f"{b}{{{{{_SSTI_A}*{_SSTI_B}}}}}"},
+            {"role": "e_dollar", "label": f"${{{_SSTI_A}*{_SSTI_B}}}",    "value": f"{b}${{{_SSTI_A}*{_SSTI_B}}}"},
         ]
 
     if cat == "xss":
@@ -346,14 +349,18 @@ def decide(category: str, results: list[dict]) -> dict:
             techniques.append({"name": "명령 주입 (id 실행)", "evidence": f"응답에 '{m.group(0)}' 등장"})
 
     elif cat == "ssti":
+        base_body = (by.get("baseline") or {}).get("body") or ""
+        expr = f"{_SSTI_A}*{_SSTI_B}"
         for role in ("e_curly", "e_dollar"):
             r = by.get(role)
             body = (r or {}).get("body") or ""
-            # 49 가 '7*7' 원문이 아니라 계산 결과로 등장해야 함
-            if r and "49" in body and "7*7" not in body:
+            # 곱 결과(1337)가 등장하되 ① 원문 표현식(7*191)이 아니라 계산 결과이고
+            # ② baseline 엔 없어야 함(우연 등장·에코 배제).
+            if r and _SSTI_PROD in body and expr not in body and _SSTI_PROD not in base_body:
                 techniques.append({
                     "name": "SSTI (서버 템플릿 평가)",
-                    "evidence": "표현식이 서버에서 계산됨 — 응답에 '49' 등장",
+                    "evidence": f"표현식 {expr} 이 서버에서 계산됨 — 응답에 '{_SSTI_PROD}' 등장"
+                                f"(원문 표현식·baseline 엔 없음)",
                 })
                 break
 

@@ -34,6 +34,15 @@ _FILE_READ_HINT = re.compile(
     r"file://|LOAD_FILE|pg_read_file|xp_cmdshell",
     re.I,
 )
+
+# 인증/인가 실패를 가리키는 응답 문구(로그인 실패·거부) — detectors·confirm 공용 단일 소스.
+# (기존 detectors._AUTH_FAIL_RE 와 confirm._AUTH_FAIL_RE 의 합집합 — 어느 경로든 동일 인식)
+AUTH_FAIL_RE = re.compile(
+    r"invalid|incorrect|wrong|failed|failure|denied|unauthor|forbidden|"
+    r"not\s+allowed|not\s*found|"
+    r"틀렸|실패|올바르지|일치하지|다시\s*시도|권한\s*없|인증\s*실패|"
+    r"잘못된\s*(?:자격|비밀번호|아이디)|아이디\s*(?:또는|/)?\s*비밀번호|"
+    r"로그인\s*(?:실패|하세요)", re.I)
 _SSRF_HINT = re.compile(
     r"169\.254\.169\.254|/latest/meta-data|metadata\.google|metadata\.azure|"
     r"localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|file://|gopher://|dict://|"

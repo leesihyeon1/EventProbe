@@ -250,21 +250,8 @@ def _redirect_chain(response) -> list:
 
 # 공격유형 → 코퍼스(산문)와 의미가 잘 맞는 앵커 문구. 원시 경로/페이로드만으로는
 # 임베딩 유사도가 낮아 관련 문서를 놓치므로, 이 서술 용어로 질의를 앵커링한다.
-_CATEGORY_DESC = {
-    "sqli": "SQL injection database query error-based union blind order by",
-    "xss": "cross-site scripting XSS javascript injection reflected DOM",
-    "ssrf": "server-side request forgery internal metadata endpoint",
-    "lfi": "local file inclusion path traversal directory traversal file read",
-    "xxe": "XML external entity injection",
-    "cmdi": "OS command injection remote code execution shell",
-    "ssti": "server-side template injection expression evaluation",
-    "redirect": "open redirect location header",
-    "jwt": "JSON web token JWT algorithm confusion signature",
-    "idor": "access control IDOR authorization insecure direct object reference",
-    "nosql": "NoSQL injection MongoDB operator",
-    "xmlrpc": "XML-RPC pingback multicall wordpress",
-    "csrf": "cross-site request forgery CSRF token",
-}
+# RAG 검색 앵커(카테고리별 설명) — 카테고리 레지스트리 단일 소스에서 파생.
+from core.categories import DESCRIPTIONS as _CATEGORY_DESC
 
 
 # 판정 결과(outcome)에 맞춰 RAG 질의 의도를 앵커링 — 같은 "참고 지식" 블록이 상황에 맞는
