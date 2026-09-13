@@ -97,11 +97,72 @@ def _applies_to(info: dict, path: str) -> dict:
     return ap
 
 
-def convert_matchers(blk: dict) -> list:
-    """nuclei 요청 블록의 matcher(status/word/regex + condition) → 이 도구의 매처 스키마.
+# DSL 파싱에서 '너무 흔해' 확증 근거로 부적합한 단어(거의 모든 응답에 존재 → 오탐)
+_DSL_GENERIC = {"text/html", "text/plain", "text/xml", "application/json", "application/xml",
+                "application/octet-stream", "<html", "</html>", "<!doctype", "200 ok",
+                "html", "utf-8", "charset", "<head", "<body", "http/1.1"}
 
-    analyzer 의 매처 엔진(_eval_matchers)이 그대로 해석한다. dsl 등 미지원 타입은 담지 않고,
-    {{helper}} 인터폴레이션이 남은 word/regex 도 그대로 매칭 불가라 제외한다.
+
+def _dsl_strings(blob: str) -> list:
+    """DSL 인자 blob 에서 문자열 리터럴(", ') 추출(이스케이프 간단 해제)."""
+    out = re.findall(r'"((?:[^"\\]|\\.)*)"', blob) + re.findall(r"'((?:[^'\\]|\\.)*)'", blob)
+    return [s.replace('\\"', '"').replace("\\'", "'").replace("\\\\", "\\") for s in out]
+
+
+def _dsl_clean_words(strs: list) -> list:
+    out = []
+    for s in strs:
+        s = s.strip()
+        if not s or "{{" in s or len(s) < 4 or s.lower() in _DSL_GENERIC:
+            continue
+        out.append(s)
+    return out
+
+
+def _dsl_part(p: str) -> str:
+    p = (p or "").lower()
+    if p.startswith("header") or p in ("content_type", "all_headers", "location"):
+        return "header"
+    return "body"   # body, body_N, data, resp 등은 본문으로
+
+
+def dsl_to_matchers(dsl_list) -> list:
+    """nuclei DSL 매처(contains/contains_all/contains_any/regex/status_code)를 word/regex/status
+    스키마로 변환. 특정성 보존 위해 AND 결합, 제네릭·짧은 단어는 배제(오탐 방지).
+    compare_versions·len·alert 등 응답 내용과 무관한 표현은 무시."""
+    text = " && ".join(str(e) for e in (dsl_list or []))
+    text = re.sub(r"to_?lower\s*\(\s*([a-z_0-9]+)\s*\)", r"\1", text, flags=re.I)  # tolower(body)→body
+    body_w, header_w, any_w, regexes, statuses = [], [], [], [], []
+    for m in re.finditer(r"contains_all\s*\(\s*([a-z_0-9]+)\s*,\s*([^()]*?)\)", text, re.I):
+        (header_w if _dsl_part(m.group(1)) == "header" else body_w).extend(_dsl_clean_words(_dsl_strings(m.group(2))))
+    for m in re.finditer(r"contains_any\s*\(\s*([a-z_0-9]+)\s*,\s*([^()]*?)\)", text, re.I):
+        any_w.extend(_dsl_clean_words(_dsl_strings(m.group(2))))
+    for m in re.finditer(r"\bcontains\s*\(\s*([a-z_0-9]+)\s*,\s*([^()]*?)\)", text, re.I):
+        (header_w if _dsl_part(m.group(1)) == "header" else body_w).extend(_dsl_clean_words(_dsl_strings(m.group(2))))
+    for m in re.finditer(r"regex\s*\(\s*(['\"])(.*?)\1\s*,\s*([a-z_0-9]+)\s*\)", text, re.I):
+        if "{{" not in m.group(2):
+            regexes.append(m.group(2))
+    for m in re.finditer(r"status_code(?:_\d+)?\s*==\s*(\d+)", text):
+        statuses.append(int(m.group(1)))
+    out = []
+    if body_w:
+        out.append({"type": "word", "part": "body", "words": sorted(set(body_w))[:8], "condition": "and"})
+    if header_w:
+        out.append({"type": "word", "part": "header", "words": sorted(set(header_w))[:8], "condition": "and"})
+    if any_w:
+        out.append({"type": "word", "part": "body", "words": sorted(set(any_w))[:8], "condition": "or"})
+    if regexes:
+        out.append({"type": "regex", "part": "body", "regex": regexes[:5], "condition": "and"})
+    if statuses:
+        out.append({"type": "status", "status": sorted(set(statuses))})
+    return out
+
+
+def convert_matchers(blk: dict) -> list:
+    """nuclei 요청 블록의 matcher(status/word/regex/dsl + condition) → 이 도구의 매처 스키마.
+
+    analyzer 의 매처 엔진(_eval_matchers)이 그대로 해석한다. {{helper}} 인터폴레이션이 남은
+    word/regex 는 매칭 불가라 제외. dsl 은 contains/regex/status 형태를 파싱해 커버(오탐 방지).
     """
     matchers = []
     for m in (blk.get("matchers") or []):
@@ -122,7 +183,8 @@ def convert_matchers(blk: dict) -> list:
             if rx:
                 matchers.append({"type": "regex", "part": (m.get("part") or "body"),
                                  "regex": rx[:5], "condition": (m.get("condition") or "or")})
-        # dsl 등 미지원 매처는 스킵(analyzer 에서 and 조건이면 안전하게 평가 포기)
+        elif t == "dsl":
+            matchers.extend(dsl_to_matchers(m.get("dsl")))
     return matchers
 
 

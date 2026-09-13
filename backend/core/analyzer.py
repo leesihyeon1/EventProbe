@@ -2261,6 +2261,11 @@ _PAYLOADS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "payloads
 def _cve_entry_to_sig(entry: dict) -> Optional[dict]:
     """payloads.json 의 cve 항목 → 경로+매처 시그니처. 확증 근거가 약하면 None."""
     matchers = entry.get("matchers") or []
+    mcond = str(entry.get("matchers_condition") or "and").lower()
+    # OR 조건에서 status 단독 매처는 정상 200 응답도 통과시켜 오탐(status=200 이면 무조건 확증) →
+    # OR 일 때는 내용 매처(word/regex)만 남긴다. status 는 AND 결합일 때만 의미가 있다.
+    if mcond == "or":
+        matchers = [m for m in matchers if (m.get("type") or "").lower() in ("word", "regex")]
     # 상태코드만 있는 매처는 '200 = 성공'이 되어 오탐 → 내용 매처(word/regex)가 있어야 확증에 쓴다.
     if not any((m.get("type") or "").lower() in ("word", "regex") for m in matchers):
         return None

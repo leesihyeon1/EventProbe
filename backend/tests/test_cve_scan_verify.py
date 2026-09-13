@@ -251,3 +251,26 @@ def test_real_bank_cve_sigs_are_well_formed():
     for s in sigs:
         assert s["path_contains"]
         assert any(m.get("type") in ("word", "regex") for m in s["matchers"])
+
+
+def test_no_cve_matcher_false_positive_on_benign_responses():
+    """백필된 CVE 매처가 정상 응답을 취약으로 오판하지 않는다(OR+status 오탐 가드)."""
+    from core import analyzer
+    analyzer._CVE_SIGS = None
+    sigs = analyzer._load_cve_sigs()
+    assert len(sigs) > 400, "matcher 백필로 검증 가능한 CVE 가 충분히 있어야 함"
+    hdr = "content-type: text/html; charset=utf-8"
+    benign = "<html><head><title>Welcome</title></head><body><h1>Home</h1></body></html>"
+    for body, st in [(benign, 200), ('{"status":"ok"}', 200), ("Not Found", 404), ("error", 500)]:
+        fps = [s["cve"] for s in sigs if analyzer._eval_matchers(s, body, hdr, st)[0]]
+        assert not fps, f"정상 응답(status={st})에 오탐: {fps[:5]}"
+
+
+def test_dsl_to_matchers_parses_contains_and_drops_generic():
+    from tools.import_nuclei import dsl_to_matchers
+    ms = dsl_to_matchers(['status_code == 200 && contains(body, "GSCAN_UNIQUE_MARKER") '
+                          '&& contains(content_type, "text/html")'])
+    words = [w for m in ms if m["type"] == "word" and m["part"] == "body" for w in m["words"]]
+    assert "GSCAN_UNIQUE_MARKER" in words
+    assert "text/html" not in words                  # 제네릭 단어 배제
+    assert any(m["type"] == "status" and 200 in m["status"] for m in ms)

