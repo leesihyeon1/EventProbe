@@ -590,6 +590,23 @@ def test_filescan_redirect_needs_3xx():
     assert [f for f in run_registered(ctx) if f["detector_id"] == "filescan_redirect"] == []
 
 
+def test_filescan_redirect_skips_login_form_sqli():
+    """로그인 SQLi(POST /login.aspx) 의 3xx 를 '파일 스캔'으로 오인하지 않는다 —
+    .aspx 확장자·리다이렉트가 있어도 크리덴셜 인젝션이지 파일 읽기가 아니다."""
+    ctx = _ctx(status_code=302, body="", category="sqli", payload="admin'--",
+               url="http://t/login.aspx", req_body="tbUsername=admin'--&tbPassword=",
+               method="POST", headers_lower={"location": "/default.aspx"})
+    assert [f for f in run_registered(ctx) if f["detector_id"] == "filescan_redirect"] == []
+
+
+def test_filescan_redirect_skips_app_page_extension():
+    """앱 실행 페이지(.aspx/.php) 는 단순 확장자만으로 파일 스캔 취급하지 않는다."""
+    ctx = _ctx(status_code=302, body="", category="", payload="",
+               url="http://t/page.aspx", method="GET",
+               headers_lower={"location": "/default.aspx"})
+    assert [f for f in run_registered(ctx) if f["detector_id"] == "filescan_redirect"] == []
+
+
 # analyze_response 통합 — 3xx 파일 스캔이 '미노출' 로 조용히 안전해지지 않는다
 def test_analyze_env_redirect_to_cdn_is_suspicious():
     r = analyze_response(302, {"location": "https://cdn.x/.env"}, "", 60,

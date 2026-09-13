@@ -984,6 +984,12 @@ _SENSITIVE_BASENAME = re.compile(
     r"\.(?:git|svn|hg|env|bak|old|swp|save|orig|sql|zip|tar|gz|rar|7z|log|ini|conf|config|"
     r"pem|key|p12|pfx|htpasswd|htaccess)\b|/wp-config|web\.config|/\.aws|/\.ssh|id_rsa", re.I)
 _GENERIC_REDIR = re.compile(r"^/?(?:$|index\.\w+|home\b|default\b|404|error)", re.I)
+# 앱 실행 페이지(엔드포인트) — 이런 확장자는 '읽어가는 파일'이 아니라 애플리케이션
+# 진입점이므로, 단순 확장자만으로 '파일 스캔'으로 오인하면 안 된다(예: /login.aspx).
+_APP_PAGE_EXT = re.compile(r"\.(?:aspx?|php\d?|jspx?|cfml?|do|action|py|rb|cgi|pl|ashx|asmx)(?:[?#]|$)", re.I)
+# 파일 읽기(lfi/파일 스캔)가 아닌 공격 — 이들에는 파일 스캔 리다이렉트 판정을 적용하지 않는다.
+_NON_FILE_CATS = frozenset({"sqli", "nosql", "xss", "cmdi", "ssti", "ssrf", "redirect",
+                            "xxe", "jwt", "csrf", "xmlrpc", "authbypass", "idor"})
 
 
 def _path_of(u):
@@ -1015,11 +1021,18 @@ class FileScanRedirectDetector(Detector):
     def applies(self, ctx):
         if ctx.status_code not in (301, 302, 303, 307, 308):
             return False
+        # 파일 읽기가 아닌 공격(크리덴셜/주입/오픈리다이렉트 등)엔 적용 안 함 — 파일 스캔 오인 방지
+        if (ctx.category or "").lower() in _NON_FILE_CATS or (ctx.attack_type or "").lower() in _NON_FILE_CATS:
+            return False
+        # 폼/JSON 제출(POST/PUT/PATCH + body)은 파일 스캔이 아니라 애플리케이션 요청
+        if (ctx.method or "").upper() in ("POST", "PUT", "PATCH") and (ctx.req_body or "").strip():
+            return False
         rp = self._requested(ctx)
         blob = f"{rp} {ctx.payload or ''}"
-        # 파일 스캔처럼 보일 때만(민감 파일명·확장자·트래버설/파일 힌트)
-        return bool(_SENSITIVE_BASENAME.search(blob) or _FILE_EXT_RE.search(rp)
-                    or _FILE_HINT.search(blob))
+        # 민감 파일명·파일읽기 힌트가 있거나, (앱 실행 페이지가 아닌) 파일 확장자일 때만
+        if _SENSITIVE_BASENAME.search(blob) or _FILE_HINT.search(blob):
+            return True
+        return bool(_FILE_EXT_RE.search(rp) and not _APP_PAGE_EXT.search(rp))
 
     def detect(self, ctx):
         loc = _hdr(ctx.headers_lower, "location")
