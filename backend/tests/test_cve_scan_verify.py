@@ -243,13 +243,15 @@ def test_checked_desc_lists_own_matchers_when_available(cve_bank):
 
 
 def test_real_bank_cve_sigs_are_well_formed():
-    """실제 payloads.json 에서 로드한 CVE 시그니처는 항상 내용 매처(word/regex)를 가진다."""
+    """실제 payloads.json 에서 로드한 CVE 시그니처는 항상 내용 매처(word/regex)를 가지고,
+    식별 근거(경로 or 지문)를 최소 하나 가진다."""
     analyzer._CVE_SIGS = None            # 캐시 초기화 후 실제 파일 로드
     sigs = analyzer._load_cve_sigs()
     analyzer._CVE_SIGS = None
     assert isinstance(sigs, list)
     for s in sigs:
-        assert s["path_contains"]
+        # 경로 또는 지문(server/powered_by) 중 최소 하나로 식별 가능해야 함
+        assert s["path_contains"] or s.get("server") or s.get("powered_by")
         assert any(m.get("type") in ("word", "regex") for m in s["matchers"])
 
 
@@ -264,6 +266,41 @@ def test_no_cve_matcher_false_positive_on_benign_responses():
     for body, st in [(benign, 200), ('{"status":"ok"}', 200), ("Not Found", 404), ("error", 500)]:
         fps = [s["cve"] for s in sigs if analyzer._eval_matchers(s, body, hdr, st)[0]]
         assert not fps, f"정상 응답(status={st})에 오탐: {fps[:5]}"
+
+
+def test_fingerprint_only_cve_identified_and_confirmed():
+    """경로가 안 맞아도 스택 지문(server/powered_by)만으로 CVE 를 식별하고
+    자기 매처로 확증한다 (SQLi/XSS 와 같은 '식별→검증' 패턴)."""
+    from core import analyzer
+    analyzer._CVE_SIGS = None
+    fp_sigs = [s for s in analyzer._load_cve_sigs()
+               if (s.get("server") or s.get("powered_by")) and analyzer._fp_specific_enough(s)]
+    assert fp_sigs, "지문 기반 식별 가능한 CVE 가 최소 하나는 있어야 함"
+    sig = fp_sigs[0]
+    fs = (sig.get("server") or [""])[0]
+    fpw = (sig.get("powered_by") or [""])[0]
+    # 경로는 CVE 경로가 아닌 '/' 로 → 지문으로만 선택되는지 확인
+    selected = analyzer._cve_sigs_for("/", fp_server=fs, fp_powered=fpw)
+    assert any(x["cve"] == sig["cve"] for x in selected), "지문으로 CVE 가 식별돼야 함"
+
+    # 지문만으로는(매처 미일치) 확증되지 않아야 함 — 정상 응답
+    hdr = {"server": fs, "x-powered-by": fpw, "content-type": "text/html"}
+    benign = analyzer._detect_cve_sig("/", "<h1>OK</h1>", hdr, 200)
+    assert not any(sig["cve"] in f["name"] for f in benign), "매처 미일치인데 확증되면 안 됨"
+
+
+def test_fingerprint_only_needs_specific_matcher():
+    """지문-only 시그니처는 매처가 충분히 구체적일 때만 채택된다(제품명 오탐 가드)."""
+    from core import analyzer
+    # 지문 토큰과 같은 짧은 word 하나만 있는 sig 는 채택되면 안 됨
+    weak = {"cve": "X", "server": ["apache"], "powered_by": [],
+            "path_contains": [], "matchers_condition": "and",
+            "matchers": [{"type": "word", "words": ["apache"]}]}
+    assert not analyzer._fp_specific_enough(weak)
+    strong = {"cve": "Y", "server": ["apache"], "powered_by": [],
+              "path_contains": [], "matchers_condition": "and",
+              "matchers": [{"type": "regex", "regex": ["root:.*:0:0:"]}]}
+    assert analyzer._fp_specific_enough(strong)
 
 
 def test_dsl_to_matchers_parses_contains_and_drops_generic():

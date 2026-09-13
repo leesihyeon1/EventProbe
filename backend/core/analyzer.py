@@ -2275,16 +2275,21 @@ def _cve_entry_to_sig(entry: dict) -> Optional[dict]:
         seg = pv.split("?")[0]
         if len(seg) >= 4:
             pcs.append(seg)
+    ap = entry.get("applies_to") or {}
     if not pcs:
-        pcs = [str(x) for x in ((entry.get("applies_to") or {}).get("path_contains") or [])
-               if len(str(x)) >= 4]
-    if not pcs:
+        pcs = [str(x) for x in (ap.get("path_contains") or []) if len(str(x)) >= 4]
+    # 지문(server/powered_by) — 경로 매칭이 안 될 때 이 스택이면 검증 대상에 포함(식별 강화)
+    server = [str(x).lower() for x in (ap.get("server") or []) if str(x).strip()]
+    powered = [str(x).lower() for x in (ap.get("powered_by") or []) if str(x).strip()]
+    if not pcs and not (server or powered):
         return None
     return {
         "id": entry.get("cve") or entry.get("id") or "",
         "name": entry.get("name") or entry.get("cve") or entry.get("id") or "",
         "cve": entry.get("cve") or "",
         "path_contains": sorted(set(pcs))[:4],
+        "server": server,
+        "powered_by": powered,
         "matchers": matchers,
         "matchers_condition": entry.get("matchers_condition", "and"),
     }
@@ -2309,17 +2314,56 @@ def _load_cve_sigs() -> list:
     return _CVE_SIGS
 
 
-def _cve_sigs_for(probe: str) -> list:
-    """요청 경로에 해당하는 CVE 시그니처(자기 매처를 가진 것)들."""
+def _fp_from_headers(headers_lower: Optional[dict]) -> tuple:
+    """응답 헤더에서 스택 지문(server, powered_by) 추출 — CVE 지문 매칭용."""
+    h = headers_lower or {}
+    server = str(h.get("server", "")).lower()
+    powered = " ".join(str(h.get(k, "")) for k in
+                       ("x-powered-by", "x-generator", "x-aspnet-version", "x-aspnetmvc-version")).lower()
+    return server, powered
+
+
+def _fp_specific_enough(sig: dict) -> bool:
+    """지문-only 매칭 시 오탐 가드 — 제품명 word 만으론 확증 불가(예: WordPress CVE 가 'wordpress'
+    단어면 아무 WP 페이지나 확증). regex 매처가 있거나, word 가 지문 토큰이 아니고 충분히
+    구체적(8자+)일 때만 지문-only 로 인정한다."""
+    fp_tokens = set(sig.get("server") or []) | set(sig.get("powered_by") or [])
+    for m in sig.get("matchers") or []:
+        t = (m.get("type") or "").lower()
+        if t == "regex" and m.get("regex"):
+            return True
+        if t == "word":
+            for w in (m.get("words") or []):
+                wl = str(w).lower()
+                if len(wl) >= 8 and not any(tok in wl or wl in tok for tok in fp_tokens):
+                    return True
+    return False
+
+
+def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list:
+    """요청 경로 또는 스택 지문에 해당하는 CVE 시그니처(자기 매처를 가진 것)들.
+    경로 매칭이 우선이고, 경로가 안 맞아도 지문(server/powered_by)이 맞으면 포함하되
+    지문-only 는 매처가 구체적일 때만(오탐 가드)."""
     pl = (probe or "").lower()
-    return [sig for sig in _load_cve_sigs()
-            if any(str(pc).lower() in pl for pc in (sig.get("path_contains") or []))]
+    fs = (fp_server or "").lower()
+    fpw = (fp_powered or "").lower()
+    out = []
+    for sig in _load_cve_sigs():
+        if any(str(pc).lower() in pl for pc in (sig.get("path_contains") or [])):
+            out.append(sig)
+            continue
+        fp_hit = (fs and any(s in fs for s in (sig.get("server") or []))) or \
+                 (fpw and any(p in fpw for p in (sig.get("powered_by") or [])))
+        if fp_hit and _fp_specific_enough(sig):
+            out.append(sig)
+    return out
 
 
-def _cve_checked_desc(probe: str) -> str:
-    """'이 CVE 프로브에서 무엇을 확인했는가' — 경로에 맞는 CVE 항목의 매처만 서술."""
+def _cve_checked_desc(probe: str, headers_lower: Optional[dict] = None) -> str:
+    """'이 CVE 프로브에서 무엇을 확인했는가' — 경로/지문에 맞는 CVE 항목의 매처만 서술."""
+    fs, fpw = _fp_from_headers(headers_lower)
     descs = []
-    for sig in _cve_sigs_for(probe)[:3]:
+    for sig in _cve_sigs_for(probe, fs, fpw)[:3]:
         d = _matchers_desc(sig)
         if d:
             descs.append(f"{sig.get('id') or sig.get('name')}: {d}")
@@ -2327,10 +2371,11 @@ def _cve_checked_desc(probe: str) -> str:
 
 
 def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int) -> list:
-    """CVE 항목의 자기 매처로 익스플로잇 성공을 확증(경로가 맞을 때만 평가)."""
+    """CVE 항목의 자기 매처로 익스플로잇 성공을 확증(경로 또는 지문이 맞을 때 평가)."""
     out, seen = [], set()
     hdr_blob = _hdr_blob(headers_lower)
-    for sig in _cve_sigs_for(probe):
+    fs, fpw = _fp_from_headers(headers_lower)
+    for sig in _cve_sigs_for(probe, fs, fpw):
         matched, ev = _eval_matchers(sig, body or "", hdr_blob, status_code)
         if not matched:
             continue
@@ -3483,7 +3528,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             and not any(f["verdict"] in ("성공", "의심") for f in findings):
         _reason = _cve_nonapplicable_reason(status_code, body, headers_lower)
         if _reason:
-            _cchecked = _cve_checked_desc(file_probe) or _CVE_NO_MATCHER
+            _cchecked = _cve_checked_desc(file_probe, headers_lower) or _CVE_NO_MATCHER
             findings.append({
                 "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
                 "why": f"{_reason}. 해당 CVE 의 확증 매처가 매칭되지 않았고 응답도 익스플로잇 결과를 "
