@@ -1811,6 +1811,10 @@ async function sendRequest() {
     const result = await API.request(reqPayload);
     result._req = reqPayload;   // 요청 원본 첨부
     if (result.sent_headers) reqPayload._sentHeaders = result.sent_headers;
+    // 도구가 실제로 보낸 body(VIEWSTATE 갱신·Content-Type 등 자동 보정 반영) — 원본과
+    // 다르면 Request 미리보기가 '실제 전송본'을 보여주도록 첨부.
+    if (result.sent_body != null && result.sent_body !== reqPayload.body)
+      reqPayload._sentBody = result.sent_body;
 
     state.lastResult = result;
     // 규칙 기반 판정은 이미 확정 → 먼저 그린다. AI·RAG(임베딩/LLM 왕복)는 아래에서 비동기 보강.
@@ -2135,7 +2139,9 @@ function buildRawRequest(req) {
   if (host) lines.push(`Host: ${host}`);
   Object.entries(headers).forEach(([k, v]) => { if (k.toLowerCase() !== 'host') lines.push(`${k}: ${v}`); });
   let raw = lines.join('\n');
-  if (req.body) raw += '\n\n' + req.body;
+  // 실제 전송된 body 우선(VIEWSTATE 갱신·Content-Type 등 자동 보정 반영), 없으면 원본.
+  const body = (req._sentBody != null) ? req._sentBody : req.body;
+  if (body) raw += '\n\n' + body;
   return raw;
 }
 
@@ -2173,6 +2179,7 @@ function renderRequestSummary(req) {
   if (!req) return;
   const el = document.getElementById('reqSummaryBody');
   const sentH = req._sentHeaders && Object.keys(req._sentHeaders).length;
+  const sentB = req._sentBody != null;   // body 가 자동 보정(VIEWSTATE/Content-Type)됨
   const raw = buildRawRequest(req);
 
   // 요청 라인/헤더/바디를 색상 강조 (복사용 원문은 dataset.raw에 보관)
@@ -2194,7 +2201,7 @@ function renderRequestSummary(req) {
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">Raw Request${sentH ? ' · <span style="color:var(--accent)">기본헤더 병합</span>' : ''}</span>
+      <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px">Raw Request${sentH ? ' · <span style="color:var(--accent)">기본헤더 병합</span>' : ''}${sentB ? ' · <span style="color:var(--accent)">실제 전송본(자동 보정)</span>' : ''}</span>
       <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px" onclick="copyRawRequest(this)">📋 복사</button>
     </div>
     <pre id="rawReqPre" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;color:var(--text-primary)">${reqLineHtml}
