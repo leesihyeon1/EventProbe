@@ -83,6 +83,35 @@ def test_put_denied_405_is_safe():
     assert any(x["verdict"] == "안전" and "PUT" in x["name"] for x in r["findings"])
 
 
+_LOGIN_FORM = ('<form><input name="tbUsername"><input type="password" name="tbPassword">'
+               '<input type="submit" value="Login"></form>')
+_LOGGED_IN = '<div>Welcome admin</div><a href="/logout.aspx">Logout</a><div>Your account</div>'
+
+
+def test_login_sqli_authbypass_both_200_is_success():
+    """로그인폼 SQLi 인증우회: 대조군(실패)=로그인폼, 공격=로그인폼 사라짐+logout 등장.
+    둘 다 200 이고 인증실패 문구도 없어도 인증우회(성공)로 확증한다."""
+    r = analyze_response(200, {"content-type": "text/html", "set-cookie": "frmLogin=1"},
+                         _LOGGED_IN, 120, payload="admin'--", category="sqli",
+                         baseline={"status_code": 200, "body": _LOGIN_FORM},
+                         url="http://h/login.aspx",
+                         req_body="tbUsername=admin'--&tbPassword=", method="POST")
+    assert r["attack_outcome"] == "success"
+    f = next(x for x in r["findings"] if x["verdict"] == "성공" and "인증 우회" in x["why"])
+    assert "로그인 폼 사라짐" in f["evidence"] or "logout" in f["evidence"].lower()
+
+
+def test_login_failed_injection_both_loginform_not_success():
+    """우회 안 되는 페이로드: 대조군·공격 둘 다 로그인폼 유지 → 차분은 인증우회 성공으로
+    올리지 않는다(오탐 가드)."""
+    r = analyze_response(200, {"content-type": "text/html"},
+                         _LOGIN_FORM, 100, payload="foo' AND '1'='2", category="sqli",
+                         baseline={"status_code": 200, "body": _LOGIN_FORM},
+                         url="http://h/login.aspx", req_body="x", method="POST")
+    assert not any(x["verdict"] == "성공" and "인증 우회" in str(x.get("why", ""))
+                   for x in r["findings"])
+
+
 def test_javascript_scheme_redirect_is_xss():
     """Location 이 javascript: 스킴으로 나가는 오픈리다이렉트는 XSS 성공으로 탐지."""
     r = analyze_response(302, {"location": "javascript:alert(1)"}, "", 40,

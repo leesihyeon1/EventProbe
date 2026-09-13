@@ -65,6 +65,21 @@ def _redirect_is_auth_reject(location):
     return bool(location) and bool(_LOGIN_REDIRECT_RE.search(location))
 
 
+# ── 로그인 상태 전이 판정용(둘 다 200 이어도 인증우회를 잡는다) ────────────────
+# 로그인 폼 존재 표식 — 비밀번호 입력 필드(이름 다양). 대조군(실패)엔 폼이 남고
+# 공격 응답에선 사라지면 '로그인 성공으로 폼이 없어졌다'는 강한 신호.
+_LOGIN_FORM_RE = re.compile(
+    r"""type\s*=\s*["']?password|name\s*=\s*["']?(?:pass|pwd|passwd|password|"""
+    r"""tbpassword|txtpassword|user_?pass|login_?pass)""", re.I)
+# 로그인-후에만 나타나는 마커 — 대조군엔 없고 공격 응답에만 새로 등장하면 인증 통과.
+_LOGGED_IN_RE = re.compile(
+    r"\b(?:log\s*out|logout|logoff|log\s*off|sign\s*out|signout)\b|로그아웃", re.I)
+# 인증우회형 크리덴셜 페이로드 — SQL/NoSQL 로그인 우회 구문.
+_AUTHBYPASS_PAYLOAD_RE = re.compile(
+    r"'\s*(?:--|#|or\b|\|\|)|\"\s*(?:or\b|--)|\bor\b\s+['\"]?\d+['\"]?\s*=\s*['\"]?\d+|"
+    r"'\s*=\s*'|\$ne\b|\$gt\b|\$regex\b|\{\s*\$", re.I)
+
+
 class Detector:
     """탐지기 계약. applies() 로 이 요청에 돌릴지 정하고 detect() 로 finding(dict) 목록을 낸다."""
     id: str = ""
@@ -176,6 +191,28 @@ class DifferentialDetector(Detector):
                             "인증 우회 — 정상 요청엔 있던 인증 실패 문구가 공격 응답에선 사라지고 200 → "
                             "우회로 인증을 통과했을 가능성이 높음(확증)",
                             "인증 실패 문구 소멸 + HTTP 200")]
+
+        # ── 강: 로그인 상태 전이 = 인증우회(둘 다 200 이어도) ──
+        # ASP.NET 등은 오답 로그인에도 401/403·실패문구 없이 폼을 200으로 다시 렌더한다.
+        # 크리덴셜 인젝션에서 '대조군=로그인 폼'인데 공격 응답은 '폼이 사라짐/로그인-후
+        # 마커 등장/로그인 아닌 곳으로 리다이렉트'면, 상태코드가 같아도 인증우회로 본다.
+        _cred = (ctx.category in ("sqli", "nosql", "authbypass")
+                 or ctx.attack_type in ("sqli", "nosql", "authbypass")
+                 or bool(_AUTHBYPASS_PAYLOAD_RE.search((ctx.payload or "") + " " + (ctx.req_body or ""))))
+        if _cred and _LOGIN_FORM_RE.search(b_body) and c_status in (200, 201, 301, 302, 303, 307, 308):
+            loc = _hdr(ctx.headers_lower, 'location')
+            trans = []
+            if not _LOGIN_FORM_RE.search(c_body):
+                trans.append("로그인 폼 사라짐")
+            if _LOGGED_IN_RE.search(c_body) and not _LOGGED_IN_RE.search(b_body):
+                trans.append("로그인-후 마커(logout 등) 등장")
+            if c_status in (301, 302, 303, 307, 308) and loc and not _redirect_is_auth_reject(loc):
+                trans.append(f"로그인 아닌 곳으로 리다이렉트({loc[:50]})")
+            if trans:
+                return [self._f("성공", 82,
+                                "인증 우회 — 대조군(실패)엔 로그인 폼이 있는데 공격 응답은 "
+                                + " · ".join(trans) + " → 크리덴셜 인젝션으로 인증을 통과(확증)",
+                                " · ".join(trans))]
 
         signals = []
         # ── 중: 5xx 에러 유발(대조는 정상) = 주입이 처리 로직을 깨뜨림 ──
