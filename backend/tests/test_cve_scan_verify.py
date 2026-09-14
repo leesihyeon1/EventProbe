@@ -382,3 +382,36 @@ def test_cve_garbage_path_token_no_crossmatch(monkeypatch):
     monkeypatch.setattr(A, "_CVE_SIGS", fake)
     assert A._cve_sigs_for("http://target/actuator/gateway/routes", "", "") == []
     assert A._cve_sigs_by_path("http://target/actuator/gateway/routes") == []
+
+
+# ── payload_id 로 '어느 CVE 인지' 특정되면 그 CVE 매처로만 검증(경로/지문 무관) ──────────
+def test_cve_verified_by_exact_payload_id_not_path_or_fp(monkeypatch):
+    """뱅크에서 고른 CVE(payload_id)는 그 CVE 자기 매처로만 확증한다 — 경로가 다르고 스택
+    지문(IIS)이 달라도 무관한 CVE 매처를 쓰지 않는다."""
+    from core import analyzer as A
+    fake = [
+        {"cve": "CVE-PICKED", "id": "CVE-PICKED", "entry_id": "cve_picked",
+         "path_contains": ["/only-here"], "server": [], "powered_by": [],
+         "matchers": [{"type": "word", "words": ["PWNED_MARKER_1"]}], "matchers_condition": "and"},
+        {"cve": "CVE-IIS", "id": "CVE-IIS", "entry_id": "cve_iis", "path_contains": [],
+         "server": ["microsoft-iis"], "powered_by": [],
+         "matchers": [{"type": "word", "words": ["HTTP Error 416 zz"]}], "matchers_condition": "and"},
+    ]
+    monkeypatch.setattr(A, "_CVE_SIGS", fake)
+    # payload_id=cve_picked · 경로는 CVE-PICKED 경로가 아니고 지문은 IIS → 그래도 그 CVE 매처로 확증
+    r = A.analyze_response(200, {"server": "microsoft-iis/10", "content-type": "text/html"},
+                           "response body contains PWNED_MARKER_1 here", 80,
+                           payload="/elsewhere", category="cve", url="http://t/elsewhere",
+                           payload_id="cve_picked")
+    assert any(f["verdict"] == "성공" and "CVE-PICKED" in f["name"] for f in r["findings"])
+    # 무관한 IIS CVE 는 어디에도 안 쓰임
+    blob = " ".join(str(f.get("name", "")) + str(f.get("checked", "")) for f in r["findings"])
+    assert "CVE-IIS" not in blob
+
+
+def test_cve_exact_id_without_matcher_states_that_cve(monkeypatch):
+    """매처 없는 CVE 를 payload_id 로 특정하면, 그 CVE 를 지목해 '확증 매처 없음'으로 정직히 서술."""
+    from core import analyzer as A
+    sig = {"cve": "CVE-NOMATCH", "id": "CVE-NOMATCH", "entry_id": "cve_nm", "matchers": []}
+    note = A._cve_checked_or_note("/anything", None, only_sigs=[sig])
+    assert "CVE-NOMATCH" in note and "매처 없음" in note

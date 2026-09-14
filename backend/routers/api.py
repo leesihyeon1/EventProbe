@@ -583,7 +583,7 @@ async def send_request(req: SingleRequest):
                 status_code=r["status_code"], headers=r["headers"], body=r["body"],
                 response_time=r["response_time"], payload=req.payload, category=req.category,
                 baseline=req.baseline, url=_url_with_params(req.url, req.params), req_body=req.body,
-                method=req.method, req_headers=sent_headers,
+                method=req.method, req_headers=sent_headers, payload_id=req.payload_id,
             )
             if response_analysis_enabled():
                 analysis["ai"] = await ai_analyze({
@@ -638,7 +638,7 @@ async def send_request(req: SingleRequest):
             body_truncated=body_cut,
             full_body_len=body_full,
             custom_alert_rules=req.custom_alert_rules,
-            req_headers=sent_headers,
+            req_headers=sent_headers, payload_id=req.payload_id,
         )
 
         # AI 상세 분석 + RAG/AI 종합판정은 기본적으로 여기서 하지 않는다.

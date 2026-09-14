@@ -2286,6 +2286,7 @@ def _cve_entry_to_sig(entry: dict) -> Optional[dict]:
         return None
     return {
         "id": entry.get("cve") or entry.get("id") or "",
+        "entry_id": entry.get("id") or "",          # 페이로드 뱅크의 안정적 id(payload_id 매핑용)
         "name": entry.get("name") or entry.get("cve") or entry.get("id") or "",
         "cve": entry.get("cve") or "",
         "path_contains": sorted(set(pcs))[:4],
@@ -2359,6 +2360,19 @@ def _cve_sigs_by_path(probe: str) -> list:
     return [sig for sig in _load_cve_sigs() if _sig_path_hit(sig, pl)]
 
 
+def _cve_sig_by_id(payload_id: Optional[str]) -> Optional[dict]:
+    """payload_id(뱅크의 안정적 id)로 '정확히 그 CVE' 시그니처를 찾는다. 이 페이로드가 어느
+    CVE(Nuclei 템플릿=CVE 1:1)인지 알면, 경로 fuzzy 매칭 대신 그 CVE 자기 매처로만 검증한다."""
+    if not payload_id:
+        return None
+    pid = str(payload_id).strip().lower()
+    for sig in _load_cve_sigs():
+        if pid in (str(sig.get("entry_id", "")).lower(), str(sig.get("cve", "")).lower(),
+                   str(sig.get("id", "")).lower()):
+            return sig
+    return None
+
+
 def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list:
     """요청 경로 또는 스택 지문에 해당하는 CVE 시그니처(자기 매처를 가진 것)들.
     경로 매칭이 우선이고, 경로가 안 맞아도 지문(server/powered_by)이 맞으면 포함하되
@@ -2378,35 +2392,46 @@ def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list
     return out
 
 
-def _cve_checked_desc(probe: str, headers_lower: Optional[dict] = None) -> str:
-    """'이 CVE 프로브에서 무엇을 확인했는가' — 이 프로브의 '경로'에 매칭되는 CVE 항목의 매처만
-    서술한다. 지문-only 로 끌려온 무관한 CVE(예: 스택이 IIS 라 뜬 IIS CVE)를 '확인 시그니처'로
-    보여주면 사용자가 테스트하는 CVE 와 달라 오해를 준다 → 경로 매칭으로만 한정."""
+def _cve_checked_desc(probe: str, headers_lower: Optional[dict] = None,
+                      only_sigs: Optional[list] = None) -> str:
+    """'이 CVE 프로브에서 무엇을 확인했는가' — only_sigs(payload_id 로 특정한 그 CVE)가 주어지면
+    그것만, 아니면 프로브 '경로'에 매칭되는 CVE 만 서술한다. 지문-only 로 끌려온 무관한 CVE 를
+    '확인 시그니처'로 보여주면 사용자가 테스트하는 CVE 와 달라 오해를 준다."""
+    sigs = only_sigs if only_sigs is not None else _cve_sigs_by_path(probe)
     descs = []
-    for sig in _cve_sigs_by_path(probe)[:3]:
+    for sig in sigs[:3]:
         d = _matchers_desc(sig)
         if d:
             descs.append(f"{sig.get('id') or sig.get('name')}: {d}")
     return " | ".join(descs)
 
 
-def _cve_checked_or_note(probe: str, headers_lower: Optional[dict] = None) -> str:
+def _cve_checked_or_note(probe: str, headers_lower: Optional[dict] = None,
+                         only_sigs: Optional[list] = None) -> str:
     """확인 시그니처 서술 — 없으면 '왜 없는지' 정직한 메모로 폴백.
-    경로에 대응하는 CVE 시그니처 자체가 뱅크에 없으면(미등록 CVE) 그 사실을 밝힌다."""
-    d = _cve_checked_desc(probe, headers_lower)
+    payload_id 로 특정한 CVE 가 매처가 없으면 그 CVE 를 밝히고, 경로에 대응하는 CVE 자체가
+    뱅크에 없으면(미등록 CVE) 그 사실을 밝힌다."""
+    d = _cve_checked_desc(probe, headers_lower, only_sigs)
     if d:
         return d
-    if not _cve_sigs_by_path(probe):
+    if only_sigs:                       # payload_id 로 특정했으나 그 CVE 에 매처 없음
+        _id = only_sigs[0].get("id") or only_sigs[0].get("name") or "이 CVE"
+        return f"{_id}: 확증 매처 없음 — 응답만으로 자동 확증 불가(수동 확인 필요)"
+    if only_sigs is None and not _cve_sigs_by_path(probe):
         return "이 경로에 대응하는 CVE 확증 매처가 뱅크에 없음(미등록 CVE 가능) — 수동 확인 필요"
     return _CVE_NO_MATCHER
 
 
-def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int) -> list:
-    """CVE 항목의 자기 매처로 익스플로잇 성공을 확증(경로 또는 지문이 맞을 때 평가)."""
+def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int,
+                    only_sigs: Optional[list] = None) -> list:
+    """CVE 항목의 자기 매처로 익스플로잇 성공을 확증. only_sigs(payload_id 로 특정한 그 CVE)가
+    주어지면 그 CVE 의 매처만 평가한다 — 이 페이로드가 어느 CVE 인지 알 때는 경로/지문 fuzzy
+    매칭 대신 동일 CVE 매처로만 검증(무관 CVE 매처로 오확증 방지)."""
     out, seen = [], set()
     hdr_blob = _hdr_blob(headers_lower)
     fs, fpw = _fp_from_headers(headers_lower)
-    for sig in _cve_sigs_for(probe, fs, fpw):
+    sigs = only_sigs if only_sigs is not None else _cve_sigs_for(probe, fs, fpw)
+    for sig in sigs:
         matched, ev = _eval_matchers(sig, body or "", hdr_blob, status_code)
         if not matched:
             continue
@@ -3348,7 +3373,8 @@ def _redirect_hint_probe(payload, url, req_body) -> str:
 
 
 def attack_findings(status_code, headers_lower, body, response_time, payload, category, baseline,
-                    url=None, req_body=None, method=None, redirect_chain=None, req_headers=None):
+                    url=None, req_body=None, method=None, redirect_chain=None, req_headers=None,
+                    payload_id=None):
     """공격별 성공 신호를 증거와 함께 수집. (findings, outcome, confidence) 반환.
 
     payload/카테고리에만 의존하지 않고, 요청 전체(payload+URL+본문)를 프로브로 삼아
@@ -3368,6 +3394,12 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     # 텍스트를 덧붙인다. 파일읽기 판정은 엄격한 '응답 내용' 시그니처라 프로브를 넓혀도 허위 성공은 없다.
     _hdr_text = _classify._headers_text(req_headers or {})
     file_probe = probe + (' ' + _hdr_text if _hdr_text else '')
+    # payload_id 로 '어느 CVE 인지' 특정되면(뱅크에서 고른 CVE), 경로/지문 fuzzy 매칭 대신
+    # 그 CVE 자기 매처로만 검증한다. 특정 안 되면(붙여넣기 등) None → 기존 휴리스틱 폴백.
+    _cve_only = None
+    _cve_sig = _cve_sig_by_id(payload_id)
+    if _cve_sig is not None:
+        _cve_only = [_cve_sig]
     # 리다이렉트 힌트는 대상 URL 의 호스트를 제외하고 판정(오픈 리다이렉트 오탐 방지)
     _redirect_probe = _redirect_hint_probe(payload, url, req_body)
 
@@ -3504,7 +3536,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
 
     # ②-c2b CVE 자기 매처 확증 — CVE 마다 성공 신호가 달라 공용 시그니처로는 검증 불가.
     #       import_nuclei 가 담아둔 그 CVE 자신의 matcher(status/word/regex)로만 확증한다.
-    findings.extend(_detect_cve_sig(file_probe, body or "", headers_lower, status_code))
+    findings.extend(_detect_cve_sig(file_probe, body or "", headers_lower, status_code, only_sigs=_cve_only))
 
     # ②-c3 robots.txt — 노출된 경로(관리·백업·API 등) 분석. recon 단서.
     rb = _detect_robots(body or "", status_code, file_probe)
@@ -3596,7 +3628,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             and not any(f["verdict"] in ("성공", "의심") for f in findings):
         _reason = _cve_nonapplicable_reason(status_code, body, headers_lower)
         if _reason:
-            _cchecked = _cve_checked_or_note(file_probe, headers_lower)
+            _cchecked = _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only)
             findings.append({
                 "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
                 "why": f"{_reason}. 해당 CVE 의 확증 매처가 매칭되지 않았고 응답도 익스플로잇 결과를 "
@@ -3619,7 +3651,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             findings.append({
                 "name": "CVE 해당 가능성 낮음 — 스택 지문 불일치", "verdict": "미확정", "confidence": 40,
                 "why": _mm,
-                "checked": _cve_checked_or_note(file_probe, headers_lower),
+                "checked": _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only),
                 "evidence": f"스택 지문 불일치 (HTTP {status_code} · {len(body or '')}B)",
             })
 
@@ -3813,6 +3845,7 @@ def analyze_response(
     full_body_len: Optional[int] = None,
     custom_alert_rules: Optional[list] = None,
     req_headers: Optional[dict] = None,   # 요청 헤더 — 헤더에 실린 공격(Log4Shell 등) 분류용
+    payload_id: Optional[str] = None,     # 뱅크에서 고른 페이로드 id — CVE 면 '그 CVE 매처로만' 검증
 ) -> dict:
     """HTTP 응답을 분석하여 보안 판정 결과 반환.
 
@@ -3942,7 +3975,7 @@ def analyze_response(
     #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
         status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body, method,
-        redirect_chain, req_headers,
+        redirect_chain, req_headers, payload_id,
     )
     result["reflection"] = _detect_reflection(body, payload)
     result["spa_shell"] = _detect_spa_shell(body, headers_lower)
