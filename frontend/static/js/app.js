@@ -2205,8 +2205,10 @@ function buildRawRequest(req) {
   const m = urlStr.match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]+)(.*)$/i);
   if (m) { host = m[1]; path = m[2] || '/'; }
   else { path = urlStr || '/'; }
-  // 실제 전송과 일치: 리터럴 '#'(프래그먼트)·공백 인코딩
-  path = (path.replace(/#/g, '%23').replace(/ /g, '%20')) || '/';
+  // 실제 전송과 일치(_url_with_params): '#'·RFC3986 불법문자( "<>\^`{|}·공백)·잘못된 '%' 인코딩
+  const _ILL = {' ':'%20','"':'%22','<':'%3C','>':'%3E','\\':'%5C','^':'%5E','`':'%60','{':'%7B','|':'%7C','}':'%7D'};
+  path = (path || '/').replace(/#/g, '%23').replace(/[ "<>\\^`{|}]/g, c => _ILL[c])
+                      .replace(/%(?![0-9A-Fa-f]{2})/g, '%25') || '/';
   // kvParams 병합(백엔드와 동일한 최소 인코딩: @ / : ; + = 등 보존)
   const pairs = Object.entries(req.params || {});
   if (pairs.length) {

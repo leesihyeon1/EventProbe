@@ -18,11 +18,20 @@ from urllib.parse import urlsplit, quote, quote_plus
 # 파라미터를 URL 쿼리에 직접 병합해서 원문을 최대한 보존한다.
 _QUERY_SAFE = "@:/;+,=!$()*~-._'"
 
+_URI_ILLEGAL = {" ": "%20", '"': "%22", "<": "%3C", ">": "%3E", "\\": "%5C",
+                "^": "%5E", "`": "%60", "{": "%7B", "|": "%7C", "}": "%7D"}
+
+
 def _url_with_params(url: str, params: dict) -> str:
-    # '#' 은 프래그먼트라 서버로 전송되지 않고, 공백은 URL 을 깨뜨린다. payload(OGNL/Struts
-    # 의 #, SQLi 의 공백 등)로 들어온 리터럴을 인코딩해 그대로 전송되게 한다(보안 테스트에선
-    # 실제 프래그먼트가 불필요). %23 은 '#' 를 포함하지 않으므로 이중 인코딩되지 않는다.
-    url = (url or "").replace("#", "%23").replace(" ", "%20")
+    # '#' 은 프래그먼트라 서버로 전송되지 않으므로 %23 으로 보존(보안 테스트엔 프래그먼트 불필요).
+    # RFC3986 상 URI 에 불법인 문자(공백·"·<·>·\·^·`·{·|·})는 인코딩해야 서버 파서가 400/500 을
+    # 내지 않는다 — 서버가 디코드해 원문(예: ERB <%= %>, SSTI {{7*7}})을 그대로 받는다.
+    url = (url or "").replace("#", "%23")
+    for ch, esc in _URI_ILLEGAL.items():
+        url = url.replace(ch, esc)
+    # 유효한 %XX 가 아닌 리터럴 '%' 만 %25 로 교정(<%= 의 '%=', %> 의 '%>' 등). 이미 인코딩된
+    # payload(%2e%2e 등)의 %XX 는 이중 인코딩하지 않는다.
+    url = re.sub(r"%(?![0-9A-Fa-f]{2})", "%25", url)
     if not params:
         return url
     q = "&".join(
