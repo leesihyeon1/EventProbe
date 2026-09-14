@@ -10,8 +10,10 @@ DNS OOB는 대상의 DNS 질의(`<데이터>.<토큰>.내도메인`)를 **내 �
 안 됩니다. VM은 무료로 구할 수 있습니다.
 
 ## 1) 무료 VM 확보 (택1)
-- **Oracle Cloud Always Free** (권장) — ARM Ampere A1 또는 AMD micro, 공인 IPv4, 영구 무료.
-  **상세 절차: [oracle-vm-guide.md](oracle-vm-guide.md)** (가입 → 인스턴스 → 포트 개방 → SSH).
+- **Oracle Cloud Always Free** — ARM Ampere A1 또는 AMD micro, 공인 IPv4, 영구 무료.
+  **상세: [oracle-vm-guide.md](oracle-vm-guide.md)** (가입 → 인스턴스 → 포트 개방 → SSH).
+- **GCP Always Free e2-micro** — us-west1/central1/east1 리전, 영구 무료.
+  **상세: [gcp-vm-guide.md](gcp-vm-guide.md)** (콘솔·gcloud 양쪽 + VPC 방화벽·정적 IP).
 - **fly.io** — 컨테이너, UDP/상시 프로세스 지원, 무료 허용량.
 - **사내 장비** — 내부 타깃 점검이면 이게 정답(콜백이 경계를 안 넘음).
 
