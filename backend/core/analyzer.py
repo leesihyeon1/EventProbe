@@ -2341,6 +2341,24 @@ def _fp_specific_enough(sig: dict) -> bool:
     return False
 
 
+# path_contains 로 쓰기 부적합한 일반 토큰(스킴/스킴조각 등) — 백필 노이즈. 모든 전체 URL 에
+# 부분일치해 무관한 CVE 를 경로 매칭시키므로(예: 'http:' 가 http://... 에 매칭) 매칭에서 제외.
+_BAD_PATH_TOKENS = {"http:", "https:", "ftp:", "http", "https", "ftp", "www.", "://", "://.", "html"}
+
+
+def _sig_path_hit(sig: dict, pl: str) -> bool:
+    """CVE 시그니처의 path_contains 가 probe 에 매칭되는가(쓰레기 토큰 제외)."""
+    return any(str(pc).lower() in pl for pc in (sig.get("path_contains") or [])
+              if str(pc).lower() not in _BAD_PATH_TOKENS)
+
+
+def _cve_sigs_by_path(probe: str) -> list:
+    """probe 의 '경로'에 매칭되는 CVE 시그니처만 — 이 프로브가 실제로 노리는 CVE 들.
+    지문(fingerprint)-only 매칭은 제외한다(다른 CVE 라 이 프로브의 '확인 대상'이 아님)."""
+    pl = (probe or "").lower()
+    return [sig for sig in _load_cve_sigs() if _sig_path_hit(sig, pl)]
+
+
 def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list:
     """요청 경로 또는 스택 지문에 해당하는 CVE 시그니처(자기 매처를 가진 것)들.
     경로 매칭이 우선이고, 경로가 안 맞아도 지문(server/powered_by)이 맞으면 포함하되
@@ -2350,7 +2368,7 @@ def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list
     fpw = (fp_powered or "").lower()
     out = []
     for sig in _load_cve_sigs():
-        if any(str(pc).lower() in pl for pc in (sig.get("path_contains") or [])):
+        if _sig_path_hit(sig, pl):
             out.append(sig)
             continue
         fp_hit = (fs and any(s in fs for s in (sig.get("server") or []))) or \
@@ -2361,14 +2379,26 @@ def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list
 
 
 def _cve_checked_desc(probe: str, headers_lower: Optional[dict] = None) -> str:
-    """'이 CVE 프로브에서 무엇을 확인했는가' — 경로/지문에 맞는 CVE 항목의 매처만 서술."""
-    fs, fpw = _fp_from_headers(headers_lower)
+    """'이 CVE 프로브에서 무엇을 확인했는가' — 이 프로브의 '경로'에 매칭되는 CVE 항목의 매처만
+    서술한다. 지문-only 로 끌려온 무관한 CVE(예: 스택이 IIS 라 뜬 IIS CVE)를 '확인 시그니처'로
+    보여주면 사용자가 테스트하는 CVE 와 달라 오해를 준다 → 경로 매칭으로만 한정."""
     descs = []
-    for sig in _cve_sigs_for(probe, fs, fpw)[:3]:
+    for sig in _cve_sigs_by_path(probe)[:3]:
         d = _matchers_desc(sig)
         if d:
             descs.append(f"{sig.get('id') or sig.get('name')}: {d}")
     return " | ".join(descs)
+
+
+def _cve_checked_or_note(probe: str, headers_lower: Optional[dict] = None) -> str:
+    """확인 시그니처 서술 — 없으면 '왜 없는지' 정직한 메모로 폴백.
+    경로에 대응하는 CVE 시그니처 자체가 뱅크에 없으면(미등록 CVE) 그 사실을 밝힌다."""
+    d = _cve_checked_desc(probe, headers_lower)
+    if d:
+        return d
+    if not _cve_sigs_by_path(probe):
+        return "이 경로에 대응하는 CVE 확증 매처가 뱅크에 없음(미등록 CVE 가능) — 수동 확인 필요"
+    return _CVE_NO_MATCHER
 
 
 def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int) -> list:
@@ -2434,7 +2464,7 @@ def _cve_fp_mismatch_note(probe: str, headers_lower: Optional[dict]) -> str:
     pl = (probe or "").lower()
     req = set()
     for sig in _load_cve_sigs():
-        if any(str(pc).lower() in pl for pc in (sig.get("path_contains") or [])):
+        if _sig_path_hit(sig, pl):
             req |= {s for s in (sig.get("server") or []) if s}
             req |= {p for p in (sig.get("powered_by") or []) if p}
     req = {p for p in req if len(p) >= 3}
@@ -3566,7 +3596,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             and not any(f["verdict"] in ("성공", "의심") for f in findings):
         _reason = _cve_nonapplicable_reason(status_code, body, headers_lower)
         if _reason:
-            _cchecked = _cve_checked_desc(file_probe, headers_lower) or _CVE_NO_MATCHER
+            _cchecked = _cve_checked_or_note(file_probe, headers_lower)
             findings.append({
                 "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
                 "why": f"{_reason}. 해당 CVE 의 확증 매처가 매칭되지 않았고 응답도 익스플로잇 결과를 "
@@ -3589,7 +3619,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             findings.append({
                 "name": "CVE 해당 가능성 낮음 — 스택 지문 불일치", "verdict": "미확정", "confidence": 40,
                 "why": _mm,
-                "checked": _cve_checked_desc(file_probe, headers_lower) or _CVE_NO_MATCHER,
+                "checked": _cve_checked_or_note(file_probe, headers_lower),
                 "evidence": f"스택 지문 불일치 (HTTP {status_code} · {len(body or '')}B)",
             })
 

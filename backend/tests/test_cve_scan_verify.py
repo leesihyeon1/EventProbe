@@ -355,3 +355,30 @@ def test_cve_fp_matching_product_no_downgrade(monkeypatch):
                            "<html>ok</html>", 80, payload="/vuln-app", category="cve",
                            url="http://t/vuln-app")
     assert not any("지문 불일치" in f["name"] for f in r["findings"])
+
+
+# ── 확인 시그니처는 '경로 매칭' CVE 만 — 지문-only 무관 CVE·쓰레기 토큰 오염 방지 ──────
+def test_cve_checked_desc_is_path_scoped_not_fingerprint(monkeypatch):
+    """스택 지문(IIS)으로 끌려온 무관 CVE 를 '확인 시그니처'로 보여주면 안 된다 —
+    이 프로브의 '경로'에 매칭되는 CVE 만 서술한다."""
+    from core import analyzer as A
+    fake = [{"cve": "CVE-IIS", "id": "CVE-IIS", "path_contains": [], "server": ["microsoft-iis"],
+             "powered_by": [], "matchers": [{"type": "word", "words": ["HTTP Error 416 abcdef"]}],
+             "matchers_condition": "and"}]
+    monkeypatch.setattr(A, "_CVE_SIGS", fake)
+    d = A._cve_checked_desc("/actuator/gateway/routes", {"server": "microsoft-iis/10"})
+    assert "CVE-IIS" not in d       # 지문으로만 걸린 CVE 는 확인 시그니처에 안 나옴
+    note = A._cve_checked_or_note("/actuator/gateway/routes", {"server": "microsoft-iis/10"})
+    assert "뱅크에 없음" in note     # 경로 매칭 CVE 없음 → 미등록 정직 메모
+
+
+def test_cve_garbage_path_token_no_crossmatch(monkeypatch):
+    """path_contains 의 'http:' 같은 쓰레기 토큰이 모든 전체 URL 에 부분일치해 무관 CVE 를
+    경로 매칭시키면 안 된다."""
+    from core import analyzer as A
+    fake = [{"cve": "CVE-GARBAGE", "id": "CVE-GARBAGE", "path_contains": ["http:", "0177.0.0.1"],
+             "server": [], "powered_by": [], "matchers": [{"type": "regex", "regex": [r"root:.*:0:0:"]}],
+             "matchers_condition": "and"}]
+    monkeypatch.setattr(A, "_CVE_SIGS", fake)
+    assert A._cve_sigs_for("http://target/actuator/gateway/routes", "", "") == []
+    assert A._cve_sigs_by_path("http://target/actuator/gateway/routes") == []
