@@ -261,6 +261,9 @@
               <div class="tab res-tab" data-tab="diff" onclick="switchResTab('diff')" id="diffTab">
                 Diff <span id="diffBadge" style="display:none;font-size:9px;background:var(--accent-dark);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">●</span>
               </div>
+              <div class="tab res-tab" data-tab="oob" onclick="switchResTab('oob')" id="oobTab" style="display:none">
+                OOB 콜백 <span id="oobBadge" style="display:none;font-size:9px;background:var(--danger);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">0</span>
+              </div>
             </div>
             <!-- 응답 검색 바 -->
             <div class="res-search-bar" style="display:flex;gap:6px;align-items:center;padding:5px 8px;background:var(--bg-primary);border-bottom:1px solid var(--border)">
@@ -276,6 +279,7 @@
             <pre class="response-body res-tab-content" data-tab="res-headers" id="responseHeadersBody"></pre>
             <div class="response-body res-tab-content" data-tab="req-summary" id="reqSummaryBody" style="font-family:var(--font-mono);font-size:12px;line-height:1.7"></div>
             <div class="res-tab-content" data-tab="diff" id="diffView" style="flex:1;overflow:auto;background:var(--bg-primary)"></div>
+            <div class="res-tab-content" data-tab="oob" id="oobView" style="flex:1;overflow:auto;background:var(--bg-primary);padding:8px 10px;font-size:12px"></div>
           </div>
 
           <!-- 드래그 리사이저 -->

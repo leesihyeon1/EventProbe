@@ -1703,6 +1703,74 @@ function switchResTab(tab) {
   resSearch(false);   // 탭 전환 시 현재 검색어로 재하이라이트
 }
 
+/* ── OOB(out-of-band) 콜백 — blind 확증 ── */
+let oobInteractions = [];   // 세션 전역 누적(콜백은 늦게 올 수 있어 요청 단위로 안 지움)
+let oobPollTimer = null;
+
+function handleOob(result) {
+  if (result && result.oob_warning) toast(result.oob_warning, 'error');
+  if (result && result.oob_host) {
+    document.getElementById('oobTab').style.display = '';   // 마커를 실제로 보낸 요청부터 탭 노출
+    ensureOobPolling();
+    if (!oobInteractions.length) renderOob();               // 대기 안내 표시
+  }
+}
+
+function ensureOobPolling() {
+  if (oobPollTimer) return;
+  const poll = async () => {
+    try {
+      const r = await fetch('/api/oob/poll');
+      const d = await r.json();
+      if (d && d.interactions && d.interactions.length) {
+        oobInteractions.push(...d.interactions);
+        renderOob();
+        const badge = document.getElementById('oobBadge');
+        // 새 콜백 도착 알림(탭이 열려있지 않아도)
+        toast(`OOB 콜백 수신 — ${d.interactions[0].protocol} from ${d.interactions[0].remote_address}`, 'success');
+      }
+    } catch (e) {}
+  };
+  poll();
+  oobPollTimer = setInterval(poll, 5000);
+}
+
+function renderOob() {
+  const el = document.getElementById('oobView');
+  const badge = document.getElementById('oobBadge');
+  const n = oobInteractions.length;
+  if (badge) { badge.textContent = n; badge.style.display = n ? '' : 'none'; }
+  if (!el) return;
+  if (!n) {
+    el.innerHTML = '<div style="color:var(--text-muted);padding:6px">대기 중… 대상이 아웃바운드로 '
+      + '<code>{{oob}}</code> 호스트를 호출(DNS/HTTP)하면 여기 표시됩니다. 콜백은 수초~수분 뒤 올 수 있습니다.</div>';
+    return;
+  }
+  const rows = oobInteractions.slice().reverse().map(it => {
+    const proto = escapeHtml(it.protocol || '');
+    const pc = proto === 'DNS' ? 'tag-orange' : (proto === 'HTTP' || proto === 'HTTPS' ? 'tag-red' : 'tag-blue');
+    const ctx = it.context || {};
+    const linked = ctx.payload ? escapeHtml(String(ctx.payload).slice(0, 50)) : (ctx.url ? escapeHtml(ctx.url) : '-');
+    const ts = escapeHtml((it.timestamp || '').replace('T', ' ').replace('Z', '').slice(0, 19));
+    return `<tr>
+      <td style="white-space:nowrap;color:var(--text-muted)">${ts}</td>
+      <td><span class="tag ${pc}" style="font-size:10px">${proto}${it.q_type ? ' ' + escapeHtml(it.q_type) : ''}</span></td>
+      <td style="white-space:nowrap">${escapeHtml(it.remote_address || '')}</td>
+      <td style="font-family:var(--font-mono);font-size:10px;word-break:break-all">${escapeHtml(it.full_id || '')}</td>
+      <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${linked}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="margin-bottom:6px;color:var(--success);font-weight:600">OOB 콜백 ${n}건 수신 — blind 취약 확증(대상이 우리 서버로 아웃바운드 요청함)</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr style="text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border)">
+        <th style="padding:3px 6px">시간</th><th style="padding:3px 6px">프로토콜</th>
+        <th style="padding:3px 6px">출처 IP</th><th style="padding:3px 6px">호출 호스트</th>
+        <th style="padding:3px 6px">연결된 페이로드</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
 /* ── 응답 검색 (Body/Headers 하이라이트 + 이동) ── */
 let _resHitIdx = 0;
 
@@ -1823,6 +1891,7 @@ async function sendRequest() {
     if (result.analysis) result.analysis._enrich = willEnrich ? 'pending' : null;
     renderResponse(result);
     renderAnalysis(result.analysis, result);
+    handleOob(result);                // OOB 콜백 탭/폴링 처리
     addHistory(reqPayload, result);   // 히스토리 저장
     if (willEnrich) enrichAnalysis(reqPayload, result);
   } catch(e) {

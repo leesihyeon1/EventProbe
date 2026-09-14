@@ -40,6 +40,7 @@ from core import capture as api_capture
 from core import xss_confirm
 from core.tlsscan import tls_scan
 from core import rag
+from core import oob
 
 router = APIRouter(prefix="/api")
 
@@ -605,6 +606,18 @@ async def send_request(req: SingleRequest):
             }
 
         _eff_url = _url_with_params(req.url, req.params)
+        # OOB: {{oob}} 마커가 있으면 콜백 호스트를 발급받아 URL/바디/헤더에 치환(blind 확증용).
+        oob_host, oob_warning = "", ""
+        if oob.enabled() and oob.has_marker(_eff_url, req.body or "",
+                                            " ".join(str(v) for v in sent_headers.values())):
+            oob_warning = oob.leak_warning(_eff_url)   # 내부 타깃 + 공개 서버면 유출 경고
+            oob_host = await oob.mint({"url": _eff_url, "payload": req.payload or "",
+                                       "method": req.method})
+            if oob_host:
+                _eff_url = oob.substitute(_eff_url, oob_host)
+                if req.body:
+                    req.body = oob.substitute(req.body, oob_host)
+                sent_headers = {k: oob.substitute(str(v), oob_host) for k, v in sent_headers.items()}
         async with httpx.AsyncClient(verify=False, follow_redirects=req.follow_redirects) as client:
             # 상태/CSRF 토큰 폼이면 같은 클라이언트로 먼저 GET 해 토큰을 갱신(세션 쿠키 공유).
             eff_body, viewstate_note = req.body, ""
@@ -679,6 +692,8 @@ async def send_request(req: SingleRequest):
             "viewstate_note": viewstate_note,
             "content_type_added": ct_added,
             "sent_body": eff_body,
+            "oob_host": oob_host,
+            "oob_warning": oob_warning,
         }
     except httpx.TimeoutException:
         return {
@@ -1717,6 +1732,18 @@ async def rag_reindex():
 @router.delete("/rag/sources/{source_id}")
 def rag_delete(source_id: str):
     return {"ok": rag.delete_source(source_id)}
+
+
+# ── OOB(out-of-band) 콜백 — blind 확증 ──────────────────────────────────────────
+@router.get("/oob/status")
+def oob_status():
+    return oob.status()
+
+
+@router.get("/oob/poll")
+async def oob_poll():
+    """interactsh 서버에서 새 콜백을 받아 반환(응답 탭 OOB 콜백 탭이 주기적으로 호출)."""
+    return {"enabled": oob.enabled(), "interactions": await oob.poll()}
 
 
 class ReportRefsRequest(BaseModel):
