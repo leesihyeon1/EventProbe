@@ -415,3 +415,34 @@ def test_cve_exact_id_without_matcher_states_that_cve(monkeypatch):
     sig = {"cve": "CVE-NOMATCH", "id": "CVE-NOMATCH", "entry_id": "cve_nm", "matchers": []}
     note = A._cve_checked_or_note("/anything", None, only_sigs=[sig])
     assert "CVE-NOMATCH" in note and "매처 없음" in note
+
+
+# ── 페이로드 기능 없이 패킷만 복붙해도 CVE 를 PoC 지문으로 식별 → 그 CVE 매처로 검증 ──────
+_CONF_POC = ('/${(#a=@org.apache.commons.io.IOUtils@toString('
+             '@java.lang.Runtime@getRuntime().exec("id")))}/')
+_FAKE_CONF_ENTRY = [{
+    "id": "cve_conf", "cve": "CVE-CONF-TEST", "name": "Confluence SpEL", "payload": _CONF_POC,
+    "matchers": [{"type": "word", "words": ["x-cmd-response:"]}], "matchers_condition": "and",
+}]
+
+
+def test_cve_identify_from_pasted_poc_and_modified_command(monkeypatch):
+    """붙여넣은 PoC 를 명령(exec 인자)만 바꿔도 CVE 로 식별하고, 정상 요청은 식별하지 않는다."""
+    from core import analyzer as A
+    monkeypatch.setattr(A, "_CVE_ENTRIES", _FAKE_CONF_ENTRY)
+    modified = ('http://t/${(#a=@org.apache.commons.io.IOUtils@toString('
+                '@java.lang.Runtime@getRuntime().exec("whoami")))}/')
+    ident = A._cve_identify_from_request(modified, "", {})
+    assert [s["cve"] for s in ident] == ["CVE-CONF-TEST"]
+    assert A._cve_identify_from_request("http://t/api/users?id=1&cmd=foo", "u=admin", {}) == []
+
+
+def test_cve_pasted_packet_verified_by_identified_matcher(monkeypatch):
+    """payload_id·category 없이 패킷만 복붙 → PoC 로 CVE 식별 → 그 CVE 매처가 응답에 맞으면 확증."""
+    from core import analyzer as A
+    monkeypatch.setattr(A, "_CVE_ENTRIES", _FAKE_CONF_ENTRY)
+    monkeypatch.setattr(A, "_CVE_SIGS", [])   # sigs 비어도 엔트리 식별로 확증돼야 함
+    r = A.analyze_response(200, {"content-type": "text/html", "x-cmd-response": "root"},
+                           "x-cmd-response: root", 80, payload="", category="",
+                           url="http://t" + _CONF_POC)
+    assert any(f["verdict"] == "성공" and "CVE-CONF-TEST" in f["name"] for f in r["findings"])

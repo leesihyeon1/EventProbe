@@ -2287,6 +2287,7 @@ def _cve_entry_to_sig(entry: dict) -> Optional[dict]:
     return {
         "id": entry.get("cve") or entry.get("id") or "",
         "entry_id": entry.get("id") or "",          # 페이로드 뱅크의 안정적 id(payload_id 매핑용)
+        "payload": str(entry.get("payload") or ""),  # PoC 원문 — 붙여넣은 요청의 CVE 식별용
         "name": entry.get("name") or entry.get("cve") or entry.get("id") or "",
         "cve": entry.get("cve") or "",
         "path_contains": sorted(set(pcs))[:4],
@@ -2314,6 +2315,50 @@ def _load_cve_sigs() -> list:
         sigs = []
     _CVE_SIGS = sigs
     return _CVE_SIGS
+
+
+_CVE_ENTRIES = None
+
+
+def _load_cve_entries() -> list:
+    """payloads.json 의 cve 항목 원본 전체 — 매처가 없는 OOB CVE(Log4Shell 등)도 포함한다.
+    '붙여넣은 요청이 어느 CVE 인가' 식별은 매처 유무와 무관하게 전체 PoC 를 대상으로 해야 한다."""
+    global _CVE_ENTRIES
+    if _CVE_ENTRIES is not None:
+        return _CVE_ENTRIES
+    try:
+        with open(_PAYLOADS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        cat = next((c for c in data.get("categories", []) if c.get("id") == "cve"), None)
+        _CVE_ENTRIES = (cat or {}).get("payloads", []) or []
+    except Exception:
+        _CVE_ENTRIES = []
+    return _CVE_ENTRIES
+
+
+def _entry_to_ident_sig(entry: dict) -> dict:
+    """식별된 CVE 엔트리 → 확증용 sig(경로/지문 게이트 없이 항상 생성). 확증 가능한 내용
+    매처(word/regex)가 없으면 matchers 를 비워 status-only 오탐을 막고, 확인 시 '매처 없음'으로
+    정직하게 서술되게 한다."""
+    matchers = entry.get("matchers") or []
+    mcond = str(entry.get("matchers_condition") or "and").lower()
+    if mcond == "or":
+        matchers = [m for m in matchers if (m.get("type") or "").lower() in ("word", "regex")]
+    if not any((m.get("type") or "").lower() in ("word", "regex") for m in matchers):
+        matchers = []                    # 확증 불가(OOB/타이밍 등) → 빈 매처
+    ap = entry.get("applies_to") or {}
+    return {
+        "id": entry.get("cve") or entry.get("id") or "",
+        "entry_id": entry.get("id") or "",
+        "payload": str(entry.get("payload") or ""),
+        "name": entry.get("name") or entry.get("cve") or entry.get("id") or "",
+        "cve": entry.get("cve") or "",
+        "path_contains": [],
+        "server": [str(x).lower() for x in (ap.get("server") or []) if str(x).strip()],
+        "powered_by": [str(x).lower() for x in (ap.get("powered_by") or []) if str(x).strip()],
+        "matchers": matchers,
+        "matchers_condition": mcond,
+    }
 
 
 def _fp_from_headers(headers_lower: Optional[dict]) -> tuple:
@@ -2370,7 +2415,58 @@ def _cve_sig_by_id(payload_id: Optional[str]) -> Optional[dict]:
         if pid in (str(sig.get("entry_id", "")).lower(), str(sig.get("cve", "")).lower(),
                    str(sig.get("id", "")).lower()):
             return sig
+    # 매처 없는 CVE(OOB 등)는 sigs 에 없으니 원본 엔트리에서도 찾아 ident-sig 로 변환.
+    for e in _load_cve_entries():
+        if pid in (str(e.get("id", "")).lower(), str(e.get("cve", "")).lower()):
+            return _entry_to_ident_sig(e)
     return None
+
+
+# CVE PoC 식별용 가변 마커 — 이 뒤는 콜백/도메인/커맨드처럼 사용자가 바꾸는 부분이라, 그 앞의
+# 불변(invariant) 구문을 식별 지문으로 쓴다. (예: '${jndi:ldap://' 뒤 log4shell-... 는 가변)
+_CVE_IDENT_MARKERS = ("oast", "interact", "burpcollab", "log4shell-", "${sys:", "evil.",
+                      "example.com", "example.oas", "attacker", "canary", "{{", "§", "xxxx",
+                      "burp", "\\n", "%0a",
+                      # 명령/콜백처럼 사용자가 바꾸는 가변부 앞에서 자른다(불변 구문만 지문으로)
+                      "exec(", "command=", "cmd=", "=~", "getruntime().exec", "?cmd", "&cmd")
+
+
+def _cve_norm(s: str) -> str:
+    """URL 디코드 + 소문자 — 인코딩·대소문자 무관 부분일치용."""
+    try:
+        return unquote(str(s or "")).lower()
+    except Exception:
+        return str(s or "").lower()
+
+
+def _cve_ident_fragment(payload: str) -> str:
+    """CVE PoC 에서 '불변 식별 지문'(가변 마커 앞의 충분히 긴·구체적 구문) 추출. 짧거나
+    일반적이면 '' (식별 불가) — 오식별 방지."""
+    pv = _cve_norm(payload).strip()
+    if not pv:
+        return ""
+    cut = len(pv)
+    for m in _CVE_IDENT_MARKERS:
+        i = pv.find(m)
+        if i != -1:
+            cut = min(cut, i)
+    frag = pv[:cut].strip()
+    return frag if len(frag) >= 12 else ""
+
+
+def _cve_identify_from_request(url: str, req_body: str, req_headers: Optional[dict]) -> list:
+    """붙여넣은 요청(경로/쿼리/바디/헤더)이 어느 CVE PoC 인지, 뱅크의 distinctive payload
+    지문으로 식별한다. payload 기능을 안 쓰고 패킷만 복붙해도 그 CVE 매처로 검증되게 한다."""
+    hdr_vals = " ".join(str(v) for v in (req_headers or {}).values())
+    blob = _cve_norm(f"{url or ''} {req_body or ''} {hdr_vals}")
+    if not blob.strip():
+        return []
+    out = []
+    for e in _load_cve_entries():           # 매처 유무와 무관하게 전체 CVE PoC 대상
+        frag = _cve_ident_fragment(e.get("payload") or "")
+        if frag and frag in blob:
+            out.append(_entry_to_ident_sig(e))
+    return out
 
 
 def _cve_sigs_for(probe: str, fp_server: str = "", fp_powered: str = "") -> list:
@@ -3394,12 +3490,18 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     # 텍스트를 덧붙인다. 파일읽기 판정은 엄격한 '응답 내용' 시그니처라 프로브를 넓혀도 허위 성공은 없다.
     _hdr_text = _classify._headers_text(req_headers or {})
     file_probe = probe + (' ' + _hdr_text if _hdr_text else '')
-    # payload_id 로 '어느 CVE 인지' 특정되면(뱅크에서 고른 CVE), 경로/지문 fuzzy 매칭 대신
-    # 그 CVE 자기 매처로만 검증한다. 특정 안 되면(붙여넣기 등) None → 기존 휴리스틱 폴백.
+    # 어느 CVE 인지 특정되면 그 CVE 자기 매처로만 검증한다(경로/지문 fuzzy 매칭 대신).
+    #  1) payload_id: 뱅크에서 고른 CVE — 가장 확실.
+    #  2) payload 기능 없이 패킷만 복붙한 경우: 요청의 PoC 지문으로 CVE 를 식별.
+    # 둘 다 안 되면 None → 기존 경로/지문 휴리스틱 폴백.
     _cve_only = None
     _cve_sig = _cve_sig_by_id(payload_id)
     if _cve_sig is not None:
         _cve_only = [_cve_sig]
+    else:
+        _ident = _cve_identify_from_request(url, req_body, req_headers)
+        if _ident:
+            _cve_only = _ident
     # 리다이렉트 힌트는 대상 URL 의 호스트를 제외하고 판정(오픈 리다이렉트 오탐 방지)
     _redirect_probe = _redirect_hint_probe(payload, url, req_body)
 
