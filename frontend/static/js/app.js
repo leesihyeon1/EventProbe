@@ -1706,14 +1706,21 @@ function switchResTab(tab) {
 /* ── OOB(out-of-band) 콜백 — blind 확증 ── */
 let oobInteractions = [];   // 세션 전역 누적(콜백은 늦게 올 수 있어 요청 단위로 안 지움)
 let oobPollTimer = null;
+let oobEnabled = null;      // /api/oob/status 로 확인(null=미확인)
+
+// 페이지 로드 시 OOB 설정 확인 → 활성화면 폴링 시작(마커 안 보내도 늦은/이전 콜백 수신)
+async function initOob() {
+  try {
+    const d = await (await fetch('/api/oob/status')).json();
+    oobEnabled = !!d.enabled;
+  } catch (e) { oobEnabled = false; }
+  renderOob();
+  if (oobEnabled) ensureOobPolling();
+}
 
 function handleOob(result) {
   if (result && result.oob_warning) toast(result.oob_warning, 'error');
-  if (result && result.oob_host) {
-    document.getElementById('oobTab').style.display = '';   // 마커를 실제로 보낸 요청부터 탭 노출
-    ensureOobPolling();
-    if (!oobInteractions.length) renderOob();               // 대기 안내 표시
-  }
+  if (result && result.oob_host) ensureOobPolling();   // 마커 전송 요청부터 폴링 보장
 }
 
 function ensureOobPolling() {
@@ -1742,8 +1749,15 @@ function renderOob() {
   if (badge) { badge.textContent = n; badge.style.display = n ? '' : 'none'; }
   if (!el) return;
   if (!n) {
-    el.innerHTML = '<div style="color:var(--text-muted);padding:6px">대기 중… 대상이 아웃바운드로 '
-      + '<code>{{oob}}</code> 호스트를 호출(DNS/HTTP)하면 여기 표시됩니다. 콜백은 수초~수분 뒤 올 수 있습니다.</div>';
+    if (oobEnabled === false) {
+      el.innerHTML = '<div style="color:var(--text-muted);padding:6px;line-height:1.6">'
+        + 'OOB 콜백 미설정 — blind 계열(cmdi·ssrf·xxe·log4shell) 확증용.<br>'
+        + '<code>.env</code> 에 <code>OOB_ENABLED=true</code> 와 <code>OOB_SERVER</code>(공개 oast.fun 또는 self-host)를 설정하면,<br>'
+        + '페이로드의 <code>{{oob}}</code> 가 콜백 호스트로 치환되고 대상의 아웃바운드 호출이 여기 표시됩니다.</div>';
+    } else {
+      el.innerHTML = '<div style="color:var(--text-muted);padding:6px;line-height:1.6">대기 중… 대상이 아웃바운드로 '
+        + '<code>{{oob}}</code> 호스트를 호출(DNS/HTTP)하면 여기 표시됩니다. 콜백은 수초~수분 뒤 올 수 있습니다.</div>';
+    }
     return;
   }
   const rows = oobInteractions.slice().reverse().map(it => {
@@ -4712,6 +4726,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 참고 문서(RAG) 목록 로드
   loadRagSources();
+
+  // OOB 콜백 탭 초기화(상시 노출) — 설정돼 있으면 폴링 시작
+  initOob();
 
   // 서버 AI 설정 여부 확인 (좌측 'AI 페이로드 생성' 동작 판단용)
   API.aiStatus().then(s => {
