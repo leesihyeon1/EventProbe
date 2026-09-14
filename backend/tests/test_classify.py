@@ -192,3 +192,15 @@ def test_erb_template_tag_is_ssti_not_cmdi():
     # 순수 cmdi/sqli 는 회귀 없이 그대로
     assert classify(payload=";id").primary == "cmdi"
     assert classify(payload="' OR '1'='1").primary == "sqli"
+
+
+def test_backslash_escape_bypass_is_xss_not_lfi():
+    """백슬래시 이스케이프 우회 XSS(\\' alert(...) \\')는 %5c(인코딩 백슬래시) 때문에 LFI 로
+    오분류되면 안 된다 — traversal(..) 없는 바 %5c/%2f 는 LFI 신호가 아니다."""
+    from core.classify import classify
+    assert classify(payload="\\' alert(document.domain) \\'").primary == "xss"
+    assert classify(payload="%5C%5C' alert(document.domain) %5C%5C'").primary == "xss"
+    # 실제 traversal 은 여전히 lfi
+    assert classify(payload="..%5c..%5cwindows\win.ini").primary == "lfi"
+    assert classify(payload="..%2f..%2fetc%2fpasswd").primary == "lfi"
+    assert classify(payload="../../etc/passwd").primary == "lfi"

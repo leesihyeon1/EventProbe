@@ -25,8 +25,9 @@ from urllib.parse import unquote, urlsplit
 # 힌트는 '콘텐츠 마커 검사를 켤지'만 정하는 게이트다. 실제 성공 판정은 엄격한 파일 내용
 # 시그니처가 하므로, 힌트를 넉넉히 잡아도 오탐이 늘지 않는다(인코딩 변형 포함).
 _FILE_READ_HINT = re.compile(
-    r"\.\.[\\/]|%2e|%252e|%c0%ae|"                 # 경로 트래버설(평문/단·이중 인코딩)
-    r"%2f|%5c|%252f|%255c|"                        # 인코딩된 슬래시/백슬래시
+    # 경로 트래버설 — 인코딩 슬래시/백슬래시는 '..' 가 앞에 있을 때만(바 %5c/%2f 는 XSS 이스케이프
+    # 우회(\\')·일반 경로에도 흔해 LFI 로 단정하면 오분류). %2e 계열도 2개 이상(=..)일 때만.
+    r"\.\.(?:[\\/]|%2f|%5c|%252f|%255c)|(?:%2e|%252e|%c0%ae){2}|"
     r"/etc/|etc%2f|/proc/|windows[\\/]|/windows/system32|win\.ini|boot\.ini|"
     r"passwd|shadow|/hosts\b|access\.log|/environ\b|/cmdline\b|"
     r"\.git[/%]|\.svn/|\.hg/|\.bzr/|\.env\b|wp-config\.php|web\.config|"  # VCS·설정·시크릿 파일
