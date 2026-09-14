@@ -17,7 +17,8 @@ DNS OOB는 대상의 DNS 질의(`<데이터>.<토큰>.내도메인`)를 **내 �
 
 ## 2) 도메인 확보 (~$1/yr, 또는 무료 대안)
 - 가장 안정적: 저가 도메인 1개(Namecheap/Porkbun/Cloudflare Registrar 등).
-- 완전 무료 대안: **eu.org**(NS 위임 지원, 승인 느림) 또는 afraid.org(FreeDNS, 불안정).
+- 완전 무료 대안: **eu.org**(NS 위임 지원, 승인 느림 — [eu-org-domain-guide.md](eu-org-domain-guide.md))
+  또는 afraid.org(FreeDNS, 불안정).
 - ⚠️ `*.vercel.app`·DuckDNS 등 **NS 제어를 못 주는 무료 서브도메인은 DNS OOB 불가.**
 
 ## 3) 도메인 NS 위임 (레지스트라 DNS 설정)
