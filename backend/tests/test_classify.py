@@ -179,3 +179,16 @@ def test_header_sqli_not_masked_by_internal_target():
 def test_log4shell_header_with_internal_target():
     r = classify(url="http://10.0.0.5/api", headers={"user-agent": "${jndi:ldap://x/a}"})
     assert r.primary == "cmdi"
+
+
+def test_erb_template_tag_is_ssti_not_cmdi():
+    """ERB <%= system() %> 는 템플릿 태그가 SSTI 신호 — 안쪽 system() 때문에 cmdi 로
+    오분류하지 않는다(코드실행은 SSTI 의 영향)."""
+    from core.classify import classify
+    assert classify(payload='<%= system("rm /home/carlos/morale.txt") %>').primary == "ssti"
+    assert classify(payload="{{7*7}}").primary == "ssti"
+    assert classify(payload="{{config.items()}}").primary == "ssti"
+    assert classify(payload="#{7*7}").primary == "ssti"
+    # 순수 cmdi/sqli 는 회귀 없이 그대로
+    assert classify(payload=";id").primary == "cmdi"
+    assert classify(payload="' OR '1'='1").primary == "sqli"

@@ -3770,6 +3770,23 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                              "evidence": f"{response_time:.0f}ms"})
 
 
+    # ④-b 주입 페이로드가 서버 오류(5xx) 유발 — baseline 없이도 '의심'으로 잡는다. 주입이
+    #      서버측 처리(템플릿 평가·쿼리·파싱)를 깨뜨렸을 가능성. 500 은 SSTI/SQLi 등에서 흔한
+    #      취약 신호다(정상 요청도 500 인지 baseline 으로 확증). 이미 성공/의심 신호가 있으면 생략.
+    _INJECT_5XX = {"ssti", "sqli", "cmdi", "xxe", "nosql", "lfi", "xpath"}
+    if (status_code >= 500 and status_code != 503 and (payload and payload.strip())
+            and infer_attack_type(probe, category) in _INJECT_5XX
+            and not any(f["verdict"] in ("성공", "의심") for f in findings)):
+        _at = infer_attack_type(probe, category)
+        findings.append({
+            "name": "서버 오류 유발 — 주입이 처리 로직을 깨뜨림(의심)", "verdict": "의심", "confidence": 55,
+            "why": f"{_at} 주입 페이로드 전송에 서버가 HTTP {status_code}(5xx) 로 응답 — 주입이 "
+                   "서버측 처리(템플릿 평가·쿼리·파싱)를 깨뜨렸을 가능성이 높습니다. SSTI/SQLi 등에서 "
+                   "흔한 취약 신호이나, 정상 요청도 5xx 인지 baseline 으로 확증하세요.",
+            "method": "단일 응답(공격 payload → 5xx)", "where": "응답 상태코드",
+            "evidence": f"공격 payload 전송 → HTTP {status_code} (정상 대비 baseline 확인 권장)",
+        })
+
     # ⑤ 차단 신호
     blocked = status_code in (403, 406, 429, 503) or _body_signals_block(status_code, body, body_lower)
 

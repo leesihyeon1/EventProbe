@@ -128,6 +128,10 @@ class AttackClass:
 #   - REDIRECT: //host. 가 모든 Referer/Origin 에 있음 → 헤더 제외
 #   - SSTI: ${ 가 일부 정상 헤더에 있을 수 있음 → 본문/URL 만
 # 헤더_스캔_허용=True 는 정상 헤더엔 거의 없는 마커(jndi·shellshock·<script·UNION SELECT 등).
+# 명확한 템플릿 엔진 델리미터(ERB/JSP <% %>, Jinja/Twig {{ }} {% %}, Ruby/EL #{ }) — 정상
+# 입력엔 거의 없어 cmdi 보다 먼저 SSTI 로 분류(안쪽 system() 등은 SSTI 의 영향이지 별개 cmdi 아님).
+_SSTI_TAG = re.compile(r"<%=?|%>|\{\{|\{%|#\{")
+
 _RULES = [
     ("authbypass", _AUTHBYPASS_HINT, True, "middleware"),  # X-Middleware-Subrequest 등 — 헤더 전용
     ("cmdi", _LOG4SHELL_HINT,  True,  "log4shell"),   # ${jndi:...} — 헤더 최빈
@@ -135,8 +139,10 @@ _RULES = [
     ("cmdi", _OGNL_HINT,       True,  "ognl"),        # OGNL/Struts(S2-*) 표현식 RCE
     ("lfi",  _FILE_READ_HINT,  True,  ""),
     ("xss",  _XSS_HINT,        True,  ""),
+    ("ssti", _SSTI_TAG,        False, ""),             # 명확한 템플릿 태그(<%= %> {{ #{ {%)는
+                                                       #  cmdi 보다 우선 — <%= system() %> 는 SSTI(코드실행이 영향)
     ("cmdi", _CMDI_HINT,       False, ""),
-    ("ssti", None,             False, ""),             # ssti 는 아래 전용 검사(7*7 등)
+    ("ssti", None,             False, ""),             # 나머지 ssti(7*7·${ 등) 전용 검사
     ("ssrf", _SSRF_HINT,       False, ""),
     ("sqli", _SQLI_HINT,       True,  ""),
     ("nosql", _NOSQL_HINT,     False, ""),

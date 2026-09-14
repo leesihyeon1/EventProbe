@@ -1358,3 +1358,20 @@ def test_ognl_struts_recognized_as_subtype():
     # analyze_response 가 subtype 을 노출
     r = analyze_response(200, {}, "<html>ok</html>" * 10, 60, payload=p, url="http://t" + p)
     assert r.get("attack_subtype") == "ognl"
+
+
+def test_injection_payload_5xx_is_suspicious():
+    """주입 페이로드(SSTI 등)가 서버 5xx 를 유발하면 baseline 없이도 '의심'으로 잡는다
+    (주입이 서버측 처리를 깨뜨렸을 가능성)."""
+    r = analyze_response(500, {"content-type": "text/html"}, "Internal Server Error", 120,
+                         payload='<%= system("id") %>', category="",
+                         url="http://h/?message=<%= system(\"id\") %>")
+    assert r["attack_type"] == "ssti"
+    assert r["attack_outcome"] == "suspicious"
+    assert any(f["verdict"] == "의심" and "서버 오류" in f["name"] for f in r["findings"])
+
+
+def test_benign_500_no_payload_not_suspicious():
+    """페이로드 없는 일반 500 은 주입 의심으로 올리지 않는다(오탐 방지)."""
+    r = analyze_response(500, {}, "error", 40, payload="", category="", url="http://h/x")
+    assert not any("서버 오류 유발" in f["name"] for f in r["findings"])
