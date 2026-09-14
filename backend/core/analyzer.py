@@ -3084,7 +3084,10 @@ def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
     elif re.search(r"(?:href|src|action|formaction)\s*=\s*[\"']?\s*javascript:[^\"'>]*$", seg, re.I) \
             or payload.strip().lower().startswith("javascript:"):
         exec_ctx, breakout = "javascript: URI", True
-    elif in_script:
+    # 이탈 문자의 이스케이프 여부는 '반사된 payload 원문' 기준으로 본다. \' 로 이스케이프된
+    # 경우엔 애초에 리터럴 payload 가 body 에 그대로 존재하지 않아(payload in body=False) 반사로
+    # 잡히지 않으므로, 앞 글자(구조상 델리미터 따옴표)를 끌어오지 않는다.
+    if in_script:
         q = _enclosing_js_quote(seg)
         if re.search(r"</\s*script", reflected, re.I):
             exec_ctx, breakout = "script 내부(스크립트 태그 종료)", True
