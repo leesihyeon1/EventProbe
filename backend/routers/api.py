@@ -431,13 +431,13 @@ async def analyze_enrich(req: EnrichRequest):
         await _attach_rag_and_verdict(analysis, req, req.status_code, req.response_time)
 
     async def _classify():
-        # 규칙 기반 분류가 이미 유형을 정했으면 AI 를 부르지 않는다(하이브리드: miss 일 때만).
-        # attack_type 이 비어 있을 때만 = 정규식 힌트가 아무것도 못 맞춘 SOC 붙여넣기 케이스.
-        if (analysis.get("attack_type") or "").strip():
-            return None
+        # 하이브리드: 규칙이 유형을 '단정'했으면(단일 유형) AI 를 부르지 않는다. 빈 값(miss)이거나
+        # 모호(유형 2개 이상 충돌 — 오분류가 잦은 지점)면 AI 분류로 보강·교정한다.
         if not ai_enabled():
             return None
-        # 호스트 제거한 경로만 — 요청 본문/헤더값은 분석가 자신의 공격이라 저유출.
+        at = (analysis.get("attack_type") or "").strip()
+        if at and not analysis.get("attack_type_ambiguous"):
+            return None
         try:
             path = urlsplit(req.url).path or "/"
         except Exception:
@@ -459,6 +459,22 @@ async def analyze_enrich(req: EnrichRequest):
         out["ai_verdict"] = analysis["ai_verdict"]
     if klass and not klass.get("error") and (klass.get("primary") or klass.get("types")):
         out["attack_class"] = klass          # {primary, types, confidence, header_borne, reason, source:"ai"}
+        # AI 가 규칙과 '다른' 유형으로 교정했으면, 그 유형으로 재분석해 검증을 다시 돌린다
+        # (분류가 틀리면 유형별 검증이 무너지므로 — AI 교정 결과로 판정을 재계산).
+        _ai_primary = (klass.get("primary") or "").lower()
+        _regex_at = (analysis.get("attack_type") or "").lower()
+        if _ai_primary and _ai_primary != _regex_at:
+            try:
+                _re = analyze_response(
+                    status_code=req.status_code, headers=req.resp_headers, body=req.resp_body,
+                    response_time=req.response_time, payload=req.payload, category=_ai_primary,
+                    url=_url_with_params(req.url, req.params), req_body=req.body, method=req.method,
+                    req_headers=req.headers)
+                _re["reclassified_by_ai"] = {"from": _regex_at or "(미분류)", "to": _ai_primary,
+                                             "reason": str(klass.get("reason", ""))[:200]}
+                out["reclassified_analysis"] = _re
+            except Exception:
+                pass
     return out
 
 

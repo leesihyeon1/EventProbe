@@ -1966,6 +1966,14 @@ async function enrichAnalysis(reqPayload, result) {
         a.attack_type = res.attack_class.primary;
         a.attack_class = res.attack_class;
       }
+      // 규칙 분류가 모호/오분류였고 AI 가 다른 유형으로 교정 → 그 유형으로 재분석한 결과로 교체.
+      // (분류가 틀리면 유형별 검증이 무너지므로 판정을 재계산한 것)
+      if (res.reclassified_analysis) {
+        const rc = res.reclassified_analysis;
+        ['findings','attack_outcome','attack_confidence','verdict','risk_level','score',
+         'det_verdict','next_action','attack_type'].forEach(k => { if (rc[k] !== undefined) a[k] = rc[k]; });
+        a._reclassified = rc.reclassified_by_ai;   // {from, to, reason}
+      }
     }
   } catch (e) {
     if (seq !== _enrichSeq || state.lastResult !== result) return;
@@ -2769,6 +2777,16 @@ function renderAnalysis(a, result) {
         <div id="spaApiBox" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
           <span style="font-size:11px;color:var(--text-muted)"><span class="spinner" style="width:10px;height:10px"></span> 헤드리스 브라우저로 실제 호출 API 캡처 중… (수 초 소요)</span>
         </div>
+      </div>
+    </div>` : ''}
+
+    <!-- AI 재분류 — 규칙 분류가 모호/오분류였고 AI 가 교정해 그 유형으로 재검증했음을 알림 -->
+    ${a._reclassified ? `
+    <div class="analysis-card" data-card-id="reclassified" style="border-color:rgba(88,166,255,.4)">
+      <div class="analysis-card-header">AI 분류 교정 <span style="margin-left:auto"><span class="tag tag-blue">${escapeHtml(String(a._reclassified.from))} → ${escapeHtml(String(a._reclassified.to))}</span></span></div>
+      <div class="analysis-card-body">
+        <div class="detail-item">규칙 기반 분류가 모호해(<b>${escapeHtml(String(a._reclassified.from))}</b>) AI 가 <b>${escapeHtml(String(a._reclassified.to))}</b> 로 교정 → 그 유형으로 검증을 다시 수행한 결과입니다.</div>
+        ${a._reclassified.reason ? `<div class="detail-item" style="color:var(--text-muted)">근거: ${escapeHtml(String(a._reclassified.reason))}</div>` : ''}
       </div>
     </div>` : ''}
 

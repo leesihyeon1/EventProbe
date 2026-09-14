@@ -4182,6 +4182,9 @@ def analyze_response(
     )
     result["attack_type"] = _kl.primary or (category or "").lower()
     result["attack_subtype"] = _kl.subtype   # log4shell·shellshock·ognl·middleware 등(표시용)
+    # 규칙 분류가 모호(유형 2개 이상 충돌)하면 enrich 에서 AI 분류로 보강·교정하도록 표시.
+    result["attack_type_ambiguous"] = _kl.ambiguous
+    result["attack_type_candidates"] = _kl.types
 
     is_attack_attempt = bool((payload and payload.strip()) or category)
     has_signal = any(f.get("verdict") in ("성공", "안전", "미확정", "의심") for f in findings)

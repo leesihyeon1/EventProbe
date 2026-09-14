@@ -122,6 +122,12 @@ class AttackClass:
                 return c.subtype
         return ""
 
+    @property
+    def ambiguous(self) -> bool:
+        """서로 다른 유형이 2개 이상 매칭 = 규칙만으론 어느 공격인지 단정 어려움.
+        이때 AI 분류로 보강하면 오분류(예: 백슬래시 XSS→LFI, ERB SSTI→cmdi)를 잡는다."""
+        return len(self.types) >= 2
+
 
 # 규칙: (유형, 정규식, 헤더_스캔_허용, 세부이름). 순서 = 우선순위(첫 매칭이 primary).
 # 헤더_스캔_허용=False 인 규칙은 payload/url/body 만 본다(정상 헤더 오탐 방지):
