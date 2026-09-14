@@ -3030,43 +3030,83 @@ def _detect_spa_shell(body: str, headers_lower: dict) -> Optional[dict]:
     return {"framework": fw, "visible_len": len(visible)}
 
 
+def _enclosing_js_quote(seg: str) -> Optional[str]:
+    """<script> 시작~반사지점(seg)을 훑어, 반사 지점이 어떤 JS 문자열 안인지 판정.
+    ", ', ` 또는 None(문자열 밖). 이스케이프(\\")를 반영하므로 Next.js flight 데이터처럼
+    \\" 로 이스케이프된 JSON 이 큰 " 문자열 안에 있는 경우를 올바로 인식한다."""
+    i = seg.rfind("<script")
+    s = seg[i:] if i != -1 else seg
+    q = None
+    esc = False
+    for ch in s:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if q:
+            if ch == q:
+                q = None
+        elif ch in "\"'`":
+            q = ch
+    return q
+
+
+def _unescaped_in(ch: str, s: str) -> bool:
+    """s 안에 ch 가 '\\' 이스케이프 없이 존재하는가(문자열/태그 이탈 가능 여부)."""
+    return re.search(r"(?<!\\)" + re.escape(ch), s or "") is not None
+
+
 def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
-    """payload가 응답에 반사됐는지 + 미인코딩 여부 + 컨텍스트 추정."""
+    """payload가 응답에 반사됐는지 + '실제 컨텍스트 이탈' 여부 + 컨텍스트 추정.
+
+    핵심(오탐 방지): 반사됐어도 감싸는 문자열/속성을 '이스케이프 없이 이탈'해야 실행 가능하다.
+    예) <script> 안 "..." JSON 문자열에 작은따옴표 payload 가 그대로 반사돼도, 큰따옴표를
+    깨지 못하면 XSS 아님(Next.js __next_f 데이터가 대표 사례)."""
     if not payload or len(payload) < 3 or payload not in body:
         return None
     idx = body.find(payload)
     seg = body[:idx]
-    # 컨텍스트 추정
+    reflected = body[idx:idx + len(payload)]     # 실제 반사된 원문(=payload, 이스케이프 시 애초에 불일치)
     open_s = seg.rfind("<script")
     close_s = seg.rfind("</script")
-    if open_s > close_s:
-        ctx = "JavaScript(script 내부)"
-    elif re.search(r'=\s*"[^"]*$', seg) or re.search(r"=\s*'[^']*$", seg):
-        ctx = "HTML 속성값"
-    else:
-        ctx = "HTML 본문"
-    # 미인코딩: payload에 특수문자가 있고 원문 그대로 존재하면 미인코딩(실행 위험)
-    has_special = any(c in payload for c in "<>\"'")
-    start = max(0, idx - 40)
-    end = min(len(body), idx + len(payload) + 40)
+    in_script = open_s > close_s
+    attr_q = '"' if re.search(r'=\s*"[^"]*$', seg) else ("'" if re.search(r"=\s*'[^']*$", seg) else None)
+    ctx = "JavaScript(script 내부)" if in_script else ("HTML 속성값" if attr_q else "HTML 본문")
+    start, end = max(0, idx - 40), min(len(body), idx + len(payload) + 40)
 
-    # 클라이언트측 XSS 실행 컨텍스트 정밀 판정 (반사 위치·payload 형태 기반)
+    # 실행 컨텍스트·이탈 판정 — 반사 위치 컨텍스트에서 payload 가 '실제로 이탈'하는지 확인
     exec_ctx = None
+    breakout = False
     if re.search(r"\bon[a-z]+\s*=\s*[\"']?[^\"'>]*$", seg, re.I):
-        exec_ctx = "이벤트 핸들러 속성"                       # ... onerror=" [여기]
+        exec_ctx, breakout = "이벤트 핸들러 속성", True          # ... onerror=" [여기]
     elif re.search(r"(?:href|src|action|formaction)\s*=\s*[\"']?\s*javascript:[^\"'>]*$", seg, re.I) \
             or payload.strip().lower().startswith("javascript:"):
-        exec_ctx = "javascript: URI"
-    elif ctx.startswith("JavaScript") and any(c in payload for c in "\"'`</"):
-        exec_ctx = "script 내부(문자열 이탈)"                  # <script> 내부에서 문자열/블록 이탈 가능
+        exec_ctx, breakout = "javascript: URI", True
+    elif in_script:
+        q = _enclosing_js_quote(seg)
+        if re.search(r"</\s*script", reflected, re.I):
+            exec_ctx, breakout = "script 내부(스크립트 태그 종료)", True
+        elif q and _unescaped_in(q, reflected):
+            exec_ctx, breakout = "script 내부(문자열 이탈)", True   # 감싸는 따옴표를 이스케이프 없이 이탈
+        elif q is None and re.search(r"[;\n{}()]", reflected):
+            exec_ctx, breakout = "script 내부(문자열 밖 raw JS)", True
+        # else: 문자열 안이지만 그 따옴표를 못 깸 → 이탈 불가(예: " 안의 ' 만) → 실행 아님
     elif re.search(r"<\s*(?:script|img|svg|iframe|body|details|input|video|audio|object|embed|marquee)\b"
-                   r"|on[a-z]+\s*=|javascript:", payload, re.I):
-        exec_ctx = "HTML 본문(태그/핸들러 삽입)"               # 실행형 태그가 원문 삽입
+                   r"|on[a-z]+\s*=|javascript:", payload, re.I) and "<" in reflected:
+        exec_ctx, breakout = "HTML 본문(태그/핸들러 삽입)", True    # 실행형 태그가 원문(<) 삽입
+    else:
+        # exec_ctx 는 없지만 컨텍스트 이탈 문자가 원문 반사되면 미인코딩(실행 가능성 있음)
+        if attr_q and _unescaped_in(attr_q, reflected):
+            breakout = True                                     # 속성 따옴표 이탈 → onX= 주입 가능
+        elif ctx == "HTML 본문" and "<" in reflected:
+            breakout = True                                     # HTML 본문에 태그 시작 가능
 
     return {
         "reflected": True,
-        "unescaped": bool(has_special),   # 특수문자 원문 반사 = 실행 가능성
-        "exec_ctx": exec_ctx,             # 실행 가능 컨텍스트(없으면 None) — 클라이언트측 XSS 판정
+        "unescaped": breakout,            # '컨텍스트 이탈' 실제 확인(단순 특수문자 존재 아님)
+        "exec_ctx": exec_ctx,             # 실행 가능 컨텍스트(없으면 None)
         "context": ctx,
         "snippet": body[start:end],
         "payload": payload,

@@ -1375,3 +1375,22 @@ def test_benign_500_no_payload_not_suspicious():
     """페이로드 없는 일반 500 은 주입 의심으로 올리지 않는다(오탐 방지)."""
     r = analyze_response(500, {}, "error", 40, payload="", category="", url="http://h/x")
     assert not any("서버 오류 유발" in f["name"] for f in r["findings"])
+
+
+def test_xss_reflected_but_escaped_in_js_string_not_success():
+    """<script> 안 "..." JS/JSON 문자열에 작은따옴표 payload 가 그대로 반사돼도, 큰따옴표를
+    이스케이프 없이 깨지 못하면 실행 불가 → 성공으로 판정하지 않는다(Next.js __next_f 오탐)."""
+    pl = "' alert(document.domain) '"
+    body = '<script>self.__next_f.push([1,"0:[\\"$\\",\\"throwError\\":\\"' + pl + '\\"]"])</script>'
+    r = analyze_response(200, {"content-type": "text/html"}, body, 60,
+                         payload=pl, category="xss", url="http://h/test?throwError=" + pl)
+    assert not any(f["verdict"] == "성공" and "XSS" in f["name"] for f in r["findings"])
+    assert not any(f["verdict"] == "성공" and "미인코딩" in f["name"] for f in r["findings"])
+
+
+def test_xss_js_string_breakout_is_success():
+    """감싸는 JS 문자열 따옴표를 이스케이프 없이 이탈하면 반사형 XSS 성공."""
+    pl = '";alert(1);//'
+    r = analyze_response(200, {"content-type": "text/html"}, '<script>var m="' + pl + '";</script>',
+                         60, payload=pl, category="xss", url="http://h/?q=" + pl)
+    assert any(f["verdict"] == "성공" and "실행 컨텍스트" in f["name"] for f in r["findings"])
