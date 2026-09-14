@@ -1394,3 +1394,18 @@ def test_xss_js_string_breakout_is_success():
     r = analyze_response(200, {"content-type": "text/html"}, '<script>var m="' + pl + '";</script>',
                          60, payload=pl, category="xss", url="http://h/?q=" + pl)
     assert any(f["verdict"] == "성공" and "실행 컨텍스트" in f["name"] for f in r["findings"])
+
+
+def test_xss_nextjs_page_flight_reflection_not_success():
+    """실제 제보 evidence 재현 — Next.js RSC flight 의 "__PAGE__?{\\"throwError\\":\\"PAYLOAD\\"}"
+    구조에서 payload(작은따옴표만)가 이스케이프된 겹따옴표 문자열 안에 반사 → 실행 불가 →
+    반사형 XSS 성공으로 판정하지 않는다."""
+    BS = chr(92); DQ = '"'
+    pl = "' alert(document.domain) '"
+    frag = ('children' + DQ + ':[' + DQ + '__PAGE__?{' + BS + DQ + 'throwError' + BS + DQ + ':'
+            + BS + DQ + pl + BS + DQ + '}' + DQ + ',{}]}]}')
+    body = '<script>self.__next_f.push([1,' + DQ + '0:[[' + DQ + '$' + DQ + ',' + frag + ']' + DQ + '])</script>'
+    r = analyze_response(200, {"content-type": "text/html"}, body, 60,
+                         payload=pl, category="xss", url="http://h/test/guinea-pig?throwError=" + pl)
+    assert not any(f["verdict"] == "성공" for f in r["findings"]), \
+        [f["name"] for f in r["findings"] if f["verdict"] == "성공"]
