@@ -3054,8 +3054,20 @@ def _enclosing_js_quote(seg: str) -> Optional[str]:
 
 
 def _unescaped_in(ch: str, s: str) -> bool:
-    """s 안에 ch 가 '\\' 이스케이프 없이 존재하는가(문자열/태그 이탈 가능 여부)."""
-    return re.search(r"(?<!\\)" + re.escape(ch), s or "") is not None
+    """s 안에 ch 가 '이스케이프 없이' 존재하는가(문자열/태그 이탈 가능). 앞의 연속 백슬래시가
+    짝수(0 포함)면 이탈 가능 — \\' (백슬래시 2개=이스케이프된 백슬래시 뒤 따옴표)는 이탈,
+    \' (1개)는 이스케이프라 이탈 아님. (백슬래시 이스케이프 우회 XSS 판정용)"""
+    s = s or ""
+    for m in re.finditer(re.escape(ch), s):
+        i = m.start()
+        n = 0
+        j = i - 1
+        while j >= 0 and s[j] == "\\":
+            n += 1
+            j -= 1
+        if n % 2 == 0:
+            return True
+    return False
 
 
 def _detect_reflection(body: str, payload: Optional[str]) -> Optional[dict]:
@@ -3377,6 +3389,19 @@ def _reflection_candidates(payload, url, req_body):
             for _, v in parse_qsl(b, keep_blank_values=False):   # form-encoded
                 if v and len(v) >= 3 and _susp(v):
                     cands.append(v)
+    # 인코딩되어 반사되는 경우 대응 — 각 후보를 최대 2번 더 URL 디코드한 변형도 후보에 추가.
+    # (이중인코딩 %255C%27... 를 보내도 서버가 \'... 로 디코드해 반사하면 그 형태로 매칭)
+    for c in list(cands):
+        d = c
+        for _ in range(2):
+            if "%" not in d:
+                break
+            d2 = unquote(d)
+            if d2 == d:
+                break
+            d = d2
+            if len(d) >= 3 and _susp(d) and d not in cands:
+                cands.append(d)
     return list(dict.fromkeys(cands))   # 순서 유지 중복 제거
 
 

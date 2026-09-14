@@ -1409,3 +1409,26 @@ def test_xss_nextjs_page_flight_reflection_not_success():
                          payload=pl, category="xss", url="http://h/test/guinea-pig?throwError=" + pl)
     assert not any(f["verdict"] == "성공" for f in r["findings"]), \
         [f["name"] for f in r["findings"] if f["verdict"] == "성공"]
+
+
+def test_xss_backslash_parity_breakout():
+    """백슬래시 패리티 — \\'(백슬래시2개=이스케이프된 백슬래시 뒤 따옴표)는 홑따옴표 문자열을
+    이탈해 실행 가능(성공), \'(1개)는 이스케이프라 이탈 아님."""
+    BS = chr(92)
+    p_ok = BS + BS + "';alert(1)//"       # \';alert(1)//  → 이탈
+    r = analyze_response(200, {"content-type": "text/html"}, "<script>var m='" + p_ok + "';</script>",
+                         50, payload=p_ok, category="xss", url="http://h/?q=" + p_ok)
+    assert any(f["verdict"] == "성공" and "실행 컨텍스트" in f["name"] for f in r["findings"])
+    p_esc = BS + "';alert(1)//"            # \';alert(1)//  → 이스케이프(안전)
+    r2 = analyze_response(200, {"content-type": "text/html"}, "<script>var m='" + p_esc + "';</script>",
+                          50, payload=p_esc, category="xss", url="http://h/?q=" + p_esc)
+    assert not any(f["verdict"] == "성공" for f in r2["findings"])
+
+
+def test_reflection_candidates_double_url_decode():
+    """이중인코딩 payload(%255C..)를 보내도 서버가 디코드해 반사하면 그 디코드형을 후보에 포함."""
+    from core.analyzer import _reflection_candidates
+    BS = chr(92)
+    p_enc = "%255C%27%2balert(document.domain)%2b%255C%27"
+    cs = _reflection_candidates(p_enc, "http://h/?throwError=" + p_enc, "")
+    assert BS + "'+alert(document.domain)+" + BS + "'" in cs      # 이중디코드형 포함
