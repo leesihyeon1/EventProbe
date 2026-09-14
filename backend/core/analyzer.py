@@ -2410,6 +2410,43 @@ def _cve_nonapplicable_reason(status_code: int, body: str, headers_lower: Option
     return ""
 
 
+# 앞단 프록시/CDN 지문 — Server 헤더가 이 값이면 뒤의 실제 백엔드(Apache/Tomcat/앱)를 가린다.
+# 따라서 이 지문만으로는 CVE '해당 없음'을 단정할 수 없다(프록시 뒤에 취약 백엔드가 있을 수 있음).
+_PROXY_FINGERPRINTS = (
+    "nginx", "cloudflare", "cloudfront", "akamai", "fastly", "varnish", "haproxy",
+    "envoy", "traffic server", "openresty", "google frontend", "gws", "caddy",
+    "amazons3", "awselb", "bigip", "squid", "cdn")
+
+
+def _cve_fp_mismatch_note(probe: str, headers_lower: Optional[dict]) -> str:
+    """테스트 중인 CVE(경로로 매칭)가 특정 제품 지문을 요구하는데, 대상의 '비-프록시' 지문이
+    다른 제품을 명시하면 '해당 가능성 낮음' 근거 문자열을 만든다.
+
+    안전 가드(하나라도 걸리면 '' — 판단 보류): 지문 없음 · Server 가 프록시/CDN(백엔드 가림)
+    · 이 CVE 에 제품 메타 없음 · 지문이 요구 제품과 겹침(=일치). 프록시 fronting 으로 인한
+    거짓 '안전'을 막기 위해 이 함수는 '안전' 이 아니라 '가능성 낮음' 근거만 제공한다."""
+    fs, fpw = _fp_from_headers(headers_lower)
+    fs, fpw = (fs or "").strip(), (fpw or "").strip()
+    if not fs and not fpw:
+        return ""
+    if fs and any(p in fs for p in _PROXY_FINGERPRINTS):
+        return ""                       # 앞단 프록시 → 백엔드 불명, 판단 안 함
+    pl = (probe or "").lower()
+    req = set()
+    for sig in _load_cve_sigs():
+        if any(str(pc).lower() in pl for pc in (sig.get("path_contains") or [])):
+            req |= {s for s in (sig.get("server") or []) if s}
+            req |= {p for p in (sig.get("powered_by") or []) if p}
+    req = {p for p in req if len(p) >= 3}
+    if not req:
+        return ""                       # 이 CVE 에 제품 메타 없음 → 판단 불가
+    fp_blob = f"{fs} {fpw}".strip()
+    if any(p in fp_blob for p in req):
+        return ""                       # 지문이 요구 제품과 일치 → 미스매치 아님
+    return (f"대상 스택 지문({(fs or fpw).strip()})이 이 CVE 대상 제품({', '.join(sorted(req))})과 "
+            f"일치하지 않음 → 해당 가능성 낮음(단, 프록시 뒤 백엔드는 미확인이라 완전 배제는 아님)")
+
+
 def _detect_sensitive_file(payload: Optional[str], body: str,
                            headers_lower: Optional[dict] = None,
                            status_code: int = 200) -> Optional[dict]:
@@ -3540,6 +3577,22 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             })
             cve_non_applicable = True
 
+    # ②-f-2 CVE 스택 지문 불일치 — 200+내용이라 '미해당' 형태는 아니지만, 대상의 비-프록시
+    #        지문이 이 CVE 대상 제품과 다르면 '해당 가능성 낮음'으로 낮춘다(하드 '안전' 아님 —
+    #        프록시 뒤 백엔드는 미확인이므로 판정불가는 유지하되 우선순위만 낮춘다).
+    if (not cve_non_applicable and (category or "").lower() == "cve"
+            and _classify.classify(payload=payload, url=url, req_body=req_body,
+                                    category=category).primary == "cve"
+            and not any(f["verdict"] in ("성공", "의심") for f in findings)):
+        _mm = _cve_fp_mismatch_note(file_probe, headers_lower)
+        if _mm:
+            findings.append({
+                "name": "CVE 해당 가능성 낮음 — 스택 지문 불일치", "verdict": "미확정", "confidence": 40,
+                "why": _mm,
+                "checked": _cve_checked_desc(file_probe, headers_lower) or _CVE_NO_MATCHER,
+                "evidence": f"스택 지문 불일치 (HTTP {status_code} · {len(body or '')}B)",
+            })
+
     # ③ 타이밍 (time-based)
     n = _extract_sleep_seconds(payload)
     if n:
@@ -3974,6 +4027,14 @@ def analyze_response(
         if result["risk_level"] not in ("critical",):
             result["risk_level"] = "high"
         result["score"] = max(result["score"], aconf)
+
+    # CVE 스택 지문 불일치(해당 가능성 낮음) → 성공/의심 신호가 없을 때 위험도를 낮춰 후순위화.
+    # '안전'으로 뒤집지는 않는다(판정불가 유지) — 프록시 뒤 백엔드 미확인이므로.
+    if (outcome == "inconclusive"
+            and any(f.get("name") == "CVE 해당 가능성 낮음 — 스택 지문 불일치" for f in findings)
+            and not any(f.get("verdict") in ("성공", "의심") for f in findings)):
+        result["risk_level"] = "low"
+        result["score"] = min(result["score"], 20)
 
     # 결정적 서술(AI 미설정/실패 시 폴백, AI 있어도 누락 항목 보강용) — 항상 생성
     # 판정 불가·의심 이벤트의 '다음 행동' — UI 가 확증 스캔/OOB/브라우저 CTA 를 안내하도록 최상위 노출.

@@ -311,3 +311,47 @@ def test_dsl_to_matchers_parses_contains_and_drops_generic():
     assert "GSCAN_UNIQUE_MARKER" in words
     assert "text/html" not in words                  # 제네릭 단어 배제
     assert any(m["type"] == "status" and 200 in m["status"] for m in ms)
+
+
+# ── CVE 스택 지문 불일치 → '해당 가능성 낮음'(하드 '안전' 아님, 프록시 가드) ──────────
+_FAKE_APACHE_CVE = [{
+    "cve": "CVE-TEST-APACHE", "id": "CVE-TEST-APACHE", "name": "테스트 Apache CVE",
+    "path_contains": ["/vuln-app"], "server": ["apache"], "powered_by": [],
+    "matchers": [{"type": "regex", "regex": [r"root:.*:0:0:"]}], "matchers_condition": "and",
+}]
+
+
+def test_cve_fp_mismatch_lowers_priority_not_safe(monkeypatch):
+    """대상 지문(비-프록시)이 CVE 대상 제품과 다르면 '해당 가능성 낮음'(미확정)으로 위험도만
+    낮춘다 — '안전'으로 뒤집지 않는다(판정불가 유지)."""
+    from core import analyzer as A
+    monkeypatch.setattr(A, "_CVE_SIGS", _FAKE_APACHE_CVE)
+    r = A.analyze_response(200, {"server": "Microsoft-IIS/10.0", "content-type": "text/html"},
+                           "<html>ok</html>", 80, payload="/vuln-app", category="cve",
+                           url="http://t/vuln-app")
+    mm = [f for f in r["findings"] if "지문 불일치" in f["name"]]
+    assert mm, "지문 불일치 finding 이 있어야 함"
+    assert mm[0]["verdict"] == "미확정"           # 안전 아님
+    assert not any(f["verdict"] == "안전" and "CVE" in f["name"] for f in r["findings"])
+    assert r["attack_outcome"] == "inconclusive"  # 판정불가 유지
+    assert r["risk_level"] == "low"               # 우선순위 하향
+
+
+def test_cve_fp_proxy_fingerprint_no_downgrade(monkeypatch):
+    """앞단 프록시(nginx)면 백엔드가 가려지므로 미스매치 판단을 보류한다(거짓 '해당없음' 방지)."""
+    from core import analyzer as A
+    monkeypatch.setattr(A, "_CVE_SIGS", _FAKE_APACHE_CVE)
+    r = A.analyze_response(200, {"server": "nginx/1.20.1", "content-type": "text/html"},
+                           "<html>ok</html>", 80, payload="/vuln-app", category="cve",
+                           url="http://t/vuln-app")
+    assert not any("지문 불일치" in f["name"] for f in r["findings"])
+
+
+def test_cve_fp_matching_product_no_downgrade(monkeypatch):
+    """지문이 CVE 요구 제품과 일치하면 미스매치가 아니다."""
+    from core import analyzer as A
+    monkeypatch.setattr(A, "_CVE_SIGS", _FAKE_APACHE_CVE)
+    r = A.analyze_response(200, {"server": "Apache/2.4.41", "content-type": "text/html"},
+                           "<html>ok</html>", 80, payload="/vuln-app", category="cve",
+                           url="http://t/vuln-app")
+    assert not any("지문 불일치" in f["name"] for f in r["findings"])
