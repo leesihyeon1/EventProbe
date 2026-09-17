@@ -459,6 +459,21 @@ def test_cve_identify_apache_traversal_raw_fragment():
     A._CVE_ENTRIES = None
 
 
+def test_cve_checked_desc_states_actual_pattern():
+    """CVE 미해당/식별 finding 의 checked 는 '무엇을 검사했는지'를 실제 패턴으로 기술한다
+    (설정파일 스캔처럼). 응답 확증 매처가 없는 CVE 도 '요청 지문 …로 식별'을 밝혀야 한다."""
+    from core import analyzer as A
+    A._CVE_ENTRIES = None
+    poc = "/cgi-bin/.%2e/.%2e/.%2e/.%2e/bin/sh"
+    sigs = A._cve_identify_from_request("http://t" + poc, "id", {})
+    assert any(s.get("cve") == "CVE-2021-41773" for s in sigs)
+    desc = A._cve_checked_desc("", None, only_sigs=sigs)
+    assert "CVE-2021-41773" in desc
+    assert "요청 지문" in desc and "/cgi-bin/.%2e/" in desc   # 실제 식별 패턴 명시
+    assert "매처 없음" not in desc                            # 밋밋한 '매처 없음' 대신 패턴 서술
+    A._CVE_ENTRIES = None
+
+
 def test_cve_pasted_packet_verified_by_identified_matcher(monkeypatch):
     """payload_id·category 없이 패킷만 복붙 → PoC 로 CVE 식별 → 그 CVE 매처가 응답에 맞으면 확증."""
     from core import analyzer as A

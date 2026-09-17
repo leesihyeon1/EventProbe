@@ -2472,8 +2472,14 @@ def _cve_identify_from_request(url: str, req_body: str, req_headers: Optional[di
         pl = e.get("payload") or ""
         fd = _cve_ident_fragment(pl, decode=True)      # 디코드 지문
         fr = _cve_ident_fragment(pl, decode=False)     # 원문(인코딩 유지) 지문
-        if (fd and fd in blob) or (fr and fr in raw):
-            out.append(_entry_to_ident_sig(e))
+        hit_raw = fr and fr in raw
+        hit_dec = fd and fd in blob
+        if hit_raw or hit_dec:
+            sig = _entry_to_ident_sig(e)
+            # 무엇으로 식별했는지(요청에서 확인한 PoC 지문) — checked 서술용. 인코딩이 지문인
+            # CVE 는 원문 지문을, 아니면 디코드 지문을 남긴다.
+            sig["ident_pattern"] = (fr if hit_raw else fd)
+            out.append(sig)
     return out
 
 
@@ -2504,9 +2510,20 @@ def _cve_checked_desc(probe: str, headers_lower: Optional[dict] = None,
     sigs = only_sigs if only_sigs is not None else _cve_sigs_by_path(probe)
     descs = []
     for sig in sigs[:3]:
-        d = _matchers_desc(sig)
-        if d:
-            descs.append(f"{sig.get('id') or sig.get('name')}: {d}")
+        label = sig.get("id") or sig.get("name")
+        d = _matchers_desc(sig)                       # 응답 확증 패턴(word/regex/status)
+        ident = sig.get("ident_pattern")              # 요청에서 확인한 PoC 식별 지문
+        if ident and len(ident) > 48:                 # 긴 인코딩 지문은 앞부분만(가독성)
+            ident = ident[:48] + "…"
+        if d and ident:
+            descs.append(f'{label}: 요청 지문 "{ident}" 로 식별 · 응답 확증 패턴 {d}')
+        elif d:
+            descs.append(f"{label}: {d}")
+        elif ident:
+            # 응답 내용 확증 매처가 없는 CVE(무출력 RCE·OOB·타이밍 계열) — 무엇으로 식별했는지와
+            # 왜 응답만으론 확증 불가인지 정직하게 서술한다.
+            descs.append(f'{label}: 요청 지문 "{ident}" 로 식별 · 응답 내용 확증 패턴 없음'
+                         "(무출력 RCE·OOB·타이밍 계열) → 응답만으로 확증 불가")
     return " | ".join(descs)
 
 
