@@ -1,7 +1,78 @@
 """요청 자동 보정(ASP.NET VIEWSTATE 갱신 · Content-Type 추론) 헬퍼 단위 테스트 —
 네트워크 없이 순수 함수만 검증."""
-from routers.api import (_extract_hidden, _is_aspnet_form, _is_stateful_form, _merge_tokens,
-                         _infer_content_type, _ensure_content_type)
+import asyncio
+
+from routers.api import (_extract_hidden, _extract_meta, _is_aspnet_form, _is_stateful_form,
+                         _merge_tokens, _infer_content_type, _ensure_content_type,
+                         _has_csrf_header, _find_page_csrf_token, _refresh_form_tokens)
+
+
+class _FakeCookies:
+    def __init__(self, d): self._d = d
+    def get(self, k): return self._d.get(k)
+
+
+class _FakeClient:
+    """네트워크 없는 httpx 대역 — 고정 HTML/쿠키를 반환."""
+    def __init__(self, html, cookies=None):
+        self.html = html
+        self.cookies = _FakeCookies(cookies or {})
+
+    async def get(self, url, headers=None, timeout=None):
+        class R:  # noqa
+            pass
+        r = R(); r.text = self.html
+        return r
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def test_extract_meta_csrf_token():
+    """SPA/Rails 의 <meta name=csrf-token content=..> 추출(속성 순서·따옴표 무관)."""
+    assert _extract_meta('<meta name="csrf-token" content="abc==">', "csrf-token") == "abc=="
+    assert _extract_meta("<meta content='tok' name='xsrf-token'>", "xsrf-token") == "tok"
+    assert _extract_meta("<div>none</div>", "csrf-token") is None
+
+
+def test_has_csrf_header_detection():
+    assert _has_csrf_header({"X-CSRF-Token": "x", "Content-Type": "json"})
+    assert _has_csrf_header({"x-xsrf-token": "x"})
+    assert not _has_csrf_header({"Authorization": "Bearer x"})
+
+
+def test_find_page_csrf_token_prefers_meta():
+    assert _find_page_csrf_token('<meta name="csrf-token" content="M">'
+                                 '<input name="csrf_token" value="H">') == "M"
+    assert _find_page_csrf_token('<input name="csrf_token" value="H">') == "H"
+
+
+def test_refresh_header_csrf_from_meta():
+    """SPA: 요청의 X-CSRF-Token 헤더가 폼 페이지 meta 토큰으로 갱신된다."""
+    c = _FakeClient('<meta name="csrf-token" content="FRESH">')
+    body, headers, note = _run(_refresh_form_tokens(
+        c, "http://t/api", {"X-CSRF-Token": "OLD", "Content-Type": "application/json"}, ""))
+    assert headers["X-CSRF-Token"] == "FRESH"
+    assert "헤더 CSRF 토큰" in note
+
+
+def test_refresh_header_csrf_from_double_submit_cookie():
+    """meta 없으면 더블-서브밋 쿠키(XSRF-TOKEN)값을 X-XSRF-TOKEN 헤더로 되돌려보낸다."""
+    c = _FakeClient("<html>no meta</html>", cookies={"XSRF-TOKEN": "CVAL"})
+    _, headers, note = _run(_refresh_form_tokens(
+        c, "http://t/api", {"X-XSRF-TOKEN": "OLD"}, ""))
+    assert headers["X-XSRF-TOKEN"] == "CVAL"
+    assert "헤더 CSRF 토큰" in note
+
+
+def test_refresh_body_form_csrf_still_works():
+    """기존 body 폼 CSRF 갱신 회귀 — 헤더 확장이 body 경로를 깨지 않는다."""
+    c = _FakeClient('<input name="csrfmiddlewaretoken" value="NEW">')
+    body, headers, note = _run(_refresh_form_tokens(
+        c, "http://t/login", {}, "user=a&csrfmiddlewaretoken=OLD&pw=b"))
+    assert "csrfmiddlewaretoken=NEW" in body
+    assert "폼 CSRF 토큰" in note
 
 
 def test_is_stateful_form_covers_csrf_tokens():

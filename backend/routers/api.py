@@ -496,6 +496,19 @@ def _extract_hidden(html: str, name: str) -> Optional[str]:
     return None
 
 
+def _extract_meta(html: str, name: str) -> Optional[str]:
+    """<meta name="X" content="Y"> 의 content 추출(속성 순서·따옴표 무관).
+    SPA/AJAX 는 CSRF 토큰을 hidden input 이 아니라 meta 태그로 노출한다(예: Rails
+    <meta name="csrf-token" content="...">)."""
+    q = r'["\']'
+    for pat in (rf'name={q}{re.escape(name)}{q}[^>]*?content={q}([^"\']*){q}',
+                rf'content={q}([^"\']*){q}[^>]*?name={q}{re.escape(name)}{q}'):
+        m = re.search(pat, html, re.I | re.S)
+        if m:
+            return m.group(1)
+    return None
+
+
 def _is_aspnet_form(url: str, body: str, method: str) -> bool:
     """.aspx 경로에 폼 body 를 POST/PUT 하거나, body 에 이미 __VIEWSTATE 가 있으면 대상."""
     if not body or method.upper() not in ("POST", "PUT"):
@@ -508,6 +521,32 @@ def _is_aspnet_form(url: str, body: str, method: str) -> bool:
 # 메커니즘(폼 페이지 GET → 토큰 추출 → 주입)으로 갱신해 요청이 403/거절로 무효화되지 않게 한다.
 _CSRF_TOKEN_FIELDS = ("authenticity_token", "csrfmiddlewaretoken", "csrf_token",
                       "_csrf_token", "_csrf", "_token")
+
+# SPA/AJAX 가 CSRF 토큰을 싣는 요청 헤더 이름(소문자). 이런 헤더가 요청에 있으면 폼 페이지의
+# meta 태그/숨김필드/쿠키에서 최신 토큰을 뽑아 헤더값을 갱신한다(프록시 세션 핸들링처럼).
+_CSRF_HEADER_NAMES = ("x-csrf-token", "x-xsrf-token", "x-csrftoken", "csrf-token",
+                      "x-csrf", "x-xsrf")
+# 페이지 meta 태그의 CSRF 토큰 이름(우선순위 순). Rails=csrf-token, 일반=xsrf-token 등.
+_CSRF_META_NAMES = ("csrf-token", "xsrf-token", "x-csrf-token", "_csrf", "csrf")
+# 더블-서브밋 쿠키 방식(Angular 등): 이 쿠키값을 CSRF 헤더로 되돌려보낸다.
+_CSRF_COOKIE_NAMES = ("XSRF-TOKEN", "csrftoken", "CSRF-TOKEN", "X-CSRF-TOKEN")
+
+
+def _has_csrf_header(headers: dict) -> bool:
+    return any(str(k).lower() in _CSRF_HEADER_NAMES for k in (headers or {}))
+
+
+def _find_page_csrf_token(html: str) -> Optional[str]:
+    """폼 페이지에서 CSRF 토큰 후보 하나 — meta 태그 우선(SPA), 없으면 알려진 hidden 필드."""
+    for n in _CSRF_META_NAMES:
+        v = _extract_meta(html, n)
+        if v:
+            return v
+    for n in _CSRF_TOKEN_FIELDS:
+        v = _extract_hidden(html, n)
+        if v:
+            return v
+    return None
 
 
 def _is_stateful_form(url: str, body: str, method: str) -> bool:
@@ -534,10 +573,14 @@ def _merge_tokens(body: str, tokens: dict) -> str:
 
 
 async def _refresh_form_tokens(client, url, headers, body):
-    """대상 폼 페이지를 GET(세션 쿠키 공유) 해 상태/CSRF 토큰을 최신값으로 body 에 주입.
-    - ASP.NET VIEWSTATE 계열: 없어도 추가(폼이 요구).
-    - CSRF 토큰(Rails/Django/일반): body 에 이미 쓰는 필드만 최신값으로 갱신.
-    (refreshed_body, note) 반환 — 아무 토큰도 못 찾으면 원본 body 그대로."""
+    """대상 폼 페이지를 GET(세션 쿠키 공유) 해 상태/CSRF 토큰을 최신값으로 갱신(프록시 세션
+    핸들링처럼). body 와 '요청 헤더' 양쪽을 갱신한다.
+    - ASP.NET VIEWSTATE 계열: 없어도 body 에 추가(폼이 요구).
+    - body CSRF 필드(Rails/Django/일반): body 에 이미 쓰는 필드만 최신값으로 갱신.
+    - 헤더 CSRF 토큰(X-CSRF-Token 등, SPA/AJAX): meta 태그/hidden/쿠키에서 최신 토큰을 뽑아
+      요청에 이미 있는 CSRF 헤더값을 갱신(더블-서브밋 쿠키 방식 포함).
+    (refreshed_body, refreshed_headers, note) 반환 — 못 찾으면 원본 그대로."""
+    out_headers = dict(headers or {})
     try:
         get_hdrs = {k: v for k, v in (headers or {}).items()
                     if k.lower() not in ("content-type", "content-length")}
@@ -548,18 +591,38 @@ async def _refresh_form_tokens(client, url, headers, body):
             v = _extract_hidden(html, n)
             if v is not None:
                 found[n] = v
-        for n in _CSRF_TOKEN_FIELDS:                    # CSRF — body 에 있는 필드만 갱신
+        for n in _CSRF_TOKEN_FIELDS:                    # body CSRF — body 에 있는 필드만 갱신
             if (n + "=") in body:
-                v = _extract_hidden(html, n)
+                v = _extract_hidden(html, n) or _extract_meta(html, "csrf-token")
                 if v is not None:
                     found[n] = v
-        if not found:
-            return body, ""
-        aspnet = [n for n in found if n in _ASPNET_TOKENS]
-        label = "ASP.NET VIEWSTATE 자동 갱신" if aspnet else "폼 CSRF 토큰 자동 갱신"
-        return _merge_tokens(body, found), f"{label}: " + ", ".join(found)
+        # ── 헤더 CSRF 토큰(SPA/AJAX) — meta/hidden, 없으면 더블-서브밋 쿠키에서 ──
+        hdr_updates = []
+        if _has_csrf_header(out_headers):
+            tok = _find_page_csrf_token(html)
+            if tok is None:                             # 쿠키 기반(Angular XSRF-TOKEN 등)
+                for cn in _CSRF_COOKIE_NAMES:
+                    cv = client.cookies.get(cn)
+                    if cv:
+                        tok = cv
+                        break
+            if tok is not None:
+                for k in list(out_headers):
+                    if str(k).lower() in _CSRF_HEADER_NAMES:
+                        out_headers[k] = tok
+                        hdr_updates.append(str(k))
+        if not found and not hdr_updates:
+            return body, out_headers, ""
+        parts = []
+        if found:
+            aspnet = [n for n in found if n in _ASPNET_TOKENS]
+            parts.append(("ASP.NET VIEWSTATE 자동 갱신: " if aspnet else "폼 CSRF 토큰 자동 갱신: ")
+                         + ", ".join(found))
+        if hdr_updates:
+            parts.append("헤더 CSRF 토큰 자동 갱신: " + ", ".join(hdr_updates))
+        return _merge_tokens(body, found), out_headers, " · ".join(parts)
     except Exception:
-        return body, ""
+        return body, out_headers, ""
 
 
 def _infer_content_type(body: str) -> str:
@@ -699,10 +762,11 @@ async def send_request(req: SingleRequest):
                     req.body = oob.substitute(req.body, oob_host)
                 sent_headers = {k: oob.substitute(str(v), oob_host) for k, v in sent_headers.items()}
         async with httpx.AsyncClient(verify=False, follow_redirects=req.follow_redirects) as client:
-            # 상태/CSRF 토큰 폼이면 같은 클라이언트로 먼저 GET 해 토큰을 갱신(세션 쿠키 공유).
+            # 상태/CSRF 토큰 폼(body) 또는 CSRF 헤더(SPA)면 같은 클라이언트로 먼저 GET 해
+            # 최신 토큰을 body·헤더에 갱신(세션 쿠키 공유, 프록시 세션 핸들링처럼).
             eff_body, viewstate_note = req.body, ""
-            if _is_stateful_form(_eff_url, req.body or "", req.method):
-                eff_body, viewstate_note = await _refresh_form_tokens(
+            if _is_stateful_form(_eff_url, req.body or "", req.method) or _has_csrf_header(sent_headers):
+                eff_body, sent_headers, viewstate_note = await _refresh_form_tokens(
                     client, _eff_url, sent_headers, req.body or "")
             start = time.time()
             response = await client.request(
