@@ -2428,7 +2428,10 @@ _CVE_IDENT_MARKERS = ("oast", "interact", "burpcollab", "log4shell-", "${sys:", 
                       "example.com", "example.oas", "attacker", "canary", "{{", "§", "xxxx",
                       "burp", "\\n", "%0a",
                       # 명령/콜백처럼 사용자가 바꾸는 가변부 앞에서 자른다(불변 구문만 지문으로)
-                      "exec(", "command=", "cmd=", "=~", "getruntime().exec", "?cmd", "&cmd")
+                      "exec(", "command=", "cmd=", "=~", "getruntime().exec", "?cmd", "&cmd",
+                      # 트래버설 깊이·대상 파일은 가변 → 그 앞의 불변 지문만(예: /cgi-bin/.%2e)
+                      "%2e%2e", "%252e", "..%2f", "..%5c", "../..", "..\\..", "/etc/", "etc%2f",
+                      "/bin/", "passwd", "win.ini", "/windows/")
 
 
 def _cve_norm(s: str) -> str:
@@ -2439,10 +2442,11 @@ def _cve_norm(s: str) -> str:
         return str(s or "").lower()
 
 
-def _cve_ident_fragment(payload: str) -> str:
+def _cve_ident_fragment(payload: str, decode: bool = True) -> str:
     """CVE PoC 에서 '불변 식별 지문'(가변 마커 앞의 충분히 긴·구체적 구문) 추출. 짧거나
-    일반적이면 '' (식별 불가) — 오식별 방지."""
-    pv = _cve_norm(payload).strip()
+    일반적이면 '' (식별 불가). decode=False 면 URL 디코드 없이 원문 지문(예: '/cgi-bin/.%2e'
+    처럼 인코딩 자체가 지문인 Apache CVE-2021-41773/42013)을 뽑는다."""
+    pv = (_cve_norm(payload) if decode else str(payload or "").lower()).strip()
     if not pv:
         return ""
     cut = len(pv)
@@ -2456,15 +2460,19 @@ def _cve_ident_fragment(payload: str) -> str:
 
 def _cve_identify_from_request(url: str, req_body: str, req_headers: Optional[dict]) -> list:
     """붙여넣은 요청(경로/쿼리/바디/헤더)이 어느 CVE PoC 인지, 뱅크의 distinctive payload
-    지문으로 식별한다. payload 기능을 안 쓰고 패킷만 복붙해도 그 CVE 매처로 검증되게 한다."""
+    지문으로 식별한다. payload 기능을 안 쓰고 패킷만 복붙해도 그 CVE 매처로 검증되게 한다.
+    디코드본·원문 두 형태로 지문 매칭 — 인코딩 자체가 지문인 CVE(.%2e 등)도 잡는다."""
     hdr_vals = " ".join(str(v) for v in (req_headers or {}).values())
+    raw = f"{url or ''} {req_body or ''} {hdr_vals}".lower()
     blob = _cve_norm(f"{url or ''} {req_body or ''} {hdr_vals}")
-    if not blob.strip():
+    if not raw.strip():
         return []
     out = []
     for e in _load_cve_entries():           # 매처 유무와 무관하게 전체 CVE PoC 대상
-        frag = _cve_ident_fragment(e.get("payload") or "")
-        if frag and frag in blob:
+        pl = e.get("payload") or ""
+        fd = _cve_ident_fragment(pl, decode=True)      # 디코드 지문
+        fr = _cve_ident_fragment(pl, decode=False)     # 원문(인코딩 유지) 지문
+        if (fd and fd in blob) or (fr and fr in raw):
             out.append(_entry_to_ident_sig(e))
     return out
 

