@@ -2543,6 +2543,19 @@ def _cve_checked_or_note(probe: str, headers_lower: Optional[dict] = None,
     return _CVE_NO_MATCHER
 
 
+def _cve_verify_patterns(probe: str, only_sigs: Optional[list] = None) -> str:
+    """'취약을 확증하려고 응답에서 실제로 검사하는 매처 패턴'만 사람이 읽는 문장으로.
+    (미해당/영향없음 판정의 근거 = 이 패턴을 찾았는데 없었다). 응답 확증 매처(word/regex/status)가
+    있는 sig 만 대상 — 없으면 '' 반환(→ 호출측이 '검증 패턴 없음'으로 정직하게 처리)."""
+    sigs = only_sigs if only_sigs is not None else _cve_sigs_by_path(probe)
+    parts = []
+    for sig in (sigs or [])[:3]:
+        d = _matchers_desc(sig)
+        if d:
+            parts.append(f"{sig.get('id') or sig.get('cve') or sig.get('name')}: {d}")
+    return " | ".join(parts)
+
+
 def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status_code: int,
                     only_sigs: Optional[list] = None) -> list:
     """CVE 항목의 자기 매처로 익스플로잇 성공을 확증. only_sigs(payload_id 로 특정한 그 CVE)가
@@ -3826,15 +3839,29 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         _reason = _cve_nonapplicable_reason(status_code, body, headers_lower)
         if _reason:
             _cchecked = _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only)
-            findings.append({
-                "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
-                "why": f"{_reason}. 해당 CVE 의 확증 매처가 매칭되지 않았고 응답도 익스플로잇 결과를 "
-                       "담을 수 없는 형태 → 이 대상에는 해당 없음(미해당). "
-                       "(컴포넌트/버전이 다르거나 취약 경로가 없는 경우입니다)",
-                "checked": _cchecked,
-                "evidence": f"{_reason} (HTTP {status_code} · {len(body or '')}B)",
-            })
-            cve_non_applicable = True
+            _verify = _cve_verify_patterns(file_probe, only_sigs=_cve_only)
+            if _verify:
+                # 응답에서 이 패턴을 검사했는데 안 맞았다 → '영향없음(미해당)'을 그 근거로 명시
+                findings.append({
+                    "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
+                    "why": f"{_reason}. 응답에서 확증 패턴({_verify})을 검사했으나 매칭되지 않았고, "
+                           "응답도 익스플로잇 결과를 담을 수 없는 형태 → 이 대상에는 해당 없음(미해당). "
+                           "(컴포넌트/버전이 다르거나 취약 경로가 없는 경우입니다)",
+                    "checked": _cchecked,
+                    "evidence": f"{_reason} · 확증 패턴 미매칭 (HTTP {status_code} · {len(body or '')}B)",
+                })
+                cve_non_applicable = True
+            else:
+                # 응답 기반 확증 패턴이 없는 CVE(무출력 RCE·OOB·타이밍) — 검사할 패턴이 없으므로
+                # '영향없음'으로 단정할 수 없다 → 판정불가(안전 오표기 금지).
+                findings.append({
+                    "name": "CVE 프로브 — 응답 확증 불가(판정불가)", "verdict": "미확정", "confidence": 45,
+                    "why": f"{_reason}. 다만 이 CVE 는 응답에서 취약을 확증할 패턴이 없어(무출력 RCE·OOB·"
+                           "타이밍 계열) '영향없음'으로 단정할 수 없음 → 판정불가. OOB/수동으로 확인하세요.",
+                    "checked": _cchecked,
+                    "evidence": f"{_reason} · 응답 확증 패턴 없음 (HTTP {status_code} · {len(body or '')}B)",
+                })
+                cve_non_applicable = True
 
     # ②-f-2 CVE 스택 지문 불일치 — 200+내용이라 '미해당' 형태는 아니지만, 대상의 비-프록시
     #        지문이 이 CVE 대상 제품과 다르면 '해당 가능성 낮음'으로 낮춘다(하드 '안전' 아님 —
@@ -3867,12 +3894,19 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
             _label = ", ".join(_id_cves[:3]) + (" 외" if len(_id_cves) > 3 else "")
             _confirmed = any(f["verdict"] == "성공" for f in findings)
             if not _confirmed:
+                _verify = _cve_verify_patterns(file_probe, only_sigs=_cve_only)
+                if _verify:
+                    _why = (f"요청이 {_label} 의 공개 PoC 지문과 일치 → 이 요청은 해당 CVE 공격 시도로 "
+                            f"식별됩니다. 응답에서 확증 패턴({_verify})을 검사했으나 매칭되지 않아 실제 "
+                            "취약 여부는 확증 불가(판정불가). 대상 컴포넌트/버전이 취약하면 성공할 수 "
+                            "있으니 취약 버전 여부를 확인하세요.")
+                else:
+                    _why = (f"요청이 {_label} 의 공개 PoC 지문과 일치 → 이 요청은 해당 CVE 공격 시도로 "
+                            "식별됩니다. 다만 이 CVE 는 응답에서 취약을 확증할 패턴이 없어(무출력 RCE·"
+                            "OOB·타이밍 계열) 응답만으로는 확증 불가(판정불가). OOB/수동으로 확인하세요.")
                 findings.append({
                     "name": f"CVE 공격 식별 — {_label}", "verdict": "미확정", "confidence": 55,
-                    "why": f"요청이 {_label} 의 공개 PoC 지문과 일치 → 이 요청은 해당 CVE 공격 시도로 "
-                           "식별됩니다. 다만 응답에서 해당 CVE 의 확증 매처가 매칭되지 않아 실제 취약 "
-                           "여부는 확증 불가(판정불가). 대상 컴포넌트/버전이 취약하면 성공할 수 있으니 "
-                           "취약 버전 여부·응답 내용을 함께 확인하세요.",
+                    "why": _why,
                     "checked": _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only),
                     "evidence": f"PoC 지문 일치: {_label} (HTTP {status_code} · {len(body or '')}B)",
                 })

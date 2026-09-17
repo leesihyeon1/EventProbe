@@ -474,6 +474,41 @@ def test_cve_checked_desc_states_actual_pattern():
     A._CVE_ENTRIES = None
 
 
+def test_cve_nonapplicable_states_verify_matcher():
+    """'미해당(안전)' 판정은 응답에서 실제 검사한 확증 매처 패턴을 근거로 명시한다."""
+    from core import analyzer as A
+    from core import classify as C
+    A._CVE_ENTRIES = None; A._CVE_SIGS = None
+    cand = None
+    for e in A._load_cve_entries():
+        pl = e.get("payload") or ""
+        if e.get("matchers") and pl.startswith("/") and C.classify(
+                payload=pl, url="http://t" + pl, req_body="", category="cve").primary == "cve":
+            cand = e; break
+    assert cand, "classify==cve 이고 매처 있는 CVE 가 있어야 함"
+    r = A.analyze_response(404, {}, "Not Found", 30, payload=cand["payload"], category="cve",
+                           url="http://t" + cand["payload"], payload_id=cand.get("id"))
+    f = next(f for f in r["findings"] if "미해당" in f["name"])
+    assert f["verdict"] == "안전"
+    assert "확증 패턴(" in f["why"]              # 검증 매처를 근거로 명시
+    A._CVE_ENTRIES = None; A._CVE_SIGS = None
+
+
+def test_cve_no_verify_matcher_stays_inconclusive_not_safe():
+    """응답 확증 매처가 없는 CVE(무출력 RCE·OOB 계열)는 '영향없음(안전)'으로 단정하지 않고
+    판정불가(미확정)로 남긴다 — 검사할 패턴이 없으면 안전이라 할 수 없다."""
+    from core import analyzer as A
+    A._CVE_ENTRIES = None; A._CVE_SIGS = None
+    poc = "/cgi-bin/.%2e/.%2e/.%2e/.%2e/bin/sh"
+    r = A.analyze_response(404, {"server": "nginx"}, "Not Found", 30, payload=poc, category="cve",
+                           url="http://t" + poc, req_body="id")
+    assert not any(f["verdict"] == "안전" for f in r["findings"])   # 안전 오표기 금지
+    f = next(f for f in r["findings"] if "CVE-2021-41773" in f["name"])
+    assert f["verdict"] == "미확정"
+    assert "확증할 패턴이 없어" in f["why"] or "확증 패턴 없음" in (f.get("checked") or "")
+    A._CVE_ENTRIES = None; A._CVE_SIGS = None
+
+
 def test_cve_pasted_packet_verified_by_identified_matcher(monkeypatch):
     """payload_id·category 없이 패킷만 복붙 → PoC 로 CVE 식별 → 그 CVE 매처가 응답에 맞으면 확증."""
     from core import analyzer as A
