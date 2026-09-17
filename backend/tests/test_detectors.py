@@ -35,6 +35,40 @@ def test_registry_has_differential():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 인증우회 공통 오라클(auth_rejected / auth_served) — 5개 사이트가 공유
+# ─────────────────────────────────────────────────────────────────────────────
+def test_auth_rejected_oracle():
+    assert D.auth_rejected(401)
+    assert D.auth_rejected(403)
+    assert D.auth_rejected(302, "/login?err=1")          # 로그인으로 리다이렉트 = 거부
+    assert not D.auth_rejected(200)
+    assert not D.auth_rejected(302, "/dashboard")        # 비-로그인 리다이렉트 = 거부 아님
+    assert not D.auth_rejected(302, "")                   # Location 없으면 거부로 못 봄
+
+
+def test_auth_served_oracle():
+    assert D.auth_served(200)
+    assert D.auth_served(201)
+    assert D.auth_served(302, "/dashboard")              # 비-로그인 리다이렉트 = 제공(성공 가능)
+    assert not D.auth_served(302, "/login")              # 로그인 리다이렉트 = 제공 아님
+    assert not D.auth_served(401)
+    assert not D.auth_served(403)
+
+
+def test_auth_oracle_shared_by_confirm():
+    """confirm 이 detectors 의 공유 오라클을 그대로 사용(별도 구현 아님)."""
+    from core import confirm as C
+    assert C.auth_rejected is D.auth_rejected
+    assert C.auth_served is D.auth_served
+    # 헤더 차분 확증이 공유 오라클로 동작
+    out = C.decide_authbypass({"status": 403, "location": ""},
+                              {"status": 200, "location": ""})
+    assert out and "우회" in out[0]["name"]
+    # 우회 응답이 로그인으로 리다이렉트(거부)면 확증 안 됨
+    assert C.decide_authbypass({"status": 403}, {"status": 302, "location": "/login"}) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 로그인 인증우회 단독 신호(대조군 없음)
 # ─────────────────────────────────────────────────────────────────────────────
 def test_login_bypass_single_signal_redirect():

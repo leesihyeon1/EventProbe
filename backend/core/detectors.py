@@ -65,6 +65,23 @@ def _redirect_is_auth_reject(location):
     return bool(location) and bool(_LOGIN_REDIRECT_RE.search(location))
 
 
+_REDIRECT_CODES = (301, 302, 303, 307, 308)
+
+
+def auth_rejected(status, location: str = "") -> bool:
+    """응답이 '인증 거부'인가 — 401/403, 또는 로그인/에러 페이지로의 3xx 리다이렉트.
+    인증우회 판정의 공통 원시(DifferentialDetector·Middleware·confirm 이 공유)."""
+    s = int(status or 0)
+    return s in (401, 403) or (s in _REDIRECT_CODES and _redirect_is_auth_reject(location or ""))
+
+
+def auth_served(status, location: str = "") -> bool:
+    """응답이 '리소스 제공(통과)'인가 — 200/201, 또는 로그인/에러가 아닌 곳으로의 3xx 리다이렉트.
+    (거부 리다이렉트가 아닌 3xx = 로그인 성공 리다이렉트일 가능성.)"""
+    s = int(status or 0)
+    return s in (200, 201) or (s in _REDIRECT_CODES and not _redirect_is_auth_reject(location or ""))
+
+
 # ── 로그인 상태 전이 판정용(둘 다 200 이어도 인증우회를 잡는다) ────────────────
 # 로그인 폼 존재 표식 — 비밀번호 입력 필드(이름 다양). 대조군(실패)엔 폼이 남고
 # 공격 응답에선 사라지면 '로그인 성공으로 폼이 없어졌다'는 강한 신호.
@@ -431,8 +448,7 @@ class MiddlewareAuthBypassDetector(Detector):
         loc = _hdr(ctx.headers_lower, "location")
 
         # 우회 요청 자체가 거부되면 이 검사 한정 미우회(안전) — 허위 의심 방지.
-        rejected = ctx.status_code in (401, 403) or (
-            ctx.status_code in (301, 302, 303, 307, 308) and _redirect_is_auth_reject(loc))
+        rejected = auth_rejected(ctx.status_code, loc)
         if rejected:
             return [{"name": f"{name} — 미우회(거부됨)", "verdict": "안전", "confidence": 72,
                      "why": f"{what}. 그러나 우회 요청도 HTTP {ctx.status_code} 로 거부됨 → 이 검사 "
@@ -441,13 +457,11 @@ class MiddlewareAuthBypassDetector(Detector):
                      "where": "요청 헤더", "detector_id": self.id, "tier": self.tier}]
 
         # 대조군 차분: 정상(헤더 없음) 거부 → 우회 요청은 제공(200/201·비거부 3xx) = 우회 성공.
-        served = ctx.status_code in (200, 201) or (
-            ctx.status_code in (301, 302, 303, 307, 308) and not _redirect_is_auth_reject(loc))
+        served = auth_served(ctx.status_code, loc)
         if ctx.has_control():
             b_status = (ctx.baseline or {}).get("status_code")
             b_loc = (ctx.baseline or {}).get("location") or ""
-            b_rejected = b_status in (401, 403) or (
-                b_status in (301, 302, 303, 307, 308) and _redirect_is_auth_reject(b_loc))
+            b_rejected = auth_rejected(b_status, b_loc)
             if b_rejected and served:
                 return [{"name": f"{name} — 우회 성공", "verdict": "성공", "confidence": 88,
                          "why": f"{what}. 정상 요청(헤더 없음)은 거부(HTTP {b_status})인데 우회 헤더를 "

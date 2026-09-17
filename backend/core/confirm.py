@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from core.detectors import _redirect_is_auth_reject
+from core.detectors import auth_rejected, auth_served
 from core import error_signatures as _error_signatures
 from typing import Optional
 
@@ -72,16 +72,13 @@ _BYPASS_HEADERS = {"x-middleware-subrequest", "x-original-url", "x-rewrite-url",
 
 def decide_authbypass(normal: dict, bypass: dict) -> list[dict]:
     """인가 우회 헤더 차분 판정 — 헤더 제거(정상)는 거부인데 헤더 포함(우회)이 리소스를
-    제공하면 인가 우회 확증. normal/bypass: {status, location, body}."""
+    제공하면 인가 우회 확증. normal/bypass: {status, location, body}.
+    거부/제공 판정은 detectors.auth_rejected/auth_served 공유 오라클을 사용."""
     def rej(r):
-        s = int(r.get("status") or 0)
-        return s in (401, 403) or (s in (301, 302, 303, 307, 308)
-                                   and _redirect_is_auth_reject(r.get("location", "")))
+        return auth_rejected(r.get("status"), r.get("location", ""))
 
     def served(r):
-        s = int(r.get("status") or 0)
-        return s in (200, 201) or (s in (301, 302, 303, 307, 308)
-                                   and not _redirect_is_auth_reject(r.get("location", "")))
+        return auth_served(r.get("status"), r.get("location", ""))
 
     if rej(normal) and served(bypass):
         return [{"name": "인가 우회 확증 (헤더 차분)",
@@ -460,12 +457,11 @@ def decide(category: str, results: list[dict]) -> dict:
                 # ② 로그인 성공 리다이렉트(대조군은 리다이렉트 아님)
                 if b_status in (301, 302, 303, 307, 308) and not c_redir:
                     signals.append(f"성공 리다이렉트({b_status})")
-                # ③ 상태 개선(대조 401/403 → 우회 200/302). 단 3xx 는 로그인/에러 페이지로의
-                #    리다이렉트면 '거부'지 우회가 아니므로 제외(Location 확인).
-                if c_status in (401, 403) and b_status in (200, 201):
-                    signals.append(f"상태 {c_status}→{b_status}")
-                elif c_status in (401, 403) and b_status in (301, 302, 303, 307, 308)                         and not _redirect_is_auth_reject(_loc_header(r.get("headers") or {})):
-                    signals.append(f"상태 {c_status}→{b_status}(리다이렉트)")
+                # ③ 상태 개선(대조 401/403 → 우회가 리소스 제공). 3xx 는 로그인/에러로의
+                #    리다이렉트면 '거부'지 우회가 아니므로 제외 — auth_served 공유 오라클로 판정.
+                if c_status in (401, 403) and auth_served(b_status, _loc_header(r.get("headers") or {})):
+                    _rd = "(리다이렉트)" if b_status not in (200, 201) else ""
+                    signals.append(f"상태 {c_status}→{b_status}{_rd}")
                 # ④ 실패 문구 소멸(대조엔 있고 우회엔 없음, 200 응답)
                 if c_fail and b_status == 200 and not _AUTH_FAIL_RE.search(b_body):
                     signals.append("인증 실패 문구 사라짐")
