@@ -257,6 +257,67 @@ class DifferentialDetector(Detector):
 register(DifferentialDetector())
 
 
+# ── 로그인 엔드포인트 경로(대조군 없이 로그인 문맥을 인지) ──
+_LOGIN_PATH_RE = re.compile(
+    r"/(?:login|log-in|signin|sign-in|logon|auth|account/login|session/new|"
+    r"users?/sign_?in|wp-login|admin(?:/login)?)", re.I)
+
+
+class LoginBypassSingleSignalDetector(Detector):
+    """대조군(baseline)이 없을 때의 로그인 인증우회 '단독 신호' 판정.
+
+    로그인 POST 에 인증우회 페이로드(SQL/NoSQL)를 보냈는데 응답이 '로그인 아닌 곳으로
+    리다이렉트' 또는 '로그아웃 마커 등장 + 로그인 폼 없음' 이면 인증우회로 의심한다.
+    단독 응답이라 '성공' 확증은 못 하므로 verdict=의심 — baseline(실패 로그인) 대조나
+    리다이렉트 추적으로 확증하도록 안내한다. baseline 이 있으면 DifferentialDetector 가
+    '성공'으로 확증하므로 이 탐지기는 대조군이 없을 때만 동작한다(중복 방지)."""
+    id = "login_bypass_single"
+    tier = 2
+    attack_types = frozenset()
+
+    def applies(self, ctx: DetectionContext) -> bool:
+        if ctx.has_control():                       # 대조군 있으면 Differential 이 확증 담당
+            return False
+        cred = (ctx.category in ("sqli", "nosql", "authbypass")
+                or ctx.attack_type in ("sqli", "nosql", "authbypass")
+                or bool(_AUTHBYPASS_PAYLOAD_RE.search((ctx.payload or "") + " " + (ctx.req_body or ""))))
+        if not cred:
+            return False
+        # 로그인 문맥: 요청 바디에 비밀번호 필드가 있거나 URL 이 로그인 경로
+        login_ctx = bool(_LOGIN_FORM_RE.search(ctx.req_body or "")) or \
+            bool(_LOGIN_PATH_RE.search(ctx.url or ""))
+        return login_ctx and bool(_AUTHBYPASS_PAYLOAD_RE.search(
+            (ctx.payload or "") + " " + (ctx.req_body or "")))
+
+    def detect(self, ctx: DetectionContext) -> list:
+        c_body = ctx.body or ""
+        loc = _hdr(ctx.headers_lower, 'location')
+        # A) 로그인 아닌 곳으로 리다이렉트 = 로그인 성공 리다이렉트일 가능성
+        if ctx.status_code in (301, 302, 303, 307, 308) and loc and not _redirect_is_auth_reject(loc):
+            return [self._f(
+                f"인증우회 의심 — 로그인 폼에 인증우회 페이로드 전송 후 로그인/에러 페이지가 아닌 "
+                f"곳으로 리다이렉트({loc[:50]}) → 로그인 성공 리다이렉트일 가능성. 대조군(정상/실패 "
+                "로그인)과 비교하거나 리다이렉트를 따라가 로그인-후 페이지인지 확인해 확증하세요",
+                f"HTTP {ctx.status_code} → {loc[:60]} (인증우회 페이로드)")]
+        # B) 200 인데 로그아웃 마커가 있고 로그인 폼이 사라짐 = 인증 통과 흔적
+        if ctx.status_code in (200, 201) and _LOGGED_IN_RE.search(c_body) \
+                and not _LOGIN_FORM_RE.search(c_body):
+            return [self._f(
+                "인증우회 의심 — 인증우회 페이로드 응답에 로그아웃 등 로그인-후 마커가 있고 로그인 "
+                "폼이 없음 → 인증을 통과했을 가능성. 대조군(실패 로그인)과 비교해 확증하세요",
+                "로그인-후 마커 등장 + 로그인 폼 없음 (인증우회 페이로드)")]
+        return []
+
+    def _f(self, why, ev):
+        return {"name": "로그인 인증우회 의심(단독 신호)", "verdict": "의심", "confidence": 60,
+                "why": why, "evidence": ev,
+                "method": "단독 신호(대조군 없음)", "where": "응답 상태·Location·본문",
+                "detector_id": self.id, "tier": self.tier}
+
+
+register(LoginBypassSingleSignalDetector())
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # tier-1 JWT 탐지기 — 요청의 토큰을 '구조'로 판정(응답 불필요)
 # ══════════════════════════════════════════════════════════════════════════════

@@ -34,6 +34,44 @@ def test_registry_has_differential():
     assert "differential" in ids and "jwt_none_alg" in ids
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 로그인 인증우회 단독 신호(대조군 없음)
+# ─────────────────────────────────────────────────────────────────────────────
+def test_login_bypass_single_signal_redirect():
+    """baseline 없이 로그인 POST + 인증우회 페이로드 → 로그인 아닌 곳으로 리다이렉트면 의심."""
+    ctx = _ctx(status_code=302, body="", category="sqli",
+               url="http://t/login.aspx", req_body="tbUsername=admin'--&tbPassword=x",
+               payload="admin'--", headers_lower={"location": "/Default.aspx"})
+    out = run_registered(ctx)
+    f = next(f for f in out if f["detector_id"] == "login_bypass_single")
+    assert f["verdict"] == "의심"
+
+
+def test_login_bypass_single_signal_not_when_redirect_to_login():
+    """실패 로그인이 로그인/에러 페이지로 되돌리는 3xx 는 우회 아님 → 신호 없음."""
+    ctx = _ctx(status_code=302, body="", category="sqli",
+               url="http://t/login.aspx", req_body="tbUsername=admin'--&tbPassword=x",
+               payload="admin'--", headers_lower={"location": "/login.aspx?error=1"})
+    assert not any(f.get("detector_id") == "login_bypass_single" for f in run_registered(ctx))
+
+
+def test_login_bypass_single_signal_suppressed_when_baseline_present():
+    """대조군이 있으면 DifferentialDetector 가 확증 담당 → 단독신호 탐지기는 침묵(중복 방지)."""
+    ctx = _ctx(status_code=302, body="", category="sqli",
+               url="http://t/login.aspx", req_body="tbUsername=admin'--&tbPassword=x",
+               payload="admin'--", headers_lower={"location": "/Default.aspx"},
+               baseline={"status_code": 200, "body": "<input type=password name=tbPassword>"})
+    ids = [f.get("detector_id") for f in run_registered(ctx)]
+    assert "login_bypass_single" not in ids
+
+def test_login_bypass_single_signal_needs_login_context():
+    """로그인 문맥이 아닌 일반 SQLi(데이터 조회)는 302 여도 이 신호가 뜨지 않는다."""
+    ctx = _ctx(status_code=302, body="", category="sqli",
+               url="http://t/ReadNews.aspx?id=2'", req_body="", payload="2'",
+               headers_lower={"location": "/somewhere"})
+    assert not any(f.get("detector_id") == "login_bypass_single" for f in run_registered(ctx))
+
+
 def test_run_registered_survives_broken_detector():
     class Boom(D.Detector):
         id = "boom"; tier = 2
