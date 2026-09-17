@@ -591,6 +591,61 @@ def _ensure_content_type(headers: dict, body: str, method: str) -> str:
     return ct
 
 
+_XSS_SUCCESS_NAMES = ("반사형 XSS", "미인코딩 반사")
+
+
+def _xss_success_findings(analysis: dict) -> list:
+    """XSS 실행/미인코딩 반사로 '성공' 판정된 finding 들(저장형 확정 대상)."""
+    out = []
+    for f in analysis.get("findings", []) or []:
+        if f.get("verdict") == "성공" and any(n in (f.get("name") or "") for n in _XSS_SUCCESS_NAMES):
+            out.append(f)
+    return out
+
+
+def _payload_marker(payload: str) -> str:
+    """재조회 본문에서 찾을 payload 의 distinctive 조각. 너무 흔한 조각으로 오탐하지
+    않도록 실행 태그/핸들러가 포함된 원문을 우선 사용."""
+    p = (payload or "").strip()
+    return p if len(p) >= 8 else ""
+
+
+async def _check_xss_persistence(url: str, headers: dict, payload: str, timeout: float) -> bool:
+    """독립 GET 재조회에서 payload 가 그대로 남아 렌더되면 True(=저장형).
+    payload 를 싣지 않은 새 요청이므로, 나타나면 서버에 '저장'되어 반사된 것이다.
+    실패/불명이면 False(반사형으로 보수적 처리)."""
+    mark = _payload_marker(payload)
+    if not mark:
+        return False
+    try:
+        get_headers = {k: v for k, v in (headers or {}).items()
+                       if k.lower() not in ("content-type", "content-length")}
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            r = await client.request("GET", url, headers=get_headers, timeout=timeout)
+        rb, _, _ = _read_body(r)
+        return mark in (rb or "")             # 원문 그대로(미인코딩) 잔존 → 저장형
+    except Exception:
+        return False
+
+
+def _relabel_xss_stored(finding: dict, stored: bool) -> None:
+    """XSS finding 을 저장형/반사형으로 구분 표기. stored=True 면 '저장형'으로 승격."""
+    finding["xss_persistence"] = "stored" if stored else "reflected"
+    name = finding.get("name") or ""
+    if stored:
+        finding["name"] = name.replace("반사형 XSS", "저장형 XSS")
+        if "저장형 XSS" not in finding["name"]:
+            finding["name"] = "저장형 XSS — " + name
+        finding["why"] = (finding.get("why") or "") + \
+            " · 독립 재조회(GET)에서도 payload 가 미인코딩으로 잔존·렌더됨 → 저장형(지속) XSS 확증"
+    else:
+        # 반사형임을 명시(재조회에서 사라짐). 이름이 이미 '반사형'이면 그대로 둔다.
+        if "저장형" not in name and "반사형" not in name:
+            finding["name"] = "반사형 XSS — " + name
+        finding["why"] = (finding.get("why") or "") + \
+            " · 독립 재조회 시 미잔존 → 반사형(요청 시에만 반영)"
+
+
 # ── 단일 요청 전송 ──────────────────────────────────────────
 @router.post("/request")
 async def send_request(req: SingleRequest):
@@ -678,6 +733,15 @@ async def send_request(req: SingleRequest):
             custom_alert_rules=req.custom_alert_rules,
             req_headers=sent_headers, payload_id=req.payload_id,
         )
+
+        # XSS 저장형/반사형 구분 — 실행형 XSS 가 성공이고 상태변경(POST/PUT/PATCH)이면
+        # payload 없는 독립 GET 재조회로 지속성을 확인해 '저장형(확증)'을 승격한다.
+        _xss = _xss_success_findings(analysis)
+        if _xss and req.method.upper() in ("POST", "PUT", "PATCH"):
+            _stored = await _check_xss_persistence(_eff_url, sent_headers, req.payload or "",
+                                                   float(req.timeout))
+            for _f in _xss:
+                _relabel_xss_stored(_f, _stored)
 
         # AI 상세 분석 + RAG/AI 종합판정은 기본적으로 여기서 하지 않는다.
         # 임베딩·LLM 호출이 최대 3회 붙어 '이미 도착한 응답'조차 수 초간 못 보게 만들기 때문.
