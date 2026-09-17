@@ -275,6 +275,56 @@
       "regex": "Uncaught TypeError",
       "label": "JavaScript 에러 노출",
       "scope": "global"
+    },
+    {
+      "regex": "mysql_fetch",
+      "label": "MySQL fetch 함수 에러",
+      "scope": "sqli"
+    },
+    {
+      "regex": "XPATH syntax error",
+      "label": "MySQL XPATH 문법 에러",
+      "scope": "sqli"
+    },
+    {
+      "regex": "unterminated quoted string",
+      "label": "PostgreSQL 미종료 문자열",
+      "scope": "sqli"
+    },
+    {
+      "regex": "invalid input syntax for",
+      "label": "PostgreSQL 입력 문법 에러",
+      "scope": "sqli"
+    },
+    {
+      "regex": "function .{0,40} does not exist",
+      "label": "함수 미존재 에러(UNION/타입 추정)",
+      "scope": "sqli"
+    },
+    {
+      "regex": "is not a recognized built-in function",
+      "label": "MSSQL 미인식 내장함수",
+      "scope": "sqli"
+    },
+    {
+      "regex": "SqlException",
+      "label": "MSSQL(.NET) SqlException",
+      "scope": "sqli"
+    },
+    {
+      "regex": "PLS-\\d{5}",
+      "label": "Oracle PL/SQL 에러 코드",
+      "scope": "sqli"
+    },
+    {
+      "regex": "unrecognized token",
+      "label": "SQLite 미인식 토큰",
+      "scope": "sqli"
+    },
+    {
+      "regex": "DBD::\\w+",
+      "label": "Perl DBD 드라이버 에러",
+      "scope": "sqli"
     }
   ]
 }

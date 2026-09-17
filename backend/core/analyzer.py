@@ -14,6 +14,7 @@ from core.classify import (_FILE_READ_HINT, _SSRF_HINT, _SQLI_HINT, _REDIRECT_HI
                            _DANGEROUS_SCHEME, _CMDI_HINT, _XSS_HINT)
 from core import detectors as _detectors
 from core import test_validity
+from core import error_signatures as _error_signatures
 from core.confirm import SUPPORTED as _CONFIRM_SUPPORTED
 # '확증 스캔' 버튼 노출 = confirm 파라미터 오라클(SUPPORTED) + authbypass(헤더 차분 오라클).
 # confirm.SUPPORTED 를 단일 소스로 삼아 버튼 노출과 실제 지원이 어긋나지 않게 한다.
@@ -186,42 +187,9 @@ def _body_signals_block(status_code: int, body: str, body_lower: str) -> bool:
 # DB/앱 에러 시그니처 — 선언형 데이터에서 로드(backend/data/dbms_error_signatures.json).
 # 외부 참조: sqlmap data/xml/errors.xml → tools/import_sqlmap_errors.py 로 갱신(그대로 임포트).
 # 이 목록은 '모든 응답'에 전역 적용되므로 오탐 낮은 특이 패턴만. 파일 없거나 손상 시 내장 폴백.
-_ERROR_PATTERNS_FALLBACK = [
-    (r"SQL syntax.*?MySQL", "MySQL 에러 노출"),
-    (r"You have an error in your SQL syntax", "MySQL/MariaDB 문법 에러"),
-    (r"ORA-\d{5}", "Oracle DB 에러 코드"),
-    (r"PostgreSQL.*?ERROR", "PostgreSQL 에러"),
-    (r"Microsoft SQL Server", "MSSQL 에러"),
-    (r"SQLSTATE\[", "SQL(PDO/SQLSTATE) 에러"),
-    (r"Traceback \(most recent", "Python 트레이스백"),
-    (r"stack trace", "스택 트레이스 노출"),
-]
-
-
-def _load_error_patterns():
-    """(global_list, sqli_list) 반환.
-    global = 모든 응답에 적용(오탐 낮은 특이 패턴), sqli = SQLi 문맥에서만 적용(sqlmap 임포트분)."""
-    fp = os.path.join(os.path.dirname(__file__), "..", "data", "dbms_error_signatures.json")
-    try:
-        with open(fp, encoding="utf-8") as f:
-            sigs = json.load(f).get("error_signatures", [])
-        g, s_only = [], []
-        for s in sigs:
-            rx, lbl = s.get("regex"), s.get("label", "")
-            if not rx:
-                continue
-            try:
-                re.compile(rx)          # 손상된 패턴은 스킵(전체 실패 방지)
-            except re.error:
-                continue
-            (s_only if s.get("scope") == "sqli" else g).append((rx, lbl))
-        return (g or list(_ERROR_PATTERNS_FALLBACK)), s_only
-    except Exception:
-        return list(_ERROR_PATTERNS_FALLBACK), []
-
-
 # ERROR_LEAK_PATTERNS: 전역(모든 응답). SQLI_ERROR_PATTERNS: SQLi 문맥 전용(전역 + sqli scope).
-ERROR_LEAK_PATTERNS, _SQLI_ONLY_ERROR_PATTERNS = _load_error_patterns()
+# 코퍼스는 core.error_signatures 단일 소스에서 로드(confirm._SQL_ERROR_RE 와 공유).
+ERROR_LEAK_PATTERNS, _SQLI_ONLY_ERROR_PATTERNS = _error_signatures.load_error_patterns()
 SQLI_ERROR_PATTERNS = ERROR_LEAK_PATTERNS + _SQLI_ONLY_ERROR_PATTERNS
 
 # ── 민감 정보 패턴 ────────────────────────────────────────────────────────────
