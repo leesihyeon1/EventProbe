@@ -3571,6 +3571,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     #  2) payload 기능 없이 패킷만 복붙한 경우: 요청의 PoC 지문으로 CVE 를 식별.
     # 둘 다 안 되면 None → 기존 경로/지문 휴리스틱 폴백.
     _cve_only = None
+    _cve_ident_hit = False               # _cve_only 가 '요청 PoC 지문 식별' 로 잡혔는지
     _cve_sig = _cve_sig_by_id(payload_id)
     if _cve_sig is not None:
         _cve_only = [_cve_sig]
@@ -3578,6 +3579,7 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         _ident = _cve_identify_from_request(url, req_body, req_headers)
         if _ident:
             _cve_only = _ident
+            _cve_ident_hit = True
     # 리다이렉트 힌트는 대상 URL 의 호스트를 제외하고 판정(오픈 리다이렉트 오탐 방지)
     _redirect_probe = _redirect_hint_probe(payload, url, req_body)
 
@@ -3832,6 +3834,31 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                 "checked": _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only),
                 "evidence": f"스택 지문 불일치 (HTTP {status_code} · {len(body or '')}B)",
             })
+
+    # ②-f-3 요청 PoC 지문으로 CVE 가 '식별'되었는데 아직 어떤 finding 도 그 CVE 를 확증/언급하지
+    #        못한 경우 — 분류가 CVE 가 아닌 다른 유형(트래버설/명령주입 등)으로 갈려 CVE 라벨
+    #        블록(②-f/②-f-2)이 안 걸린 케이스. 자기 매처가 응답에 맞았다면 이미 ②-b 에서 '성공'
+    #        으로 떴고, 여기선 '확증은 안 됐지만 이 요청이 무슨 CVE 공격인지' 를 정직하게 노출한다.
+    if _cve_ident_hit:
+        _id_cves = []
+        for s in _cve_only or []:
+            c = str(s.get("cve") or "")
+            if c.upper().startswith("CVE-") and c not in _id_cves:  # 실제 CVE 만(민감파일 노출 등 제외)
+                _id_cves.append(c)
+        _already = any((c in (f.get("name") or "")) for f in findings for c in _id_cves)
+        if _id_cves and not _already:
+            _label = ", ".join(_id_cves[:3]) + (" 외" if len(_id_cves) > 3 else "")
+            _confirmed = any(f["verdict"] == "성공" for f in findings)
+            if not _confirmed:
+                findings.append({
+                    "name": f"CVE 공격 식별 — {_label}", "verdict": "미확정", "confidence": 55,
+                    "why": f"요청이 {_label} 의 공개 PoC 지문과 일치 → 이 요청은 해당 CVE 공격 시도로 "
+                           "식별됩니다. 다만 응답에서 해당 CVE 의 확증 매처가 매칭되지 않아 실제 취약 "
+                           "여부는 확증 불가(판정불가). 대상 컴포넌트/버전이 취약하면 성공할 수 있으니 "
+                           "취약 버전 여부·응답 내용을 함께 확인하세요.",
+                    "checked": _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only),
+                    "evidence": f"PoC 지문 일치: {_label} (HTTP {status_code} · {len(body or '')}B)",
+                })
 
     # ③ 타이밍 (time-based)
     n = _extract_sleep_seconds(payload)

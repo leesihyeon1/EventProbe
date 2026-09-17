@@ -39,14 +39,17 @@ def test_no_signal_attack_is_marked_unknown_not_safe():
 
 
 def test_unknown_evidence_matches_attack_type_not_file():
-    """GPON(명령 주입) 미확인 증거는 '파일 노출'이 아니라 '명령 실행 출력' 검색으로 서술."""
+    """GPON(명령 주입) PoC 는 CVE 로 식별되어 'CVE 공격 식별'(판정불가)로 뜨고,
+    '파일 노출'로 오라벨되지 않는다(확증 매처 미매칭 → 판정불가 유지)."""
     r = analyze_response(200, {"server": "Apache"}, "<html>router page</html>", 60,
                          payload="/GponForm/diag_Form?images/", category="cve",
                          url="http://h/GponForm/diag_Form?images/",
                          req_body="wan_conlist=0&dest_host=;id;&ipv=0")
-    ev = next(f["evidence"] for f in r["findings"] if f["verdict"] == "미확인")
-    assert "명령 실행 출력" in ev
-    assert "root:x:0:0" not in ev   # 파일 노출로 오해하지 않음
+    cve_f = next(f for f in r["findings"] if "CVE 공격 식별" in f["name"])
+    assert cve_f["verdict"] == "미확정"          # 판정불가 계열 — 안전으로 표기 금지
+    assert "CVE-2018-1056" in cve_f["name"]      # GPON CVE 로 식별
+    assert not any("root:x:0:0" in str(f.get("evidence") or "")
+                   for f in r["findings"])       # 파일 노출로 오해하지 않음
 
 
 def test_mislabeled_category_uses_payload_attack_type():
