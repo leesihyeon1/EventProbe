@@ -9,9 +9,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from typing import List, Pattern, Tuple
+
+_log = logging.getLogger("eventprobe.error_signatures")
 
 _JSON = os.path.join(os.path.dirname(__file__), "..", "data", "dbms_error_signatures.json")
 
@@ -48,6 +51,9 @@ def load_error_patterns() -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]
             (s_only if s.get("scope") == "sqli" else g).append((rx, lbl))
         return (g or list(_FALLBACK)), s_only
     except Exception:
+        # JSON 없거나 손상 → 최소 폴백. 조용히 축소되면 탐지력 저하가 안 보이므로 경고 로그.
+        _log.warning("DBMS 오류 코퍼스 로드 실패 — 내장 폴백(%d개)만 사용", len(_FALLBACK),
+                     exc_info=True)
         return list(_FALLBACK), []
 
 

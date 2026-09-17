@@ -1853,14 +1853,8 @@ async def rag_report_refs(req: ReportRefsRequest):
 
 
 # ── 페이로드 목록 조회 ──────────────────────────────────────
+# 프론트는 /payloads 로 전체를 한 번 받아 클라이언트에서 카테고리별로 필터한다.
+# (예전의 /payloads/{category_id} 단건 조회는 프론트·테스트 어디서도 안 써서 제거)
 @router.get("/payloads")
 def get_payloads():
     return load_payloads()
-
-@router.get("/payloads/{category_id}")
-def get_category_payloads(category_id: str):
-    data = load_payloads()
-    for cat in data["categories"]:
-        if cat["id"] == category_id:
-            return cat
-    raise HTTPException(status_code=404, detail="카테고리를 찾을 수 없습니다")

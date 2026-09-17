@@ -3,10 +3,13 @@
 """
 import ast
 import json
+import logging
 import os
 import re
 from typing import Optional
 from urllib.parse import unquote, urlsplit, parse_qsl
+
+_log = logging.getLogger("eventprobe.analyzer")
 
 # 공격 유형 분류의 단일 홈 — 힌트 정규식도 여기서 가져온다(예전엔 세 벌로 흩어져 있었다).
 from core import classify as _classify
@@ -1675,7 +1678,8 @@ def run_alert_rules(headers_lower: dict, body: str, body_lower: str, status_code
                     "evidence":    _extract_alert_evidence(rule["id"], headers_lower, body, body_lower),
                 })
         except Exception:
-            pass
+            # 룰 하나가 죽어도 나머지는 진행하되 조용히 사라지지 않게 디버그 로그(진단용).
+            _log.debug("alert rule %s failed", rule.get("id"), exc_info=True)
     # 위험도 순 정렬
     risk_order = {"high": 0, "medium": 1, "low": 2, "informational": 3}
     alerts.sort(key=lambda a: risk_order.get(a["risk"], 9))

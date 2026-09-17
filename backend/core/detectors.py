@@ -19,8 +19,11 @@
 """
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+_log = logging.getLogger("eventprobe.detectors")
 from typing import Optional
 
 
@@ -139,6 +142,9 @@ def run_registered(ctx: DetectionContext, max_tier: int = 2) -> list:
             if det.applies(ctx):
                 out.extend(det.detect(ctx) or [])
         except Exception:
+            # 한 탐지기가 죽어도 나머지는 진행하되, 조용히 사라지지 않게 디버그 로그를 남긴다
+            # (기본 로깅 레벨에선 안 보이지만, 탐지기 오작동 진단 시 EVENTPROBE 로거로 확인 가능).
+            _log.debug("detector %s failed", getattr(det, "id", det), exc_info=True)
             continue
     return out
 
@@ -377,7 +383,7 @@ class JwtNoneAlgDetector(Detector):
                 continue
             alg = str(head.get("alg", "")).lower()
             sig = tok.split(".")[2] if tok.count(".") >= 2 else ""
-            if alg == "none" or (alg in ("none", "") and not sig):
+            if alg == "none" or (alg == "" and not sig):   # alg:none, 또는 alg 없고 서명 없음
                 # 서버 수용 여부까지 보려면 대조군 필요 — 있으면 상태 전이로 확증
                 verdict, conf, why = "의심", 62, (
                     "요청 JWT 의 alg=none(서명 없음) — 서버가 이를 받아주면 서명 검증 우회로 "
