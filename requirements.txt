@@ -12,3 +12,4 @@ playwright>=1.40.0     # SPA 실제 호출 API 캡처(헤드리스). 설치 후:
 pytest>=8.0.0          # (개발용) 판정 엔진 단위 테스트: python -m pytest backend/tests
 pypdf>=4.0.0            # (RAG) PDF 텍스트 추출
 beautifulsoup4>=4.12.0  # (RAG) URL HTML 본문 추출
+numpy>=1.24.0          # (RAG) 임베딩 코사인 유사도 계산 — rag.py 하드 의존

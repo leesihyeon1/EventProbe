@@ -780,7 +780,8 @@ register(GraphqlDetector())
 
 
 # 요청에 주입한 CRLF 뒤 헤더가 응답 헤더에 나타나면 헤더 인젝션 성공
-_CRLF_INJECT = re.compile(r"(?:%0d%0a|%0a|\r\n|\r\n)\s*([A-Za-z][A-Za-z0-9\-]{1,40})\s*:\s*([^\r\n]{1,60})", re.I)
+_CRLF_INJECT = re.compile(
+    r"(?:%0d%0a|%0d|%0a|\r\n|\r|\n)\s*([A-Za-z][A-Za-z0-9\-]{1,40})\s*:\s*([^\r\n]{1,60})", re.I)
 
 
 class CrlfDetector(Detector):

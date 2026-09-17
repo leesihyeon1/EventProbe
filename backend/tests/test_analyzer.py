@@ -255,6 +255,24 @@ def test_private_key_leak_is_critical():
     assert r["sensitive_data"]
 
 
+def test_version_string_not_internal_ip_bypass():
+    """버전 문자열(10.15.7)이 3옥텟 내부IP 정규식에 걸려 bypass/critical 로 오탐하던 회귀.
+    내부 IP 는 SENSITIVE_PATTERNS(→bypass)에서 빠지고 low 알림 룰만 담당해야 한다."""
+    r = analyze_response(200, {"server": "nginx"}, "App version 10.15.7 (macOS 10.15.7)", 30,
+                         payload="x", category="")
+    assert r["verdict"] != "bypass"
+    assert r["risk_level"] != "critical"
+    assert not any("IP" in s for s in r["sensitive_data"])
+
+
+def test_real_internal_ip_still_low_alert():
+    """실제 사설 IP(4옥텟)는 low/tentative 알림으로는 여전히 잡되 critical 격상은 안 한다."""
+    r = analyze_response(200, {}, "backend at 192.168.10.55 internal only", 30,
+                         payload="x", category="")
+    assert any("내부 IP" in (al.get("name") or "") for al in r["alerts"])
+    assert r["risk_level"] != "critical"
+
+
 def test_time_based_sqli_success_is_high():
     """SLEEP(5) 요청에 실제 5초 이상 지연이면 blind time-based 성공 → high."""
     r = analyze_response(200, {}, "ok", 5200,

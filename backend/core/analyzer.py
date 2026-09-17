@@ -245,8 +245,9 @@ SENSITIVE_PATTERNS = [
     (r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b",           "Slack 토큰 노출"),
     (r"\bsk_live_[0-9A-Za-z]{24,}\b",               "Stripe 라이브 시크릿키 노출"),
     (r"-----BEGIN (?:OPENSSH|DSA|PGP) PRIVATE KEY-----", "개인키 노출"),
-    (r"\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+\b",
-                                                   "내부 IP 주소 노출"),
+    # 내부 IP 는 여기(SENSITIVE_PATTERNS)에 두지 않는다 — 매칭 시 무조건 verdict=bypass/critical
+    # 로 격상돼 과대평가되고, 옛 정규식은 3옥텟(10.X.Y)이라 버전 문자열(10.15.7)을 오탐했다.
+    # 사설 IP 본문 노출은 알림 룰 'info-private-ip-body'(low/tentative, 4옥텟 정규식)가 담당한다.
 ]
 
 

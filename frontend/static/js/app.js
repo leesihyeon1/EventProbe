@@ -116,6 +116,32 @@ function verdictBadge(verdict) {
   return `<span class="status-badge status-${verdict}">${labels[verdict] ?? verdict}</span>`;
 }
 
+// 헤드라인 판정 — 두 축을 분리 표기해 모순을 없앤다.
+//  · 주(主): evidence 축(attack_outcome) = '공격이 실제로 통했나' — 보안 판정
+//  · 부(副): HTTP 처리결과 축(레거시 verdict) = '요청이 통과/차단/에러됐나' — 맥락일 뿐
+// 예전엔 부 축(예: verdict=bypass '우회 성공')만 헤드라인에 떠 evidence 축(미확정)과 모순됐다.
+function headlineVerdict(a) {
+  const OUT = {
+    success:      ['공격 성공', 'tag-red'],
+    suspicious:   ['의심',      'tag-orange'],
+    blocked:      ['차단됨',    'tag-green'],
+    safe:         ['영향 없음', 'tag-green'],
+    inconclusive: ['판정 불가', 'tag-blue'],
+  };
+  // HTTP 축은 '요청이 서버에 통과됐는가'만 — bypass 는 '통과'로(보안 판정은 주 배지가 담당)
+  const HTTP = { blocked:'차단', passed:'통과', bypass:'통과', error:'에러', unknown:'기타', timeout:'무응답' };
+  const httpChip = HTTP[a.verdict]
+    ? `<span class="status-badge status-${a.verdict}" style="opacity:.65;font-weight:400" `
+      + `title="HTTP 처리 결과 — 보안 판정이 아님">HTTP ${HTTP[a.verdict]}</span>`
+    : '';
+  const o = a.attack_outcome;
+  if (o && OUT[o]) {
+    const [lbl, cls] = OUT[o];
+    return `<span class="tag ${cls}" style="vertical-align:middle">${lbl}</span> ${httpChip}`;
+  }
+  return verdictBadge(a.verdict);   // attack_outcome 없으면(전송 실패 등) 레거시 표기
+}
+
 function riskBadge(risk) {
   const map = { critical:'tag-red', high:'tag-orange', medium:'tag-yellow', low:'tag-blue', info:'tag-gray' };
   return `<span class="tag ${map[risk] ?? 'tag-gray'}">${risk?.toUpperCase()}</span>`;
@@ -2746,8 +2772,8 @@ function _redirectChainCard(result) {
 function renderAnalysis(a, result) {
   if (!a) return;
 
-  // 헤더 verdict badge
-  document.getElementById('analysisVerdict').innerHTML = verdictBadge(a.verdict);
+  // 헤더 verdict badge — evidence 판정(주) + HTTP 처리결과(부) 분리 표기
+  document.getElementById('analysisVerdict').innerHTML = headlineVerdict(a);
 
   const container = document.getElementById('analysisContent');
 

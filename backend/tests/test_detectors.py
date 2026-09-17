@@ -363,6 +363,15 @@ def test_crlf_not_reflected_not_flagged():
     assert _find(ctx, "crlf_injection") == []
 
 
+def test_crlf_single_cr_only_injection_detected():
+    """단일 CR(%0d)만으로 헤더를 주입한 경우도 탐지(정규식 중복 대안 수정 회귀)."""
+    ctx = _ctx(status_code=200, body="ok", category="crlf",
+               payload="val%0dX-Injected: pwned",
+               headers_lower={"x-injected": "pwned"})
+    out = _find(ctx, "crlf_injection")
+    assert out and out[0]["verdict"] == "성공"
+
+
 # LDAP / XPath error-based
 def test_ldap_parser_error_is_success():
     ctx = _ctx(status_code=200, body="Error: javax.naming.NameNotFoundException near filter",
