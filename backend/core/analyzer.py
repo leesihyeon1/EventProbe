@@ -228,7 +228,9 @@ SQLI_ERROR_PATTERNS = ERROR_LEAK_PATTERNS + _SQLI_ONLY_ERROR_PATTERNS
 SENSITIVE_PATTERNS = [
     (r"root:[x*]:0:0",                             "passwd 파일 내용"),
     (r"-----BEGIN (RSA |EC )?PRIVATE KEY-----",    "개인키 노출"),
-    (r"password\s*[=:]\s*\S+",                     "패스워드 노출"),
+    # 실제 노출된 '값'만 — 라벨(Password:</TD>)·마스킹(****)·빈 값·폼 필드는 제외.
+    # 값 첫 글자가 < * 공백 따옴표면 태그/마스킹/빈 값이므로 매칭하지 않는다.
+    (r"password\"?\s*[=:]\s*[\"']?(?![<*\s\"'])[^\s\"'<>&]{3,}", "패스워드 노출"),
     (r"api[_-]?key\s*[=:]\s*['\"]?\w{10,}",       "API 키 노출"),
     (r"secret[_-]?key\s*[=:]\s*['\"]?\w{10,}",    "Secret 키 노출"),
     (r"access[_-]?token\s*[=:]\s*['\"]?\S{10,}",  "Access Token 노출"),
@@ -1155,7 +1157,11 @@ ALERT_RULES = [
         "description": "PHP Fatal/Warning/Notice 등 오류가 노출되어 경로·코드가 유출됩니다.",
         "solution": "display_errors=Off 로 설정하세요.",
         "reference": "",
-        "check": lambda h, b, bl, s: bool(re.search(r"<b>(fatal error|warning|notice|parse error)</b>|on line <b>\d+</b>", bl)),
+        # 실제 PHP 오류 구조만 — 'on line <b>N</b>' 마커 또는 '<b>Warning</b>: … in … on line'.
+        # 본문에 <b>Warning</b> 만 있는 안내문(예: Acunetix 배너)은 오탐하지 않는다.
+        "check": lambda h, b, bl, s: bool(
+            re.search(r"on line <b>\d+</b>", bl)
+            or re.search(r"<b>(?:fatal error|warning|notice|parse error)</b>:.{0,300}?\bon line\b", bl, re.S)),
     },
     {
         "id": "debug-phpinfo", "name": "phpinfo() 노출", "risk": "high", "confidence": "certain",
