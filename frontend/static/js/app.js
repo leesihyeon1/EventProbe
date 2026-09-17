@@ -111,33 +111,56 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function verdictBadge(verdict) {
-  const labels = { blocked:'차단됨', passed:'통과됨', bypass:'우회 성공', error:'에러', unknown:'미확인', timeout:'타임아웃' };
-  return `<span class="status-badge status-${verdict}">${labels[verdict] ?? verdict}</span>`;
+// ════════════════════════════════════════════════════════════════════════════
+// 판정 어휘 단일 소스 — 두 축을 분리하고, 축마다 라벨을 한 곳에서만 정의한다.
+//   · 보안 판정 축(evidence) = attack_outcome — '공격이 실제로 통했나'.  OUTCOME 맵.
+//   · HTTP 처리결과 축         = 레거시 verdict — '요청이 통과/차단/에러됐나'.  HTTP_DISP 맵.
+// 예전엔 같은 attack_outcome 이 카드마다 '판정 불가/미확정/공격 미확인'으로 제각각 렌더됐고,
+// 레거시 verdict 의 'unknown' 이 evidence finding 의 '미확인' 과 같은 단어라 혼동됐다.
+// 3-state 규칙: 취약(성공)/안전/판정불가 — '판정 불가' 를 '안전' 으로 표기 금지.
+const OUTCOME = {                     // attack_outcome → [라벨, tag클래스]
+  success:      ['공격 성공', 'tag-red'],
+  suspicious:   ['의심',      'tag-orange'],   // 판정불가 계열(확증 전)
+  blocked:      ['차단됨',    'tag-green'],
+  safe:         ['영향 없음', 'tag-green'],
+  inconclusive: ['판정 불가', 'tag-blue'],
+};
+const OUTCOME_BORDER = {              // 카드 테두리 강조색(성공/의심만 강조)
+  success: 'rgba(248,81,73,.4)', suspicious: 'rgba(210,153,34,.5)',
+};
+// HTTP 축은 '요청이 서버에 통과/차단/에러됐는가'만 — 보안 판정은 OUTCOME 이 담당하므로
+// bypass 도 '우회 통과'(HTTP 통과)로만 표기하고, unknown 은 '미확인' 대신 '기타'(어휘 충돌 회피).
+const HTTP_DISP = {                   // 레거시 verdict → [라벨(전체), 라벨(축약)]
+  // bypass='우회 성공' 은 WAF 우회 테스트 문맥의 도메인 의미(페이로드가 필터를 통과)로 유지.
+  // unknown 은 evidence finding 의 '미확인' 과 겹쳐 혼동됐으므로 '기타' 로 분리.
+  blocked: ['차단됨', '차단'], passed: ['통과됨', '통과'], bypass: ['우회 성공', '우회'],
+  error: ['에러', '에러'], unknown: ['기타', '기타'], timeout: ['타임아웃', '타임아웃'],
+};
+// finding.verdict → tag 클래스 (성공/의심/차단/안전/미확정/미확인 — evidence 세분화)
+const FINDING_CLS = {
+  '성공':'tag-red', '의심':'tag-orange', '차단':'tag-green',
+  '안전':'tag-green', '미확정':'tag-blue', '미확인':'tag-orange',
+};
+
+function outcomeBadge(outcome) {      // 보안 판정 배지(단일 소스)
+  const [lbl, cls] = OUTCOME[outcome] || ['분석', 'tag-blue'];
+  return `<span class="tag ${cls}">${lbl}</span>`;
 }
 
-// 헤드라인 판정 — 두 축을 분리 표기해 모순을 없앤다.
-//  · 주(主): evidence 축(attack_outcome) = '공격이 실제로 통했나' — 보안 판정
-//  · 부(副): HTTP 처리결과 축(레거시 verdict) = '요청이 통과/차단/에러됐나' — 맥락일 뿐
-// 예전엔 부 축(예: verdict=bypass '우회 성공')만 헤드라인에 떠 evidence 축(미확정)과 모순됐다.
+function verdictBadge(verdict) {      // HTTP 처리결과 배지(레거시 verdict) — 보안 판정 아님
+  const lbl = (HTTP_DISP[verdict] || [verdict])[0];
+  return `<span class="status-badge status-${verdict}">${lbl}</span>`;
+}
+
+// 헤드라인 판정 — 두 축을 분리 표기해 모순을 없앤다(보안 판정 주 + HTTP 처리결과 부).
 function headlineVerdict(a) {
-  const OUT = {
-    success:      ['공격 성공', 'tag-red'],
-    suspicious:   ['의심',      'tag-orange'],
-    blocked:      ['차단됨',    'tag-green'],
-    safe:         ['영향 없음', 'tag-green'],
-    inconclusive: ['판정 불가', 'tag-blue'],
-  };
-  // HTTP 축은 '요청이 서버에 통과됐는가'만 — bypass 는 '통과'로(보안 판정은 주 배지가 담당)
-  const HTTP = { blocked:'차단', passed:'통과', bypass:'통과', error:'에러', unknown:'기타', timeout:'무응답' };
-  const httpChip = HTTP[a.verdict]
+  const short = (HTTP_DISP[a.verdict] || [null, null])[1];
+  const httpChip = short
     ? `<span class="status-badge status-${a.verdict}" style="opacity:.65;font-weight:400" `
-      + `title="HTTP 처리 결과 — 보안 판정이 아님">HTTP ${HTTP[a.verdict]}</span>`
+      + `title="HTTP 처리 결과 — 보안 판정이 아님">HTTP ${short}</span>`
     : '';
-  const o = a.attack_outcome;
-  if (o && OUT[o]) {
-    const [lbl, cls] = OUT[o];
-    return `<span class="tag ${cls}" style="vertical-align:middle">${lbl}</span> ${httpChip}`;
+  if (a.attack_outcome && OUTCOME[a.attack_outcome]) {
+    return `<span style="vertical-align:middle">${outcomeBadge(a.attack_outcome)}</span> ${httpChip}`;
   }
   return verdictBadge(a.verdict);   // attack_outcome 없으면(전송 실패 등) 레거시 표기
 }
@@ -1678,7 +1701,6 @@ async function goTest() {
 
   const btn = document.getElementById('goTestBtn');
   btn.disabled = true; const orig = btn.textContent; btn.textContent = '실행 중…';
-  const V = { blocked:['차단','tag-green'], passed:['통과','tag-yellow'], bypass:['우회!','tag-red'], error:['에러','tag-blue'], timeout:['타임아웃','tag-blue'] };
 
   try {
     for (const chk of checks) {
@@ -1689,7 +1711,8 @@ async function goTest() {
       try {
         const r = await API.request(_applyCandidate(base, cand));
         const v = r.analysis?.verdict || 'error';
-        const [label, cls] = V[v] || [v, 'tag-blue'];
+        // 공격 페이로드 결과 → 보안 판정(attack_outcome) 우선, 없으면 HTTP 처리결과
+        const [label, cls] = OUTCOME[r.analysis?.attack_outcome] || [(HTTP_DISP[v] || [null, v])[1], 'tag-blue'];
         let extra;
         if (r.status_code === 0) {
           // 응답 없음 — 타임아웃/연결실패 등. 실제 사유 우선 노출
@@ -2516,15 +2539,9 @@ function _validityCard(a) {
 function renderAttackCard(a) {
   const findings = a.findings || [];
   if (!findings.length && !a.attack_outcome) return '';
-  const OUT = {
-    success:      ['공격 성공',   'tag-red',   'rgba(248,81,73,.4)'],
-    suspicious:   ['의심',        'tag-orange','rgba(210,153,34,.5)'],
-    blocked:      ['차단됨',      'tag-green', 'var(--border)'],
-    safe:         ['영향 없음',   'tag-green', 'var(--border)'],
-    inconclusive: ['미확정',      'tag-blue',  'var(--border)'],
-  };
-  const [label, cls, border] = OUT[a.attack_outcome] || ['분석', 'tag-blue', 'var(--border)'];
-  const V = { '성공': 'tag-red', '의심': 'tag-orange', '차단': 'tag-green', '안전': 'tag-green', '미확정': 'tag-blue', '미확인': 'tag-orange' };
+  const [label, cls] = OUTCOME[a.attack_outcome] || ['분석', 'tag-blue'];
+  const border = OUTCOME_BORDER[a.attack_outcome] || 'var(--border)';
+  const V = FINDING_CLS;
 
   const rows = findings.map(f => {
     let ev = escapeHtml(String(f.evidence || ''));
@@ -2564,7 +2581,7 @@ function renderAttackCard(a) {
 // 판정 근거: findings 의 증거를 판정 카드에 표시. 성공이면 실제 매칭 스니펫,
 // 미노출/미확인이면 '응답에서 검색한 시그니처(root:x:0:0, uid=... 등) → 미검출'.
 function _findingEvidenceBlock(findings) {
-  const V = { '성공':'tag-red', '의심':'tag-orange', '차단':'tag-green', '안전':'tag-green', '미확정':'tag-blue', '미확인':'tag-orange' };
+  const V = FINDING_CLS;
   const evs = (findings || []).filter(f => f && f.evidence);
   if (!evs.length) return '';
   return `<div style="margin-top:8px">
@@ -2618,8 +2635,7 @@ function renderVerdictCard(a, confidenceColor) {
   const ai = a.ai_verdict;
   const det = a.det_verdict || {};   // 결정적 서술(항상 존재) — AI 없거나 누락 시 폴백
   if (ai && !ai.error) {
-    const OUT = { success: ['공격 성공', 'tag-red'], suspicious: ['의심', 'tag-orange'], blocked: ['차단됨', 'tag-green'], safe: ['영향 없음', 'tag-green'], inconclusive: ['공격 미확인', 'tag-blue'] };
-    const [label, cls] = OUT[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
+    const [label, cls] = OUTCOME[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
     const sev = String(ai.severity || 'info');
     const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
     const sevCls = (sev === 'critical' || sev === 'high') ? 'tag-red' : sev === 'medium' ? 'tag-yellow' : 'tag-blue';
@@ -2642,8 +2658,6 @@ function renderVerdictCard(a, confidenceColor) {
   }
   // 결정적 판정 (기본/폴백) — AI 없어도 요약·우선확인·조치를 결정적 서술로 제공
   const aiErr = ai && ai.error ? `<div style="font-size:10px;color:var(--text-muted)">AI 판정 실패(결정적 판정으로 대체): ${escapeHtml(ai.error)}</div>` : '';
-  const outLabel = { success:'공격 성공', suspicious:'의심', blocked:'차단됨', safe:'영향 없음', inconclusive:'미확정' }[a.attack_outcome];
-  const outCls = { success:'tag-red', suspicious:'tag-orange', blocked:'tag-green', safe:'tag-green', inconclusive:'tag-blue' }[a.attack_outcome] || 'tag-blue';
   return `
     <div class="analysis-card" data-card-id="verdict">
       <div class="analysis-card-header">판정 결과
@@ -2651,7 +2665,7 @@ function renderVerdictCard(a, confidenceColor) {
       </div>
       <div class="analysis-card-body">
         <div class="verdict-display">
-          ${verdictBadge(a.verdict)}
+          ${headlineVerdict(a)}
           <div style="flex:1">
             <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">신뢰도 ${a.confidence}%</div>
             <div class="confidence-bar">
@@ -2661,7 +2675,7 @@ function renderVerdictCard(a, confidenceColor) {
           ${riskBadge(a.risk_level)}
         </div>
         ${aiErr}
-        ${(outLabel || det.summary) ? `<div class="detail-item" style="margin-top:6px">${outLabel ? `<span class="tag ${outCls}" style="font-size:9px;margin-right:4px">${outLabel}</span>` : ''}${escapeHtml(det.summary || '')}</div>` : ''}
+        ${det.summary ? `<div class="detail-item" style="margin-top:6px">${escapeHtml(det.summary)}</div>` : ''}
         ${det.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(det.priority)}</div>` : ''}
         ${det.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(det.remediation)}</div>` : ''}
       </div>
@@ -4729,7 +4743,7 @@ function renderHistoryList() {
         <div class="history-item-bottom">
           <span class="history-status" style="color:${statusColor}">${h.status || '-'}</span>
           <span class="history-time">${formatRelTime(h.ts)}</span>
-          <span class="history-verdict verdict-${h.verdict}">${{blocked:'차단',passed:'통과',bypass:'우회',timeout:'타임아웃',error:'에러',unknown:'미확인'}[h.verdict]||h.verdict}</span>
+          <span class="history-verdict verdict-${h.verdict}">${(HTTP_DISP[h.verdict]||[null, h.verdict])[1]}</span>
           ${h.alert_count ? `<span class="history-alert-count">🔔${h.alert_count}</span>` : ''}
         </div>
       </div>`;
