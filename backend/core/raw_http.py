@@ -158,3 +158,69 @@ def _dechunk(data: bytes) -> bytes:
     except Exception:
         return data
     return out
+
+
+# ── Raw HTTP 요청 패킷 파싱(SOAR 등 외부 연동용) ──────────────────────────────
+# 프론트엔드 parseRawHttp(app.js)의 서버측 포팅. SOAR incident 에서 만든 raw 패킷을
+# 그대로 받아 {method, url, headers, body, http_version} 로 분해한다. 그 뒤 기존 전송·판정
+# 흐름을 그대로 재사용한다(구조화 재입력 불필요).
+import re as _re
+
+# 유효한 헤더 이름 토큰(RFC 7230 tchar) + ':' — JSON 본문 {"q":"..."} 이 헤더로 오인되지 않게 한다.
+_HDR_LINE = _re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+:")
+_HTTP_VER = _re.compile(r"^HTTP/[\d.]+$", _re.I)
+
+
+def parse_raw_request(raw: str, scheme: str = "https", host_override: str = "") -> dict:
+    """raw HTTP 요청 패킷 → {method, url, headers, body, http_version, host}.
+
+    - 요청라인: 'METHOD URI [HTTP/x.x]'. URI 에 인코딩 안 된 공백(SQLi ' OR 1=1 -- ')이 있어도
+      첫 토큰=메서드 / 마지막이 HTTP/x.x 면 버전 / 그 사이 전체(공백 포함)=URI 로 파싱.
+    - 헤더/본문 경계: 빈 줄 또는 '헤더 형식이 아닌 첫 줄'. (빈 줄이 collapse 된 붙여넣기 대응)
+    - URL: URI 가 절대 URL 이면 그대로, 아니면 scheme://<Host 헤더>+URI.
+    """
+    text = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    req_line = (lines.pop(0) if lines else "").strip()
+
+    header_lines, body_start = [], len(lines)
+    for i, ln in enumerate(lines):
+        t = ln.strip()
+        if t == "":
+            body_start = i + 1
+            break
+        if not _HDR_LINE.match(t):
+            body_start = i
+            break
+        header_lines.append(t)
+    body = "\n".join(lines[body_start:])
+
+    method, target, http_version = "GET", "/", ""
+    tokens = [t for t in _re.split(r"\s+", req_line) if t]
+    if len(tokens) >= 2 and tokens[0].isalpha():
+        method = tokens[0].upper()
+        end = len(tokens)
+        if _HTTP_VER.match(tokens[end - 1]):
+            http_version = tokens[end - 1]
+            end -= 1
+        target = " ".join(tokens[1:end]) or "/"
+
+    headers = {}
+    for h in header_lines:
+        idx = h.find(":")
+        if idx <= 0:
+            continue
+        headers[h[:idx].strip()] = h[idx + 1:].strip()
+
+    host = host_override or next(
+        (v for k, v in headers.items() if k.lower() == "host"), "")
+
+    if _re.match(r"^https?://", target, _re.I):
+        url = target                                   # 절대 URL(프록시 스타일)은 그대로
+    else:
+        sch = (scheme or "https").lower()
+        path = target if target.startswith("/") else "/" + target
+        url = f"{sch}://{host}{path}" if host else path
+
+    return {"method": method, "url": url, "headers": headers, "body": body,
+            "http_version": http_version, "host": host}

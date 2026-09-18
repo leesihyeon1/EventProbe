@@ -40,7 +40,7 @@ def _url_with_params(url: str, params: dict) -> str:
     )
     return url + ("&" if "?" in url else "?") + q
 from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, ai_classify_attack, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
-from core.raw_http import raw_send
+from core.raw_http import raw_send, parse_raw_request
 from core.cve_matcher import match_cve_payloads
 from core.followup import hot_families, escalation_candidates
 from core import confirm as confirm_scan
@@ -899,6 +899,56 @@ async def send_request(req: SingleRequest):
                 "score": 0,
             },
         }
+
+
+# ── Raw 패킷 전송(SOAR 등 외부 연동) ─────────────────────────
+class RawRequest(BaseModel):
+    """raw HTTP 요청 패킷을 그대로 받아 파싱·전송·판정. SOAR incident 버튼 연동용.
+
+    프론트의 붙여넣기 흐름과 동일하되 파싱을 서버가 한다 — SOAR 는 패킷 문자열만 보내면 된다.
+    충실도 위해 use_defaults 기본 False(도구 기본 헤더 미주입 → 패킷 그대로 전송).
+    """
+    raw: str                              # raw HTTP 요청 패킷(요청라인+헤더[+본문])
+    scheme: str = "https"                 # URI 가 상대경로일 때 사용할 스킴
+    host: Optional[str] = None            # Host 헤더 override(선택)
+    category: Optional[str] = None
+    payload: Optional[str] = None
+    baseline: Optional[dict] = None
+    timeout: int = 10
+    follow_redirects: bool = False
+    use_defaults: bool = False            # raw 충실도: 기본 미주입
+    inline_ai: bool = False
+    custom_alert_rules: list = []
+
+
+@router.post("/request/raw")
+async def send_request_raw(req: RawRequest):
+    """raw 패킷을 파싱해 SingleRequest 로 변환한 뒤 기존 전송·판정 흐름을 재사용."""
+    if not (req.raw or "").strip():
+        return {"error": "raw 패킷이 비어 있습니다."}
+    try:
+        parsed = parse_raw_request(req.raw, scheme=req.scheme, host_override=req.host or "")
+    except Exception as e:
+        return {"error": f"raw 파싱 실패: {type(e).__name__}: {e}"}
+    if not parsed.get("url") or parsed["url"].startswith("/"):
+        return {"error": "대상 URL 을 구성할 수 없습니다 — Host 헤더가 없거나 절대 URL 이 아닙니다. "
+                         "host 필드로 대상을 지정하거나 요청라인에 절대 URL 을 쓰세요."}
+    single = SingleRequest(
+        method=parsed["method"], url=parsed["url"], headers=parsed["headers"],
+        body=parsed["body"] or None, params={}, payload=req.payload, category=req.category,
+        timeout=req.timeout, use_defaults=req.use_defaults, default_headers={},
+        http_version=parsed.get("http_version") or None, baseline=req.baseline,
+        follow_redirects=req.follow_redirects, inline_ai=req.inline_ai,
+        custom_alert_rules=req.custom_alert_rules,
+    )
+    result = await send_request(single)
+    # SOAR 가 '무엇을 실제로 보냈는지' 확인·수정할 수 있게 파싱 결과를 함께 돌려준다.
+    result["parsed_request"] = {
+        "method": parsed["method"], "url": parsed["url"],
+        "http_version": parsed.get("http_version") or "HTTP/1.1",
+        "header_count": len(parsed["headers"]), "has_body": bool(parsed["body"]),
+    }
+    return result
 
 
 # ── AI 상태 / 페이로드 변형 ─────────────────────────────────
