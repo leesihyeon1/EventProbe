@@ -70,6 +70,27 @@ def test_parse_no_http_version():
     assert p["url"] == "https://h/p"
 
 
+def test_parse_single_line_flattened_packet_reflow():
+    # SOAR/티켓이 줄바꿈을 다 지워 한 줄로 온 패킷도 헤더 경계로 복원해 파싱.
+    oneline = ("GET /static/x.svg Accept-Language: en-US,en;q=0.5 Host: m.ncsoft.com "
+               "Referer: https://google.com User-Agent: Mozilla/5.0 (X11; Linux) Chrome/77.0 "
+               "X-Forwarded-For: 1.2.3.4 Cache-Control: max-age=0")
+    p = parse_raw_request(oneline, scheme="https")
+    assert p["method"] == "GET"
+    assert p["url"] == "https://m.ncsoft.com/static/x.svg"
+    assert p["host"] == "m.ncsoft.com"
+    assert p["headers"]["User-Agent"] == "Mozilla/5.0 (X11; Linux) Chrome/77.0"   # 값 내 공백 보존
+    assert p["headers"]["Referer"] == "https://google.com"                        # URL 스킴 콜론 미분할
+    assert len(p["headers"]) == 6
+
+
+def test_multiline_packet_not_reflowed():
+    # 정상 멀티라인은 reflow 미적용 — 헤더 값 안의 'Word: ' 가 잘못 분할되지 않아야.
+    raw = "GET /p HTTP/1.1\r\nHost: h\r\nX-Note: see also: nothing\r\n\r\n"
+    p = parse_raw_request(raw)
+    assert p["headers"]["X-Note"] == "see also: nothing"
+
+
 def test_parse_collapsed_blank_line_body():
     # 붙여넣기에서 헤더/본문 사이 빈 줄이 사라져도 '헤더 형식 아닌 첫 줄'에서 본문 시작.
     raw = "POST /a HTTP/1.1\r\nHost: h\r\nContent-Type: text/plain\r\nhello world body"

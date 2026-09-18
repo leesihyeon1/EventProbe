@@ -170,6 +170,20 @@ import re as _re
 _HDR_LINE = _re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+:")
 _HTTP_VER = _re.compile(r"^HTTP/[\d.]+$", _re.I)
 
+# 헤더 경계 후보: 공백 + '헤더이름:' + 공백. SOAR/티켓이 줄바꿈을 다 지워 한 줄로 만든 패킷을
+# 복원(reflow)할 때 이 앞에 개행을 넣는다. URL 스킴(https:)은 ':'뒤가 '//'라 매칭 안 됨(안전).
+_HDR_BOUNDARY = _re.compile(r"\s+(?=[!#$%&'*+.^_`|~0-9A-Za-z-]+:[ \t])")
+
+
+def _reflow_single_line(text: str) -> str:
+    """줄바꿈이 소실돼 한 줄로 붙은 HTTP 패킷을 헤더 경계마다 개행 삽입해 복원(best-effort).
+
+    'GET /p Accept-Language: en Host: h ...' → 'GET /p\\nAccept-Language: en\\nHost: h\\n...'
+    헤더 값 안에 우연히 'Word: ' 패턴이 있으면 과분할될 수 있는 휴리스틱이라, 이미 줄바꿈이
+    있는 정상 패킷에는 절대 적용하지 않는다(호출부에서 단일 라인일 때만 호출).
+    """
+    return _HDR_BOUNDARY.sub("\n", text)
+
 
 def parse_raw_request(raw: str, scheme: str = "https", host_override: str = "") -> dict:
     """raw HTTP 요청 패킷 → {method, url, headers, body, http_version, host}.
@@ -180,6 +194,9 @@ def parse_raw_request(raw: str, scheme: str = "https", host_override: str = "") 
     - URL: URI 가 절대 URL 이면 그대로, 아니면 scheme://<Host 헤더>+URI.
     """
     text = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    # 줄바꿈이 다 사라진 한 줄 패킷(SOAR/티켓 flatten)이고 헤더 경계가 보이면 복원한다.
+    if "\n" not in text.strip() and _HDR_BOUNDARY.search(text):
+        text = _reflow_single_line(text)
     lines = text.split("\n")
     req_line = (lines.pop(0) if lines else "").strip()
 
