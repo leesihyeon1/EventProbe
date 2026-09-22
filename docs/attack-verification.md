@@ -1,5 +1,13 @@
 # 공격 검증 내역 (Attack Verification)
 
+> 2026-09 수정: 단일 요청의 시간 지연 일치는 성공이 아닌 의심 신호로 처리합니다.
+> 아래의 과거 타이밍 성공 기준 대신 대조군 비교·반복 확인이 필요합니다.
+> AI 보강은 분류 → 필요 시 동일 관측 정보로 재분석 → 상세 설명·RAG 보강 순서로 수행합니다.
+> 반사형 XSS의 미인코딩·실행 문맥 반사도 브라우저 확증 전에는 의심입니다.
+> `attack_risk_level`과 `hygiene_risk_level`을 분리하고 `overall_risk_level`로 전체 위험도를 제공합니다.
+> 기존 `risk_level`은 공격 분석 위험도 호환 필드이며 신뢰도는 위험 점수로 사용하지 않습니다.
+> 통계의 `outcome_counts`가 공격 판정별 집계입니다. 차단 응답 비율은 WAF 탐지 정확도가 아닙니다.
+
 > 이 도구가 각 공격의 "성공"을 **어떻게 검증하는가**를 정리한 문서.
 > 구현 근거: `backend/core/analyzer.py` 의 `analyze_response()` / `attack_findings()`.
 > 회귀 테스트: `backend/tests/test_analyzer.py`.
@@ -95,7 +103,7 @@
 
 ## 6. AI 보강 (선택)
 
-- **ai_verdict** — 라벨(판정/신호 이름·상태·시간)만 전송, **응답 본문 미전송(무유출)**. 판정 카드 서술에 사용.
+- **ai_verdict** — 원본 응답 본문 전체와 인증 헤더는 제외하지만 요청 문맥·판정 evidence·RAG 발췌문을 전송한다. 결정적 판정을 바꾸지 않고 판정 카드의 설명·우선순위·조치를 보강한다.
 - **ai_analyze** — 응답 body를 AI로 전송(**유출 위험**). 기본 off, `AI_RESPONSE_ANALYSIS=true` 일 때만.
 
 AI는 결정적 룰 엔진의 판정을 **대체하지 않고 서술을 보강**하는 레이어다.

@@ -10,7 +10,7 @@ from typing import Optional
 import sys, os, secrets
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from core.analyzer import analyze_response, generate_summary, file_exposure_looks_real, _sensitive_file_ext
-from urllib.parse import urlsplit, quote, quote_plus
+from urllib.parse import urlsplit, quote, quote_plus, parse_qsl
 
 # 쿼리에서 RFC3986 상 합법이며 보안 페이로드에 흔히 쓰이는 문자는 보존하고
 # (@ / : ; + , = ! $ ( ) * 등), 구조를 깨는 문자(공백·&·#·%)만 인코딩한다.
@@ -50,6 +50,7 @@ from core import xss_confirm
 from core.tlsscan import tls_scan
 from core import rag
 from core import oob
+from core.ai_privacy import SENSITIVE_HEADERS, sanitize_headers
 
 router = APIRouter(prefix="/api")
 
@@ -208,7 +209,7 @@ def find_payload_by_id(payload_id: str):
     return None, None
 
 
-_SENSITIVE_HDRS = ("host", "authorization", "cookie", "proxy-authorization")
+_SENSITIVE_HDRS = SENSITIVE_HEADERS
 # 도구가 스스로 붙이는 헤더(테스트 태그·기본 브라우저 프로파일) — 대상 서버 설정이 아니므로
 # AI 판정/조치에서 제외한다(예: "디버그 헤더 ncits_log_test 제거" 같은 엉뚱한 조치 방지).
 _TOOL_NOISE_HDRS = {"ncits_log_test", "accept", "accept-language", "accept-encoding",
@@ -288,6 +289,89 @@ _CONFIRM_ANCHOR = ("확증 방법 익스플로잇 승격 필터 우회 how to co
                    "exploit escalate bypass filter")
 
 
+def _rag_body_keys(body: str, limit: int = 30) -> list[str]:
+    """Extract structure, not values, from JSON/form/XML bodies for retrieval."""
+    raw = (body or "").strip()
+    if not raw:
+        return []
+    keys: list[str] = []
+
+    def add(value):
+        value = str(value or "").strip()
+        if value and value not in keys and len(keys) < limit:
+            keys.append(value[:80])
+
+    def walk(value, prefix=""):
+        if len(keys) >= limit:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                add(path)
+                walk(child, path)
+        elif isinstance(value, list):
+            for child in value[:3]:
+                walk(child, prefix)
+
+    try:
+        walk(json.loads(raw))
+    except Exception:
+        try:
+            for key, _ in parse_qsl(raw, keep_blank_values=True):
+                add(key)
+        except Exception:
+            pass
+        for tag in re.findall(r"<([A-Za-z_][\w:.-]*)\b", raw)[:limit]:
+            add(tag)
+        for key in re.findall(r"(?:^|[&;\s])([A-Za-z_][\w.-]{1,79})\s*=", raw)[:limit]:
+            add(key)
+    return keys
+
+
+def _rag_safe_terms(text: str, limit: int = 40) -> str:
+    """Keep useful retrieval terms while dropping token-like high-entropy values."""
+    out = []
+    for token in re.findall(r"[A-Za-z0-9_./:-]+|[가-힣]{2,}", str(text or "")):
+        if len(token) > 64:
+            continue
+        jwt_like = token.count(".") == 2 and all(len(part) >= 8 for part in token.split("."))
+        if jwt_like or (len(token) >= 24 and re.fullmatch(r"[A-Za-z0-9_\-+/=]+", token)):
+            continue
+        if token not in out:
+            out.append(token)
+        if len(out) >= limit:
+            break
+    return " ".join(out)
+
+
+def build_rag_query(method: str = "", url: str = "", params: dict = None,
+                    body: str = "", headers=None, category: str = "",
+                    intent: str = "", findings: list = None,
+                    fingerprint: dict = None) -> str:
+    """Build a task-specific retrieval query from names and safe evidence terms."""
+    parts = urlsplit(url or "")
+    path = re.sub(r"[/?&=]", " ", parts.path or "/")
+    query_keys = [key for key, _ in parse_qsl(parts.query, keep_blank_values=True)]
+    param_keys = [str(key) for key in (params or {}).keys()]
+    body_keys = _rag_body_keys(body)
+    if isinstance(headers, dict):
+        header_names = list(sanitize_headers(headers).keys())
+    else:
+        header_names = [str(h) for h in (headers or [])
+                        if str(h).strip().lower() not in _SENSITIVE_HDRS]
+    header_names = [h for h in header_names if h.lower() not in _TOOL_NOISE_HDRS]
+    finding_terms = []
+    for finding in findings or []:
+        finding_terms.extend([finding.get("name", ""), finding.get("why", ""),
+                              finding.get("evidence", "")])
+    fp = fingerprint or {}
+    fields = [method.upper(), path, " ".join(query_keys + param_keys),
+              " ".join(body_keys), " ".join(header_names), category, intent,
+              str(fp.get("server", "")), str(fp.get("powered_by", "")),
+              " ".join(str(x) for x in finding_terms)]
+    return _rag_safe_terms(" ".join(filter(None, fields)), limit=80)
+
+
 # 페이로드 덤프 청크 판별 — RAG 가 페이로드 뱅크와 겹치지 않게 설명 산문을 선호한다.
 _PAYLOAD_LINE = re.compile(r"""['"<>]|\bUNION\b|\bSELECT\b|--|/\*|\balert\(|%[0-9a-fA-F]{2}|\$\{|\{\{""")
 
@@ -301,21 +385,22 @@ def _is_prose(text: str) -> bool:
     return pl / len(lines) < 0.4
 
 
-async def _retrieve_related(category: str, outcome: str, findings: list, probe: str = "") -> list:
+async def _retrieve_related(category: str, outcome: str, findings: list, req=None) -> list:
     """RAG 검색 — 공격유형 의미 앵커 + 신호 이름(+요청 보조)으로 조회. AI 유무와 무관하게
-    동작(관련 문서 표시 + AI 판정 근거 공용). 공개 문서라 유출 위험 없음."""
+    동작한다. 관련 문서 표시와 AI 판정 근거가 같은 검색 결과를 공유한다."""
     if not rag.has_sources():
         return []
     # '미확인' finding 의 why 는 일반 boilerplate 라 질의를 희석 → 실제 신호(성공/미확정/안전)만 사용.
     specific = [f for f in (findings or []) if f.get("verdict") != "미확인"]
     names = " ".join(f.get("name", "") for f in specific)
-    whys = " ".join(str(f.get("why", "")) for f in specific)[:300]
-    # 카테고리 서술 용어를 앞에 두어 의미 앵커로 삼고, 원시 probe 는 보조로만(노이즈 최소화).
     desc = _CATEGORY_DESC.get((category or "").lower(), category or "")
     intent = _OUTCOME_INTENT.get((outcome or "").lower(), "")   # 판정별 "왜" 의도
-    # 페이로드(probe)·why 는 질의에서 뺀다 — 넣으면 페이로드 덤프 청크가 끌려와 페이로드 뱅크와
-    # 겹친다. 대신 설명 앵커로 "왜/원리/영향" 산문을 끌어온다(중복 제거 + 설명 제공).
-    rag_q = " ".join(filter(None, [desc, _EXPLAIN_ANCHOR, intent, names])).strip()
+    request_q = build_rag_query(
+        method=getattr(req, "method", ""), url=getattr(req, "url", ""),
+        params=getattr(req, "params", None), body=getattr(req, "body", ""),
+        headers=getattr(req, "headers", None), category=desc,
+        intent=" ".join(filter(None, [_EXPLAIN_ANCHOR, intent, names])), findings=specific)
+    rag_q = request_q.strip()
     if not rag_q:
         return []
     try:
@@ -368,8 +453,7 @@ async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
             for f in analysis.get("findings", [])]
     _atype = analysis.get("attack_type") or req.category
     _blur = _blurred_request(req)
-    _probe = f"{_blur['path']} {_blur['payload']}"
-    hits = await _retrieve_related(_atype, analysis.get("attack_outcome"), _fnd, _probe)
+    hits = await _retrieve_related(_atype, analysis.get("attack_outcome"), _fnd, req)
     if hits:
         analysis["related_docs"] = [{"title": h.get("title", ""), "loc": h.get("loc", ""),
                                      "score": h.get("score"), "excerpt": (h.get("text", "") or "")[:220]}
@@ -378,6 +462,7 @@ async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
         analysis["ai_verdict"] = await ai_verdict({
             "category": _atype, "status": status_code, "time": resp_time,
             "outcome": analysis.get("attack_outcome"),
+            "det_verdict": analysis.get("det_verdict"),
             "findings": _fnd, "request": _blur,
             "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
             "retrieved": hits,
@@ -402,6 +487,12 @@ class EnrichRequest(BaseModel):
     resp_headers: dict = {}
     resp_body: str = ""
     analysis: dict = {}          # 규칙 기반 분석(findings/alerts/attack_* 등)
+    baseline: Optional[dict] = None
+    redirect_chain: Optional[list] = None
+    body_truncated: bool = False
+    full_body_len: Optional[int] = None
+    payload_id: Optional[str] = None
+    custom_alert_rules: list = []
 
 
 @router.post("/analyze/enrich")
@@ -420,7 +511,7 @@ async def analyze_enrich(req: EnrichRequest):
             return None
         return await ai_analyze({
             "method": (req.method or "GET").upper(), "url": req.url, "payload": req.payload,
-            "category": req.category, "req_body": req.body,
+            "category": analysis.get("attack_type") or req.category, "req_body": req.body,
             "status_code": req.status_code, "response_time": req.response_time,
             "resp_headers": req.resp_headers, "resp_body": (req.resp_body or "")[:BODY_LIMIT],
             "base_verdict": analysis.get("verdict"),
@@ -444,19 +535,13 @@ async def analyze_enrich(req: EnrichRequest):
             path = req.url or "/"
         return await ai_classify_attack({
             "method": req.method, "path": path, "params": req.params,
-            "body": req.body, "headers": req.headers,
+            "body": req.body, "headers": sanitize_headers(req.headers),
         })
 
     try:
-        detail, _, klass = await asyncio.gather(_detail(), _verdict(), _classify())
+        klass = await _classify()
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
-    if detail is not None:
-        out["ai"] = detail
-    if analysis.get("related_docs") is not None:
-        out["related_docs"] = analysis["related_docs"]
-    if analysis.get("ai_verdict") is not None:
-        out["ai_verdict"] = analysis["ai_verdict"]
     if klass and not klass.get("error") and (klass.get("primary") or klass.get("types")):
         out["attack_class"] = klass          # {primary, types, confidence, header_borne, reason, source:"ai"}
         # AI 가 규칙과 '다른' 유형으로 교정했으면, 그 유형으로 재분석해 검증을 다시 돌린다
@@ -469,12 +554,26 @@ async def analyze_enrich(req: EnrichRequest):
                     status_code=req.status_code, headers=req.resp_headers, body=req.resp_body,
                     response_time=req.response_time, payload=req.payload, category=_ai_primary,
                     url=_url_with_params(req.url, req.params), req_body=req.body, method=req.method,
-                    req_headers=req.headers)
+                    req_headers=req.headers, baseline=req.baseline,
+                    redirect_chain=req.redirect_chain, body_truncated=req.body_truncated,
+                    full_body_len=req.full_body_len, payload_id=req.payload_id,
+                    custom_alert_rules=req.custom_alert_rules)
                 _re["reclassified_by_ai"] = {"from": _regex_at or "(미분류)", "to": _ai_primary,
                                              "reason": str(klass.get("reason", ""))[:200]}
                 out["reclassified_analysis"] = _re
-            except Exception:
-                pass
+                analysis = _re
+            except Exception as e:
+                return {"error": f"재분석 실패: {type(e).__name__}"}
+    try:
+        detail, _ = await asyncio.gather(_detail(), _verdict())
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        return out
+    if detail is not None:
+        out["ai"] = detail
+    for key in ("related_docs", "ai_verdict"):
+        if analysis.get(key) is not None:
+            out[key] = analysis[key]
     return out
 
 
@@ -960,7 +1059,8 @@ class AiVariantRequest(BaseModel):
 
 @router.get("/ai-status")
 def ai_status():
-    return {"enabled": ai_enabled()}
+    return {"enabled": ai_enabled(), "rag": rag.status(),
+            "rag_cloud_context": bool(ai_enabled() and rag.has_sources())}
 
 @router.post("/ai-payloads")
 async def ai_payloads(req: AiVariantRequest):
@@ -987,6 +1087,7 @@ class AiSuggestRequest(BaseModel):
     params: dict = {}
     body: Optional[str] = None
     header_names: list[str] = []
+    category: str = ""
     count: int = 8
     fingerprint: dict = {}   # {server, powered_by, body} — 직전 응답 지문(선택, 로컬 CVE 매칭용)
 
@@ -1005,14 +1106,11 @@ async def ai_suggest(req: AiSuggestRequest):
     #      (검색 결과는 LLM 생성에만 주입되므로 AI 활성일 때만 조회)
     retrieved = []
     if ai_enabled() and rag.has_sources():
-        fp = req.fingerprint or {}
-        rag_q = " ".join(filter(None, [
-            re.sub(r"[/?&=]", " ", path),
-            " ".join((req.params or {}).keys()),
-            str(fp.get("server", "")), str(fp.get("powered_by", "")),
-        ]))
+        rag_q = build_rag_query(req.method, req.url, req.params, req.body or "",
+                                req.header_names, req.category, "payload exploit technique",
+                                fingerprint=req.fingerprint)
         try:
-            retrieved = await asyncio.to_thread(rag.search, rag_q, 6)
+            retrieved = await asyncio.to_thread(rag.search, rag_q, 6, req.category)
             # 관련도 낮은 스니펫은 버려 무관한 요청에 문서가 끼어드는 것을 막는다(상위 대비 40%↑)
             if retrieved:
                 top = retrieved[0]["score"]
@@ -1024,7 +1122,7 @@ async def ai_suggest(req: AiSuggestRequest):
     ai_res = None
     if ai_enabled():
         safe_header_names = [h for h in (req.header_names or [])
-                             if h.lower() not in ("host", "authorization", "cookie", "proxy-authorization")]
+                             if h.strip().lower() not in _SENSITIVE_HDRS]
         ai_res = await ai_suggest_payloads(req.method, path, req.params, req.body or "", safe_header_names, count,
                                            retrieved=retrieved)
     ai_res = ai_res if isinstance(ai_res, dict) else {}
@@ -1901,7 +1999,7 @@ async def tls_scan_endpoint(req: TlsScanRequest):
 # ── RAG 문서 인제스트/검색(공개 테스트 문서용) ────────────────
 @router.post("/rag/ingest")
 async def rag_ingest(url: str = Form(""), file: UploadFile = File(None)):
-    """공개 테스트 문서(PDF/URL/텍스트)를 로컬 RAG 코퍼스에 색인. 검색·저장은 로컬."""
+    """사용자 제공 문서(PDF/URL/텍스트)를 로컬 RAG 코퍼스에 색인."""
     try:
         if file is not None:
             data = await file.read()
@@ -1923,12 +2021,15 @@ async def rag_ingest(url: str = Form(""), file: UploadFile = File(None)):
 
 @router.get("/rag/sources")
 def rag_sources():
-    return {"sources": rag.list_sources(), "embeddings": rag.embeddings_enabled()}
+    sources = rag.list_sources()
+    state = rag.status(sources)
+    return {"sources": sources, "embeddings": rag.embeddings_enabled(), **state,
+            "cloud_context": bool(ai_enabled() and rag.has_sources())}
 
 
 @router.post("/rag/reindex")
 async def rag_reindex():
-    """벡터가 없는 기존 문서를 임베딩해 백필(의미 검색 활성화)."""
+    """현재 모델·본문·청킹 버전과 다르거나 없는 벡터를 다시 생성."""
     return await asyncio.to_thread(rag.reindex_embeddings)
 
 

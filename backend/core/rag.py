@@ -1,10 +1,10 @@
-"""로컬 RAG 스토어 — 공개 테스트 문서(PDF/URL/텍스트)를 청킹·BM25 색인해 검색.
+"""로컬 RAG 스토어 — 문서를 청킹하고 BM25·임베딩을 결합해 검색.
 
-무거운 임베딩/벡터DB 없이 순수 파이썬 BM25 로 동작(설계 1단계). 인제스트한 문서는
-data/rag/ 에 JSON 으로 영속화하고, 프로세스 시작/변경 시 인메모리 색인을 재구성한다.
+별도 벡터 DB 대신 NumPy 행렬을 사용하고, 인제스트한 문서는 data/rag/ 에 JSON과
+.npy로 영속화한다. 임베딩이 없거나 오래되면 BM25만으로 계속 동작한다.
 
-검색·색인·저장은 전부 로컬. (검색 결과를 클라우드 LLM 프롬프트에 주입하는 것은 상위
-계층의 정책이며, 공개 문서면 유출이 아니다.)
+검색·색인·저장은 전부 로컬이다. 검색 결과를 클라우드 LLM 프롬프트에 주입할지는 상위
+계층이 결정하며, 내부 문서라면 외부 전송 범위를 별도로 검토해야 한다.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import tempfile
 import time
 from collections import Counter
 from typing import Optional
@@ -25,6 +26,8 @@ _RAG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "rag
 _TOKEN_RE = re.compile(r"[a-z0-9_][a-z0-9_./:\-]*", re.I)
 _CHUNK_SIZE = 900
 _CHUNK_OVERLAP = 120
+_CHUNKER_VERSION = 1
+_RRF_K = 60
 
 
 def _ensure_dir():
@@ -131,9 +134,23 @@ class _BM25:
 # 검색 정확도를 '키워드'에서 '의미'로 올린다. 이미 쓰는 NVIDIA API 재사용(torch 불필요).
 # 실패/미설정 시 조용히 BM25 로 폴백한다.
 def _embed_cfg():
-    return (os.getenv("NVIDIA_API_KEY", "").strip(),
-            os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/"),
-            os.getenv("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3-embed-1b").strip())
+    """Provider-neutral embedding configuration with backward-compatible fallbacks."""
+    explicit = any(os.getenv(name) for name in
+                   ("EMBEDDING_API_KEY", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL"))
+    if explicit:
+        key = (os.getenv("EMBEDDING_API_KEY") or os.getenv("AI_API_KEY") or
+               os.getenv("NVIDIA_API_KEY", "")).strip()
+        base = (os.getenv("EMBEDDING_BASE_URL") or os.getenv("AI_BASE_URL") or
+                os.getenv("NVIDIA_BASE_URL") or "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+        model = (os.getenv("EMBEDDING_MODEL") or os.getenv("NVIDIA_EMBED_MODEL") or
+                 "nvidia/nemotron-3-embed-1b").strip()
+    else:
+        # A chat-only OpenAI-compatible endpoint may not expose /embeddings. Do not silently
+        # treat AI_API_KEY alone as embedding capability; NVIDIA remains the legacy default.
+        key = os.getenv("NVIDIA_API_KEY", "").strip()
+        base = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+        model = os.getenv("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3-embed-1b").strip()
+    return key, base, model
 
 
 def embeddings_enabled() -> bool:
@@ -205,6 +222,94 @@ def _embed(texts: list, input_type: str) -> Optional["np.ndarray"]:
 
 def _vec_path(source_id: str) -> str:
     return os.path.join(_RAG_DIR, source_id + ".npy")
+
+
+def _content_hash(chunks: list) -> str:
+    h = hashlib.sha256()
+    for chunk in chunks or []:
+        h.update(str(chunk.get("loc", "")).encode("utf-8", "ignore"))
+        h.update(b"\0")
+        h.update(str(chunk.get("text", "")).encode("utf-8", "ignore"))
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def _embedding_meta(chunks: list, mat: "np.ndarray") -> dict:
+    return {
+        "model": _embed_cfg()[2],
+        "dimension": int(mat.shape[1]),
+        "chunker_version": _CHUNKER_VERSION,
+        "content_hash": _content_hash(chunks),
+        "embedded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def _manifest_embedding_meta(source_id: str) -> dict:
+    """Read metadata for bundled vectors without rewriting large source JSON files."""
+    path = os.path.join(_RAG_DIR, "embedding_manifest.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            manifest = json.load(f)
+        source = (manifest.get("sources") or {}).get(source_id) or {}
+        if not source:
+            return {}
+        return {
+            "model": manifest.get("model"),
+            "dimension": manifest.get("dimension"),
+            "chunker_version": manifest.get("chunker_version"),
+            "content_hash": source.get("content_hash"),
+            "embedded_at": manifest.get("created_at", "bundled"),
+        }
+    except Exception:
+        return {}
+
+
+def _atomic_save_npy(path: str, mat: "np.ndarray") -> None:
+    fd, tmp = tempfile.mkstemp(prefix="rag_vec_", suffix=".npy", dir=os.path.dirname(path))
+    os.close(fd)
+    try:
+        np.save(tmp, mat)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def _atomic_save_json(path: str, value: dict) -> None:
+    fd, tmp = tempfile.mkstemp(prefix="rag_src_", suffix=".json", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def _embedding_state(src: dict) -> tuple[bool, str]:
+    """Return whether a source vector matches current content, chunker and model."""
+    sid, chunks = src.get("id"), src.get("chunks", [])
+    path = _vec_path(sid) if sid else ""
+    if not path or not os.path.isfile(path):
+        return False, "missing"
+    meta = src.get("embedding") or _manifest_embedding_meta(sid)
+    if not meta:
+        return False, "metadata-missing"
+    if meta.get("model") != _embed_cfg()[2]:
+        return False, "model-changed"
+    if meta.get("chunker_version") != _CHUNKER_VERSION:
+        return False, "chunker-changed"
+    if meta.get("content_hash") != _content_hash(chunks):
+        return False, "content-changed"
+    try:
+        mat = np.load(path, mmap_mode="r")
+        if mat.ndim != 2 or mat.shape[0] != len(chunks):
+            return False, "shape-mismatch"
+        if int(meta.get("dimension") or 0) != int(mat.shape[1]):
+            return False, "dimension-mismatch"
+    except Exception:
+        return False, "unreadable"
+    return True, "current"
 
 
 # ── 색인 캐시(변경 시 재구성) ─────────────────────────────────────────────────
@@ -306,12 +411,12 @@ def _save_source(source_id: str, title: str, kind: str, ref: str, chunks: list) 
     _ensure_dir()
     rec = {"id": source_id, "title": title[:200], "kind": kind, "source_ref": ref[:500],
            "added": time.strftime("%Y-%m-%d %H:%M:%S"), "chunks": chunks}
-    with open(os.path.join(_RAG_DIR, source_id + ".json"), "w", encoding="utf-8") as f:
-        json.dump(rec, f, ensure_ascii=False)
     # 임베딩(가능하면) — 실패해도 문서는 저장됨(BM25 로 동작)
     mat = _embed([c.get("text", "") for c in chunks], "passage")
     if mat is not None and mat.shape[0] == len(chunks):
-        np.save(_vec_path(source_id), mat)
+        _atomic_save_npy(_vec_path(source_id), mat)
+        rec["embedding"] = _embedding_meta(chunks, mat)
+    _atomic_save_json(os.path.join(_RAG_DIR, source_id + ".json"), rec)
     _INDEX["sig"] = None    # 다음 검색 때 재색인
     _VINDEX["sig"] = None
     return {"id": source_id, "title": rec["title"], "kind": kind,
@@ -349,10 +454,13 @@ def list_sources() -> list:
     out = []
     for src in _load_all_sources():
         sid = src.get("id")
+        current, reason = _embedding_state(src)
         out.append({"id": sid, "title": src.get("title", ""),
                     "kind": src.get("kind", ""), "chunks": len(src.get("chunks", [])),
                     "added": src.get("added", ""), "source_ref": src.get("source_ref", ""),
-                    "embedded": bool(sid and os.path.isfile(_vec_path(sid)))})
+                    "embedded": current, "embedding_state": reason,
+                    "embedding_model": ((src.get("embedding") or _manifest_embedding_meta(sid))
+                                        .get("model", ""))})
     out.sort(key=lambda s: s.get("added", ""), reverse=True)
     return out
 
@@ -376,22 +484,27 @@ def has_sources() -> bool:
 
 
 def _ensure_vindex():
-    """저장된 .npy 벡터를 모아 의미 검색용 행렬을 구성. 벡터 없는 문서는 제외."""
-    sig = _sources_signature()
-    if _VINDEX["sig"] == sig and _VINDEX["mat"] is not None:
+    """Build a semantic index only from vectors valid for the current configuration."""
+    files = sorted(glob.glob(os.path.join(_RAG_DIR, "src_*.npy")))
+    sig = (_sources_signature(), tuple((f, os.path.getmtime(f)) for f in files),
+           _embed_cfg()[2], _CHUNKER_VERSION)
+    if _VINDEX["sig"] == sig:
         return
     mats, chunks = [], []
     for src in _load_all_sources():
         sid = src.get("id")
         vp = _vec_path(sid)
         src_chunks = src.get("chunks", [])
-        if not (sid and os.path.isfile(vp) and src_chunks):
+        current, _ = _embedding_state(src)
+        if not (sid and current and src_chunks):
             continue
         try:
             m = np.load(vp)
         except Exception:
             continue
-        if m.shape[0] != len(src_chunks):
+        if m.ndim != 2 or m.shape[0] != len(src_chunks):
+            continue
+        if mats and m.shape[1] != mats[0].shape[1]:
             continue
         mats.append(m)
         for c in src_chunks:
@@ -417,6 +530,66 @@ def _semantic_search(query: str, k: int) -> Optional[list]:
     order = np.argsort(-sims)[:k]
     return [{**_VINDEX["chunks"][int(i)], "score": round(float(sims[int(i)]), 3)}
             for i in order if sims[int(i)] > 0]
+
+
+def _bm25_search(query: str, k: int) -> list:
+    _ensure_index()
+    if not _INDEX["chunks"]:
+        return []
+    q = _tokenize(query)
+    if not q:
+        return []
+    ranked = _INDEX["bm25"].topk(q, k)
+    if not ranked:
+        return []
+    peak = ranked[0][0] or 1.0
+    return [{**_INDEX["chunks"][i], "score": round(float(raw / peak), 3),
+             "bm25_score": round(float(raw), 3)} for raw, i in ranked]
+
+
+def _hit_key(hit: dict) -> tuple:
+    return (hit.get("source_id"), hit.get("loc"),
+            hashlib.sha1(str(hit.get("text", "")).encode("utf-8", "ignore")).hexdigest())
+
+
+def _hybrid_merge(semantic: list, lexical: list, k: int) -> list:
+    """Combine dense and lexical ranks using normalized reciprocal-rank fusion."""
+    merged: dict[tuple, dict] = {}
+    denom = 2.0 / (_RRF_K + 1)
+    for label, hits in (("semantic", semantic or []), ("bm25", lexical or [])):
+        for rank, hit in enumerate(hits, 1):
+            key = _hit_key(hit)
+            row = merged.setdefault(key, {**hit, "_rrf": 0.0, "retrieval": []})
+            row["_rrf"] += 1.0 / (_RRF_K + rank)
+            row["retrieval"].append(label)
+            if label == "semantic":
+                row["semantic_score"] = hit.get("score")
+            else:
+                row["bm25_score"] = hit.get("bm25_score")
+    out = []
+    for row in merged.values():
+        row["score"] = round(min(1.0, row.pop("_rrf") / denom), 3)
+        row["retrieval"] = "+".join(row["retrieval"])
+        out.append(row)
+    out.sort(key=lambda h: h.get("score", 0), reverse=True)
+    return out[:k]
+
+
+def _select_diverse(hits: list, k: int, max_per_source: int = 2) -> list:
+    """Remove duplicate chunks and keep one large source from monopolizing results."""
+    selected, per_source, seen_text = [], Counter(), set()
+    for hit in hits:
+        normalized = re.sub(r"\W+", " ", str(hit.get("text", "")).lower()).strip()
+        fingerprint = hashlib.sha1(normalized.encode("utf-8", "ignore")).hexdigest()
+        source = hit.get("source_id") or hit.get("title") or "unknown"
+        if fingerprint in seen_text or per_source[source] >= max_per_source:
+            continue
+        selected.append(hit)
+        seen_text.add(fingerprint)
+        per_source[source] += 1
+        if len(selected) >= k:
+            break
+    return selected
 
 
 # 공격 카테고리 → 문서에서 그 주제를 가리키는 용어(리랭킹 부스트용).
@@ -457,45 +630,63 @@ def _rerank_by_category(hits: list, category: str) -> list:
 
 
 def search(query: str, k: int = 6, category: str = "") -> list:
-    """쿼리로 top-k 청크 검색. 의미 검색 우선, 실패 시 BM25 폴백.
-    category 가 주어지면 후보 풀을 넓혀 카테고리 용어로 재정렬(기존 데이터에도 즉시 적용)."""
+    """Hybrid dense+BM25 retrieval with category and source-diversity reranking."""
     if not (query or "").strip():
         return []
-    pool = max(k, k * 3) if category else k             # 카테고리 리랭킹용 후보 확대
-    sem = _semantic_search(query, pool)
-    if sem:
-        return _rerank_by_category(sem, category)[:k] if category else sem[:k]
-    _ensure_index()
-    if not _INDEX["chunks"]:
-        return []
-    q = _tokenize(query)
-    if not q:
-        return []
-    hits = []
-    for score, i in _INDEX["bm25"].topk(q, pool):
-        c = _INDEX["chunks"][i]
-        hits.append({**c, "score": round(score, 3)})
-    return _rerank_by_category(hits, category)[:k] if category else hits[:k]
+    pool = max(k * 5, 20)
+    sem = _semantic_search(query, pool) or []
+    lexical = _bm25_search(query, pool)
+    if sem and lexical:
+        hits = _hybrid_merge(sem, lexical, pool * 2)
+    elif sem:
+        hits = [{**h, "retrieval": "semantic"} for h in sem]
+    else:
+        hits = [{**h, "retrieval": "bm25"} for h in lexical]
+    if category:
+        hits = _rerank_by_category(hits, category)
+    return _select_diverse(hits, k)
 
 
-def reindex_embeddings() -> dict:
-    """벡터(.npy)가 없는 기존 문서를 임베딩해 백필. 이미 있으면 건너뜀."""
+def reindex_embeddings(force: bool = False) -> dict:
+    """Create or refresh vectors whose model/content/chunker metadata is stale."""
     if not embeddings_enabled():
-        return {"ok": False, "reason": "NVIDIA_API_KEY 미설정 — 임베딩 사용 불가", "embedded": 0}
+        return {"ok": False, "reason": "임베딩 API 키 미설정 — EMBEDDING_API_KEY/AI_API_KEY/NVIDIA_API_KEY 확인", "embedded": 0}
     done, failed, skipped = 0, 0, 0
     for src in _load_all_sources():
         sid = src.get("id")
         chunks = src.get("chunks", [])
         if not (sid and chunks):
             continue
-        if os.path.isfile(_vec_path(sid)):
+        current, _ = _embedding_state(src)
+        if current and not force:
             skipped += 1
             continue
         mat = _embed([c.get("text", "") for c in chunks], "passage")
         if mat is not None and mat.shape[0] == len(chunks):
-            np.save(_vec_path(sid), mat)
+            _atomic_save_npy(_vec_path(sid), mat)
+            src["embedding"] = _embedding_meta(chunks, mat)
+            _atomic_save_json(os.path.join(_RAG_DIR, sid + ".json"), src)
             done += 1
         else:
             failed += 1
     _VINDEX["sig"] = None
     return {"ok": failed == 0, "embedded": done, "skipped": skipped, "failed": failed}
+
+
+def status(sources: list | None = None) -> dict:
+    sources = list_sources() if sources is None else sources
+    current = sum(1 for src in sources if src.get("embedded"))
+    stale = len(sources) - current
+    if embeddings_enabled() and current:
+        mode = "hybrid"
+    else:
+        mode = "bm25"
+    return {
+        "mode": mode,
+        "embeddings_configured": embeddings_enabled(),
+        "embedding_model": _embed_cfg()[2] if embeddings_enabled() else "",
+        "source_count": len(sources),
+        "chunk_count": sum(src.get("chunks", 0) for src in sources),
+        "embedded_sources": current,
+        "stale_sources": stale,
+    }

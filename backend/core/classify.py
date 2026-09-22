@@ -184,6 +184,20 @@ def _url_wo_host(url: Optional[str]) -> str:
     return url                 # 상대경로 등은 그대로(host 없음)
 
 
+def is_direct_file_probe(url, payload=None, req_body=None) -> bool:
+    """파일 경로 자체의 요청만 구분한다. 파라미터·본문 주입과 트래버설은 제외."""
+    try:
+        parsed = urlsplit(url or "")
+        path = _decode(parsed.path)
+    except ValueError:
+        return False
+    if parsed.query or req_body or (payload and _decode(payload.strip()) != path):
+        return False
+    if ".." in path or "\\" in path:
+        return False
+    return bool(re.search(r"(?:^|/)(?:\.git/(?:config|HEAD|index)|\.env|wp-config\.php|web\.config|\.htaccess)$", path, re.I))
+
+
 def _headers_text(headers: Optional[dict]) -> str:
     """헤더를 'key: value' 한 줄들로. dict(소문자 매칭용)나 HeaderView 모두 허용."""
     if not headers:

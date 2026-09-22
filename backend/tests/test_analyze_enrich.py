@@ -20,6 +20,43 @@ from routers import api as api_mod
 client = TestClient(app)
 
 
+def test_reclassification_preserves_context_before_enrichment(monkeypatch):
+    events = []
+    context = {}
+    monkeypatch.setattr(api_mod, "ai_enabled", lambda: True)
+    monkeypatch.setattr(api_mod, "response_analysis_enabled", lambda: False)
+
+    async def classify(_):
+        events.append("classify")
+        return {"primary": "sqli"}
+
+    def analyze(**kwargs):
+        events.append("analyze")
+        context.update(kwargs)
+        return {"attack_type": "sqli", "attack_outcome": "suspicious"}
+
+    async def enrich(analysis, *args):
+        events.append("enrich")
+        assert analysis["attack_outcome"] == "suspicious"
+        analysis["ai_verdict"] = {"outcome": "suspicious"}
+
+    monkeypatch.setattr(api_mod, "ai_classify_attack", classify)
+    monkeypatch.setattr(api_mod, "analyze_response", analyze)
+    monkeypatch.setattr(api_mod, "_attach_rag_and_verdict", enrich)
+    request = api_mod.EnrichRequest(
+        analysis={"attack_type": "", "attack_outcome": "safe"},
+        baseline={"status_code": 200, "body": "normal"},
+        redirect_chain=[{"status_code": 302, "location": "/login"}],
+        body_truncated=True, full_body_len=5000,
+        payload_id="test-probe", custom_alert_rules=[{"name": "test"}])
+    result = asyncio.run(api_mod.analyze_enrich(request))
+    assert events == ["classify", "analyze", "enrich"]
+    for field in ("baseline", "redirect_chain", "body_truncated", "full_body_len",
+                  "payload_id", "custom_alert_rules"):
+        assert context[field] == getattr(request, field)
+    assert result["ai_verdict"]["outcome"] == result["reclassified_analysis"]["attack_outcome"]
+
+
 @pytest.fixture
 def fake_ai(monkeypatch):
     """ai_analyze / RAG / ai_verdict 를 '느린 가짜'로 대체하고 호출을 기록."""

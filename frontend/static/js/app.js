@@ -122,7 +122,7 @@ const OUTCOME = {                     // attack_outcome → [라벨, tag클래�
   success:      ['공격 성공', 'tag-red'],
   suspicious:   ['의심',      'tag-orange'],   // 판정불가 계열(확증 전)
   blocked:      ['차단됨',    'tag-green'],
-  safe:         ['영향 없음', 'tag-green'],
+  safe:         ['이번 검사 미검출', 'tag-green'],
   inconclusive: ['판정 불가', 'tag-blue'],
 };
 const OUTCOME_BORDER = {              // 카드 테두리 강조색(성공/의심만 강조)
@@ -1348,7 +1348,9 @@ async function loadRagSources() {
     } else {
       const pending = srcs.filter(s => !s.embedded).length;
       embRow.style.display = srcs.length ? 'flex' : 'none';
-      embStat.textContent = pending ? `의미 검색 · 미임베딩 ${pending}건` : '의미 검색 활성';
+      const mode = res.mode === 'hybrid' ? '하이브리드(BM25+벡터)' : 'BM25';
+      embStat.textContent = pending ? `${mode} · 재색인 필요 ${pending}건` : `${mode} 검색 활성`;
+      embStat.title = res.embedding_model || '';
       embRow.querySelector('button').style.display = pending ? '' : 'none';
     }
   }
@@ -1362,7 +1364,7 @@ async function loadRagSources() {
     srcs.map(s => `
     <div class="rag-src-row" data-title="${escapeHtml((s.title||s.id).toLowerCase())}" style="display:flex;gap:6px;align-items:center;padding:3px 0;border-top:1px solid var(--border)">
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(s.source_ref||'')}">
-        ${escapeHtml(s.title||s.id)} <span style="color:var(--text-muted)">· ${escapeHtml(s.kind)} · ${s.chunks}청크${s.embedded ? ' · 임베딩' : ''}</span>
+        ${escapeHtml(s.title||s.id)} <span style="color:var(--text-muted)">· ${escapeHtml(s.kind)} · ${s.chunks}청크${s.embedded ? ' · 임베딩 최신' : ' · BM25/재색인 필요'}</span>
       </span>
       <button class="btn btn-secondary" style="font-size:10px;padding:1px 6px" onclick="ragDelete('${s.id}')">삭제</button>
     </div>`).join('');
@@ -1380,7 +1382,7 @@ async function ragReindex() {
   toast('임베딩 재색인 중… (문서 수에 따라 시간이 걸립니다)', 'info');
   const res = await API.ragReindex();
   if (res.ok === false && res.reason) { toast(res.reason, 'error'); }
-  else { toast(`임베딩 완료: ${res.embedded || 0}건 (건너뜀 ${res.skipped || 0}, 실패 ${res.failed || 0})`, res.failed ? 'error' : 'success'); }
+    else { toast(`임베딩 갱신: ${res.embedded || 0}건 (최신 ${res.skipped || 0}, 실패 ${res.failed || 0})`, res.failed ? 'error' : 'success'); }
   loadRagSources();
 }
 
@@ -1433,6 +1435,7 @@ async function generateAiCandidates() {
       API.aiSuggest({
         method: req.method, url: req.url, params: req.params,
         body: req.body, header_names: req.headerNames, count: 10,
+        category: state.selectedCategory?.id || '',
         fingerprint: buildFingerprint(),
       }).catch(e => ({ error: e.message })),
       fuBody ? API.followupSuggest(fuBody).catch(e => ({ error: e.message })) : Promise.resolve(null),
@@ -1997,8 +2000,12 @@ async function enrichAnalysis(reqPayload, result) {
       payload: reqPayload.payload, category: reqPayload.category,
       status_code: result.status_code, response_time: result.response_time,
       resp_headers: result.headers || {}, resp_body: result.body || '',
+      baseline: reqPayload.baseline, redirect_chain: result.redirect_chain,
+      body_truncated: a.body_truncated, full_body_len: a.body_len_full,
+      payload_id: reqPayload.payload_id, custom_alert_rules: reqPayload.custom_alert_rules || [],
       analysis: {
         verdict: a.verdict, attack_type: a.attack_type, attack_outcome: a.attack_outcome,
+        attack_type_ambiguous: a.attack_type_ambiguous, det_verdict: a.det_verdict,
         findings: a.findings || [], alerts: a.alerts || [],
       },
     });
@@ -2020,7 +2027,10 @@ async function enrichAnalysis(reqPayload, result) {
       if (res.reclassified_analysis) {
         const rc = res.reclassified_analysis;
         ['findings','attack_outcome','attack_confidence','verdict','risk_level','score',
-         'det_verdict','next_action','attack_type'].forEach(k => { if (rc[k] !== undefined) a[k] = rc[k]; });
+         'det_verdict','next_action','attack_type','impact','validity','body_truncated',
+         'body_len_seen','body_len_full','reflection','spa_shell','confidence',
+         'attack_type_ambiguous','attack_type_candidates','attack_subtype',
+         'attack_risk_level','hygiene_risk_level','overall_risk_level','http_outcome'].forEach(k => { if (rc[k] !== undefined) a[k] = rc[k]; });
         a._reclassified = rc.reclassified_by_ai;   // {from, to, reason}
       }
     }
@@ -2432,7 +2442,7 @@ function renderAiCard(ai) {
 // 공격 유형 분류 표시 — 판정(성공/실패)이 아니라 '무슨 공격 시도인가'.
 // 정규식(core.classify)이 정하면 그대로, 못 정하면(빈 값) AI 분류(attack_class)를 배지로.
 const _ATTACK_TYPE_KO = {
-  sqli:'SQL 인젝션', xss:'XSS', cmdi:'명령 주입', lfi:'파일 읽기/트래버설', xxe:'XXE',
+  sqli:'SQL 인젝션', xss:'XSS', cmdi:'명령 주입', lfi:'파일 읽기/트래버설', file:'민감 파일 직접 노출 점검', xxe:'XXE',
   ssrf:'SSRF', ssti:'서버 템플릿 주입', redirect:'오픈 리다이렉트', nosql:'NoSQL 주입',
   xmlrpc:'XML-RPC', jwt:'JWT', idor:'IDOR/접근제어', ldap:'LDAP 주입', xpath:'XPath 주입',
   crlf:'CRLF 주입', cors:'CORS 오설정', graphql:'GraphQL', ssi:'SSI/ESI', upload:'파일 업로드',
@@ -2631,12 +2641,25 @@ function _ragContextBlock(ragCtx, usedCount) {
 }
 
 // 판정 결과 카드 — AI 종합 판정(라벨 기반)이 있으면 그것으로, 없으면 결정적 판정
+function _impactSummary(a) {
+  const impact = a.impact;
+  if (!impact || !impact.confirmed) return '';
+  return `<div class="detail-item" style="margin-top:6px;overflow-wrap:anywhere"><b>확인된 영향</b> — ${escapeHtml(impact.confirmed)}</div>
+    <details style="margin-top:4px;font-size:11px;overflow-wrap:anywhere">
+      <summary style="cursor:pointer;color:var(--text-muted)">영향 상세 · 조건과 확인 범위</summary>
+      <div class="detail-item"><b>잠재적 영향</b> — ${escapeHtml(impact.potential || '')}</div>
+      <div class="detail-item"><b>확인 범위</b> — ${escapeHtml(impact.limitations || '')}</div>
+    </details>`;
+}
+
 function renderVerdictCard(a, confidenceColor) {
+  const confidence = a.attack_confidence ?? a.confidence;
+  confidenceColor = confidence >= 70 ? 'var(--success)' : confidence >= 40 ? 'var(--warning)' : 'var(--danger)';
   const ai = a.ai_verdict;
   const det = a.det_verdict || {};   // 결정적 서술(항상 존재) — AI 없거나 누락 시 폴백
   if (ai && !ai.error) {
     const [label, cls] = OUTCOME[ai.outcome] || [String(ai.outcome || '-'), 'tag-blue'];
-    const sev = String(ai.severity || 'info');
+    const sev = String(a.risk_level || 'info');
     const sevKo = { critical:'심각', high:'높음', medium:'중간', low:'낮음', info:'정보' }[sev] || sev;
     const sevCls = (sev === 'critical' || sev === 'high') ? 'tag-red' : sev === 'medium' ? 'tag-yellow' : 'tag-blue';
     return `
@@ -2648,9 +2671,10 @@ function renderVerdictCard(a, confidenceColor) {
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
             <span class="tag ${cls}">${label}</span>
             <span class="tag ${sevCls}">위험도 ${escapeHtml(sevKo)}</span>
-            <span class="tag tag-blue">신뢰도 ${escapeHtml(String(ai.confidence ?? '-'))}</span>
+            <span class="tag tag-blue">검증 신뢰도 ${escapeHtml(String(confidence ?? '-'))}</span>
           </div>
           ${(ai.reasoning || det.summary) ? `<div class="detail-item">${escapeHtml(ai.reasoning || det.summary)}</div>` : ''}
+          ${_impactSummary(a)}
           ${(ai.priority || det.priority) ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(ai.priority || det.priority)}</div>` : ''}
           ${(ai.remediation || det.remediation) ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(ai.remediation || det.remediation)}</div>` : ''}
         </div>
@@ -2667,15 +2691,16 @@ function renderVerdictCard(a, confidenceColor) {
         <div class="verdict-display">
           ${headlineVerdict(a)}
           <div style="flex:1">
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">신뢰도 ${a.confidence}%</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">검증 신뢰도 ${confidence}%</div>
             <div class="confidence-bar">
-              <div class="confidence-fill" style="width:${a.confidence}%;background:${confidenceColor}"></div>
+              <div class="confidence-fill" style="width:${confidence}%;background:${confidenceColor}"></div>
             </div>
           </div>
           ${riskBadge(a.risk_level)}
         </div>
         ${aiErr}
         ${det.summary ? `<div class="detail-item" style="margin-top:6px">${escapeHtml(det.summary)}</div>` : ''}
+        ${_impactSummary(a)}
         ${det.priority ? `<div class="detail-item"><b>우선 확인</b> — ${escapeHtml(det.priority)}</div>` : ''}
         ${det.remediation ? `<div class="detail-item"><b>조치</b> — ${escapeHtml(det.remediation)}</div>` : ''}
       </div>
@@ -4136,10 +4161,8 @@ function renderReport(data) {
   const leakList   = results.filter(r => r.analysis?.error_leaks?.length > 0);
   const sensitiveList = results.filter(r => r.analysis?.sensitive_data?.length > 0);
 
-  const overallRisk = sensitiveList.length || bypassList.length ? 'CRITICAL'
-    : leakList.length ? 'HIGH'
-    : passedList.length > summary.total * 0.3 ? 'MEDIUM'
-    : 'LOW';
+  const riskOrder = ['info', 'low', 'medium', 'high', 'critical'];
+  const overallRisk = riskOrder[Math.max(1, ...results.map(r => riskOrder.indexOf(r.analysis?.overall_risk_level || r.analysis?.risk_level || 'info')))].toUpperCase();
 
   const riskColor = { CRITICAL:'var(--critical)', HIGH:'var(--danger)', MEDIUM:'var(--warning)', LOW:'var(--success)' };
 
@@ -4153,11 +4176,11 @@ function renderReport(data) {
         </div>
         <div class="summary-card">
           <div class="num num-rate">${summary.detection_rate}%</div>
-          <div class="lbl">WAF 탐지율</div>
+          <div class="lbl">차단 응답 비율</div>
         </div>
         <div class="summary-card">
-          <div class="num num-bypass">${summary.bypass}</div>
-          <div class="lbl">우회 성공</div>
+          <div class="num num-bypass">${results.filter(r => r.analysis?.attack_outcome === 'success').length}</div>
+          <div class="lbl">공격 성공 증거</div>
         </div>
         <div class="summary-card">
           <div class="num num-total">${summary.total}</div>
@@ -4172,7 +4195,7 @@ function renderReport(data) {
       <div style="display:flex;flex-direction:column;gap:8px">
         ${renderProgressBar('차단 (Blocked)', summary.blocked, summary.total, 'var(--success)')}
         ${renderProgressBar('통과 (Passed)', summary.passed, summary.total, 'var(--warning)')}
-        ${renderProgressBar('우회 성공 (Bypass)', summary.bypass, summary.total, 'var(--critical)')}
+        ${renderProgressBar('공격 성공 증거', results.filter(r => r.analysis?.attack_outcome === 'success').length, summary.total, 'var(--critical)')}
         ${renderProgressBar('에러/타임아웃', summary.error, summary.total, 'var(--text-muted)')}
       </div>
     </div>
@@ -4201,10 +4224,10 @@ function renderReport(data) {
     <div class="report-section">
       <h3>📋 권고 사항</h3>
       <div style="display:flex;flex-direction:column;gap:6px">
-        ${summary.bypass > 0 ? `<div class="detail-item">🔴 WAF 룰셋 즉시 보완 필요 — ${summary.bypass}개 페이로드 우회 성공</div>` : ''}
+        ${summary.bypass > 0 ? `<div class="detail-item">탐지된 취약 증거를 확인하고 해당 기능의 수정 우선순위를 검토하세요.</div>` : ''}
         ${leakList.length > 0 ? `<div class="detail-item">🟠 에러 메시지 노출 차단 — 서버 에러 응답 커스터마이징 필요</div>` : ''}
         ${summary.passed > 0 ? `<div class="detail-item">🟡 탐지 미적용 페이로드 ${summary.passed}개 — 추가 룰 검토 권장</div>` : ''}
-        ${summary.detection_rate >= 90 ? `<div class="detail-item">✅ 탐지율 ${summary.detection_rate}% — 양호한 수준 유지</div>` : ''}
+        <div class="detail-item">차단 응답 비율은 WAF 탐지 정확도나 대상의 안전성을 의미하지 않습니다.</div>
         <div class="detail-item">📌 정기적인 WAF 룰셋 검토 및 업데이트 권장</div>
         <div class="detail-item">📌 탐지 우회 기법 지속 모니터링 필요</div>
       </div>

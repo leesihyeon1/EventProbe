@@ -1,0 +1,32 @@
+{
+  "description": "EventProbe RAG retrieval golden set. A hit is any accepted source in top-k.",
+  "k": 5,
+  "minimum_recall_at_k": 0.8,
+  "cases": [
+    {"id":"log4shell-cve","query":"Log4Shell CVE-2021-44228 JNDI LDAP lookup exploitation","category":"log4shell","expected_sources":["src_c992306f8ad3","src_b0ee1e1a2ced"]},
+    {"id":"log4shell-mitigation","query":"Log4j JNDI lookup mitigation disable message lookups remediation","category":"log4shell","expected_sources":["src_c992306f8ad3","src_b0ee1e1a2ced"]},
+    {"id":"ssrf-parser","query":"SSRF URL parser confusion validation bypass","category":"ssrf","expected_sources":["src_1d1cd1cebaec","src_b0ee1e1a2ced","src_45af850f8f3c"]},
+    {"id":"ssrf-metadata","query":"SSRF cloud metadata 169.254.169.254 allowlist prevention","category":"ssrf","expected_sources":["src_1d1cd1cebaec","src_b0ee1e1a2ced","src_45af850f8f3c","src_4da44f300970"]},
+    {"id":"xss-svg","query":"cross site scripting SVG onload event handler payload","category":"xss","expected_sources":["src_81238a331c3d","src_45af850f8f3c","src_b0ee1e1a2ced"]},
+    {"id":"xss-dom","query":"DOM XSS source sink innerHTML location hash testing","category":"xss","expected_sources":["src_81238a331c3d","src_45af850f8f3c","src_b0ee1e1a2ced","src_c3d716bbcf6f"]},
+    {"id":"xss-defense","query":"XSS output encoding CSP sanitization remediation","category":"xss","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f"]},
+    {"id":"sqli-error","query":"SQL injection error based extractvalue updatexml database error","category":"sqli","expected_sources":["src_6ebb743ec58a","src_45af850f8f3c","src_4da44f300970","src_b0ee1e1a2ced"]},
+    {"id":"sqli-blind","query":"blind SQL injection boolean based time delay confirmation","category":"sqli","expected_sources":["src_6ebb743ec58a","src_45af850f8f3c","src_4da44f300970","src_c3d716bbcf6f"]},
+    {"id":"sqli-remediation","query":"SQL injection parameterized query prepared statement remediation","category":"sqli","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f"]},
+    {"id":"waf-bypass","query":"WAF bypass filter evasion encoding normalization technique","category":"sqli","expected_sources":["src_70d42903d541","src_b0ee1e1a2ced","src_c3d716bbcf6f"]},
+    {"id":"waf-double-encoding","query":"web application firewall double encoding case variation bypass","category":"xss","expected_sources":["src_70d42903d541","src_b0ee1e1a2ced","src_c3d716bbcf6f"]},
+    {"id":"csrf-defense","query":"CSRF token SameSite cookie origin validation prevention","category":"csrf","expected_sources":["src_b0ee1e1a2ced","src_c3d716bbcf6f","src_37a799e760c1"]},
+    {"id":"jwt-algorithm","query":"JWT algorithm confusion alg none signature verification","category":"jwt","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_bc8859ca78bd"]},
+    {"id":"idor","query":"IDOR broken object level authorization object identifier testing","category":"idor","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f","src_bc8859ca78bd"]},
+    {"id":"api-bola","query":"API BOLA broken object level authorization resource id","category":"idor","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_bc8859ca78bd"]},
+    {"id":"api-mass-assignment","query":"API mass assignment hidden property privilege escalation","category":"authbypass","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_bc8859ca78bd"]},
+    {"id":"command-injection","query":"OS command injection shell metacharacter output blind callback","category":"cmdi","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_4da44f300970","src_ab5eddc48c19"]},
+    {"id":"ssti","query":"server side template injection Jinja Twig expression evaluation","category":"ssti","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_4da44f300970"]},
+    {"id":"path-traversal","query":"path traversal local file inclusion dot dot slash passwd testing","category":"lfi","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f","src_4da44f300970"]},
+    {"id":"xxe","query":"XML external entity XXE DOCTYPE SYSTEM file disclosure prevention","category":"xxe","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f"]},
+    {"id":"deserialization","query":"insecure deserialization gadget chain object injection remote code execution","category":"deserial","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f","src_ab5eddc48c19"]},
+    {"id":"request-smuggling","query":"HTTP request smuggling content length transfer encoding CL TE testing","category":"smuggling","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f","src_ab5eddc48c19"]},
+    {"id":"oauth-redirect","query":"OAuth open redirect redirect_uri validation authorization code theft","category":"redirect","expected_sources":["src_b0ee1e1a2ced","src_45af850f8f3c","src_c3d716bbcf6f"]},
+    {"id":"security-headers","query":"web security headers CSP HSTS X-Content-Type-Options remediation","category":"headers","expected_sources":["src_b0ee1e1a2ced","src_c3d716bbcf6f","src_37a799e760c1"]}
+  ]
+}

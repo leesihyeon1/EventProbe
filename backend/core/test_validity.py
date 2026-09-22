@@ -26,7 +26,7 @@ _CHALLENGE_RE = re.compile(
 
 # 리소스 수준 프로브(파일 읽기·CVE 경로 등) — 여기선 302/401/403 이 '미도달'이 아니라
 # '리소스 보호/부재/미해당 = 안전'이라는 정당한 결론이다. auth 관련 미도달 경고에서 제외.
-_RESOURCE_PROBE = frozenset({"cve", "lfi"})
+_RESOURCE_PROBE = frozenset({"cve", "lfi", "file"})
 
 # 대조군(baseline)이 있어야 단일 응답으로 판정 가능한 공격
 _NEEDS_BASELINE = frozenset({"authbypass", "idor"})

@@ -273,13 +273,13 @@ def test_real_internal_ip_still_low_alert():
     assert r["risk_level"] != "critical"
 
 
-def test_time_based_sqli_success_is_high():
-    """SLEEP(5) 요청에 실제 5초 이상 지연이면 blind time-based 성공 → high."""
+def test_time_based_sqli_single_delay_requires_confirmation():
+    """단일 지연은 대조군이 없어 성공이 아닌 의심으로 남는다."""
     r = analyze_response(200, {}, "ok", 5200,
                          payload="1' AND SLEEP(5)-- -", category="sqli")
-    assert r["attack_outcome"] == "success"
-    assert r["verdict"] == "bypass"
-    assert r["risk_level"] == "high"
+    assert r["attack_outcome"] == "suspicious"
+    assert r["verdict"] != "bypass"
+    assert r["risk_level"] == "medium"
 
 
 def test_time_based_sqli_no_delay_is_not_success():
@@ -308,8 +308,8 @@ def test_cmdi_id_output_success():
 def test_xss_exec_context_reflection_success():
     r = analyze_response(200, {}, "<div><svg onload=alert(1)></div>", 100,
                          payload="<svg onload=alert(1)>", category="xss")
-    assert r["attack_outcome"] == "success"
-    assert r["risk_level"] == "high"
+    assert r["attack_outcome"] == "suspicious"
+    assert r["risk_level"] == "medium"
 
 
 def test_sql_error_leak_is_escalated():
@@ -1040,8 +1040,8 @@ def test_reflected_xss_from_url_when_payload_empty():
     r = analyze_response(200, {"content-type": "text/html"}, body, 100,
                          payload="", category="",
                          url="https://t/?search=test\"><svg onload=alert(1)>")
-    assert r["attack_outcome"] == "success"
-    assert any("반사형 XSS" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+    assert r["attack_outcome"] == "suspicious"
+    assert any("반사형 XSS" in f["name"] and f["verdict"] == "의심" for f in r["findings"])
 
 
 def test_benign_url_reflection_no_false_positive():
@@ -1067,7 +1067,7 @@ def test_xss_partial_encoding_still_detected():
     body = "<h1>x&quot;><svg onload=alert(1)></h1>"
     r = analyze_response(200, {"content-type": "text/html"}, body, 50,
                          payload="", category="", url='https://t/?q="><svg onload=alert(1)>')
-    assert r["attack_outcome"] == "success"
+    assert r["attack_outcome"] == "suspicious"
     assert any("반사형 XSS" in f["name"] for f in r["findings"])
 
 
@@ -1082,7 +1082,7 @@ def test_xss_transport_urlencoded_reflected_decoded():
     body = "<h1>'<svg onload=alert(1)>'</h1>"
     r = analyze_response(200, {"content-type": "text/html"}, body, 50,
                          payload="", category="", url="https://t/?q=%3Csvg%20onload%3Dalert(1)%3E")
-    assert r["attack_outcome"] == "success"
+    assert r["attack_outcome"] == "suspicious"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1169,7 +1169,7 @@ def test_unencoded_reflection_not_marked_as_encoded():
     body = "<h1>x\"><svg onload=alert(1)></h1>"
     r = analyze_response(200, {"content-type": "text/html"}, body, 50, payload="",
                          category="", url="https://t/?q=\"><svg onload=alert(1)>")
-    assert any("반사형 XSS" in f["name"] and f["verdict"] == "성공" for f in r["findings"])
+    assert any("반사형 XSS" in f["name"] and f["verdict"] == "의심" for f in r["findings"])
     assert not any("인코딩 반사" in f["name"] for f in r["findings"])
 
 
@@ -1414,7 +1414,7 @@ def test_xss_js_string_breakout_is_success():
     pl = '";alert(1);//'
     r = analyze_response(200, {"content-type": "text/html"}, '<script>var m="' + pl + '";</script>',
                          60, payload=pl, category="xss", url="http://h/?q=" + pl)
-    assert any(f["verdict"] == "성공" and "실행 컨텍스트" in f["name"] for f in r["findings"])
+    assert any(f["verdict"] == "의심" and "실행 컨텍스트" in f["name"] for f in r["findings"])
 
 
 def test_xss_nextjs_page_flight_reflection_not_success():
@@ -1439,7 +1439,7 @@ def test_xss_backslash_parity_breakout():
     p_ok = BS + BS + "';alert(1)//"       # \';alert(1)//  → 이탈
     r = analyze_response(200, {"content-type": "text/html"}, "<script>var m='" + p_ok + "';</script>",
                          50, payload=p_ok, category="xss", url="http://h/?q=" + p_ok)
-    assert any(f["verdict"] == "성공" and "실행 컨텍스트" in f["name"] for f in r["findings"])
+    assert any(f["verdict"] == "의심" and "실행 컨텍스트" in f["name"] for f in r["findings"])
     p_esc = BS + "';alert(1)//"            # \';alert(1)//  → 이스케이프(안전)
     r2 = analyze_response(200, {"content-type": "text/html"}, "<script>var m='" + p_esc + "';</script>",
                           50, payload=p_esc, category="xss", url="http://h/?q=" + p_esc)

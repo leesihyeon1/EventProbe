@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-21",
+  "model": "nvidia/nemotron-3-embed-1b",
+  "dimension": 2048,
+  "chunker_version": 1,
+  "sources": {
+    "src_04022255a96d": {"content_hash": "f6749a21e9c5dd4e760a94997065f701b376b5016622a7e0e973a6006e84219b"},
+    "src_1d1cd1cebaec": {"content_hash": "f12ab5d7ae368b935156729ee75dbbe5472dfe80b583bde284186fd4ed268c89"},
+    "src_37a799e760c1": {"content_hash": "6cae7f4786a56df9591bfe6ac5607f243c8dfb78233ad1962a0ed695db881932"},
+    "src_45af850f8f3c": {"content_hash": "6c96f6e9cfb2dcaf95a720ac58679d5e535b16df07d67006e117efc7e3ce20aa"},
+    "src_4da44f300970": {"content_hash": "5d098b700b239b73efaa1f0ef39795267f3440ded343a07f50433fdbdf25ae40"},
+    "src_6ebb743ec58a": {"content_hash": "e02051de0d064e3aaf12200329db935edcd70319e8ec8a7e7c32c3f3d917beb9"},
+    "src_70d42903d541": {"content_hash": "420744db8428766518351d66cdbbbeaf1ec8012e245ccee4d799289ee860cf44"},
+    "src_81238a331c3d": {"content_hash": "031a74f273fe7678c775e722ee5e3ebc7704b2386665bc31b87c2c8a532edd6e"},
+    "src_952ffb14710e": {"content_hash": "26494996689b1880714941c3883a15264ba5fadf4bb9deeb855f2a32345d912b"},
+    "src_ab5eddc48c19": {"content_hash": "fd2ed3e4fad0663dcc62e97405f23281ec2c6797d60b6c91a1c511a0da193231"},
+    "src_b0ee1e1a2ced": {"content_hash": "f1db28843255b476241bcab09b985f0b271cb2cdf943093042ca7cae691cb779"},
+    "src_bc8859ca78bd": {"content_hash": "3ad758f617c1de43325f6c5b874a16934e5d2a031f102fc9ed633acca8db1080"},
+    "src_c3d716bbcf6f": {"content_hash": "05f608de2d7a2b84093dcce040aef9fe2905ecd8177c37f3a5b722a9df5890af"},
+    "src_c992306f8ad3": {"content_hash": "3ff80859888fb6138cd3ac9806730d17d0935a2391c5aacb8f49d44bce7ebdda"}
+  }
+}

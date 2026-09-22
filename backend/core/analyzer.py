@@ -3600,12 +3600,12 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     refl = _best_reflection(body or "", payload, url, req_body)
     if refl:
         if refl.get("exec_ctx"):
-            findings.append({"name": "반사형 XSS(실행 컨텍스트)", "verdict": "성공", "confidence": 92,
-                             "why": f"payload가 {refl['exec_ctx']}에 실행 가능한 형태로 반영됨 → 브라우저에서 스크립트 실행 가능(반사형 XSS)",
+            findings.append({"name": "반사형 XSS(실행 컨텍스트)", "verdict": "의심", "confidence": 70,
+                             "why": f"payload가 {refl['exec_ctx']}에 실행 가능한 형태로 반영됨. CSP·콘텐츠 유형·브라우저 동작을 포함한 실행 확증이 필요합니다.",
                              "evidence": refl["snippet"]})
         elif refl["unescaped"]:
-            findings.append({"name": "payload 미인코딩 반사", "verdict": "성공", "confidence": 88,
-                             "why": f"payload가 {refl['context']}에 인코딩 없이 반영됨 → XSS 등 실행 가능",
+            findings.append({"name": "payload 미인코딩 반사", "verdict": "의심", "confidence": 55,
+                             "why": f"payload가 {refl['context']}에 인코딩 없이 반영됨. 반사만으로 실행을 확정할 수 없으며 브라우저 검증이 필요합니다.",
                              "evidence": refl["snippet"]})
         else:
             findings.append({"name": "payload 반사", "verdict": "미확정", "confidence": 40,
@@ -3714,8 +3714,8 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
         pass
     elif sf:
         findings.append({"name": f"민감 파일 미노출 — {sf['targeted']}", "verdict": "안전", "confidence": 80,
-                         "why": f"요청한 {sf['targeted']} 이(가) 응답 본문에 없음 → 파일 미노출"
-                                " (200 응답은 일반 페이지·오류 페이지·SPA 껍데기일 수 있음)",
+                         "why": f"HTTP {status_code} 응답에서 {sf['targeted']} 내용 시그니처 미검출. "
+                                "이번 응답에서 노출이 확인되지 않았으며, 파일 존재 여부나 다른 경로의 노출 여부는 미확인입니다.",
                          "checked": sf.get("checked", ""),
                          "evidence": f"응답에서 {sf['targeted']} 시그니처({sf.get('checked','')})를 "
                                      f"검색 → 없음 (HTTP {status_code} · {len(body or '')}B)"})
@@ -3894,8 +3894,8 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     n = _extract_sleep_seconds(payload)
     if n:
         if response_time >= n * 1000 * 0.8:
-            findings.append({"name": "시간 지연 일치", "verdict": "성공", "confidence": 90,
-                             "why": f"지연 {n}s 요청 → 실제 {response_time/1000:.1f}s 지연 (Blind time-based)",
+            findings.append({"name": "시간 지연 일치 — 확증 필요", "verdict": "의심", "confidence": 55,
+                             "why": f"지연 {n}s 요청 → 응답 {response_time/1000:.1f}s. 단일 측정으로 공격에 의한 지연을 확정할 수 없습니다. 정상 대조군과 반복 측정해 지연 차이를 확인하세요.",
                              "evidence": f"{response_time:.0f}ms ≈ {n}s"})
         else:
             findings.append({"name": "시간 지연 없음", "verdict": "미확정", "confidence": 30,
@@ -4250,6 +4250,13 @@ def analyze_response(
     # 규칙 분류가 모호(유형 2개 이상 충돌)하면 enrich 에서 AI 분류로 보강·교정하도록 표시.
     result["attack_type_ambiguous"] = _kl.ambiguous
     result["attack_type_candidates"] = _kl.types
+    # 직접 노출 점검의 표시·설명만 세분화한다. 위에서 수행한 탐지 규칙은 유지.
+    if (_kl.types == ["lfi"] and not _kl.header_borne
+            and _classify.is_direct_file_probe(url, payload, req_body)):
+        result["attack_type"] = "file"
+        result["attack_subtype"] = "direct_exposure"
+        result["attack_type_candidates"] = ["file"]
+        result["attack_type_ambiguous"] = False
 
     is_attack_attempt = bool((payload and payload.strip()) or category)
     has_signal = any(f.get("verdict") in ("성공", "안전", "미확정", "의심") for f in findings)
@@ -4293,6 +4300,17 @@ def analyze_response(
     _has_block = any(w["severity"] == "block" for w in _validity["warnings"])
     if _has_block and outcome == "safe":
         outcome = "inconclusive"     # 테스트 무효 → '안전' 금지, 판정불가로
+        aconf = 30
+    # 관측된 누출은 유지하되 요청 처리 성공을 요구하는 증거는 무효 전제에서 확정하지 않는다.
+    if _has_block and outcome == "success":
+        for finding in findings:
+            if finding.get("verdict") == "성공" and not any(
+                    marker in finding.get("name", "") for marker in ("파일", "노출", "누출")):
+                finding["verdict"] = "의심"
+                finding["confidence"] = min(finding.get("confidence", 55), 55)
+                finding["why"] += " 테스트 유효성 경고로 실행 확증을 보류합니다."
+        if not any(f.get("verdict") == "성공" for f in findings):
+            outcome, aconf = "suspicious", 55
     if _has_block:
         _w = next(w for w in _validity["warnings"] if w["severity"] == "block")
         findings.append({
@@ -4307,7 +4325,7 @@ def analyze_response(
     result["attack_confidence"] = aconf
 
     # 10. 최종 위험도 산정 — '차단되지 않음'이 아니라 '취약 증거'를 기준으로 한다.
-    if result["verdict"] == "bypass" or result["sensitive_data"]:
+    if result["sensitive_data"]:
         result["risk_level"] = "critical"
         result["score"] = 90
     elif result["error_leaks"]:
@@ -4344,7 +4362,7 @@ def analyze_response(
         result["verdict"] = "bypass"
         if result["risk_level"] not in ("critical",):
             result["risk_level"] = "high"
-        result["score"] = max(result["score"], aconf)
+        result["score"] = 90 if result["risk_level"] == "critical" else 70
 
     # CVE 스택 지문 불일치(해당 가능성 낮음) → 성공/의심 신호가 없을 때 위험도를 낮춰 후순위화.
     # '안전'으로 뒤집지는 않는다(판정불가 유지) — 프록시 뒤 백엔드 미확인이므로.
@@ -4369,7 +4387,17 @@ def analyze_response(
     else:
         result["next_action"] = None
 
+    result["http_outcome"] = ("rejected" if status_code in (400, 401, 403, 406, 429)
+                              else "error" if status_code >= 500 else "responded")
+    # 최종 위험도는 공격 증거와 별도 응답 보안 문제 중 높은 값. 신뢰도와 점수는 독립.
+    result["attack_risk_level"] = result["risk_level"]
+    result["hygiene_risk_level"] = ("high" if "high" in alert_risks else
+                                     "medium" if "medium" in alert_risks else "info")
+    _levels = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+    result["overall_risk_level"] = max((result["attack_risk_level"], result["hygiene_risk_level"]), key=_levels.get)
     result["det_verdict"] = _deterministic_narrative(result)
+    from core.impact import describe_impact
+    result["impact"] = describe_impact(result)
 
     return result
 
@@ -4399,6 +4427,8 @@ def generate_summary(results: list) -> dict:
         "error": error,
         "detection_rate": round(detection_rate, 1),
         "risk_counts": risk_counts,
+        "outcome_counts": {name: sum(1 for r in results if r.get("analysis", {}).get("attack_outcome") == name)
+                           for name in ("success", "safe", "blocked", "suspicious", "inconclusive")},
         "waf_detected": list({
             r.get("analysis", {}).get("waf_detected")
             for r in results
