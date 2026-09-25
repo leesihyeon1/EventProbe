@@ -125,7 +125,7 @@ class _Interactsh:
     async def poll(self) -> list:
         """서버에서 새 콜백을 받아 복호. [{protocol, remote_address, timestamp, full_id,
         raw_excerpt, marker_context}] 반환(새 것만)."""
-        if not self._registered:
+        if not await self._ensure_registered():
             return []
         try:
             async with httpx.AsyncClient(timeout=20, verify=True) as c:
@@ -137,15 +137,15 @@ class _Interactsh:
         except Exception:
             return []
         data = body.get("data") or []
-        if not data:
-            return []
-        try:
-            aes_key = self._priv.decrypt(
-                base64.b64decode(body["aes_key"]),
-                padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
-                             algorithm=hashes.SHA256(), label=None))
-        except Exception:
-            return []
+        aes_key = None
+        if data:
+            try:
+                aes_key = self._priv.decrypt(
+                    base64.b64decode(body["aes_key"]),
+                    padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
+                                 algorithm=hashes.SHA256(), label=None))
+            except Exception:
+                data = []
         out = []
         for item in data:
             try:
@@ -169,6 +169,30 @@ class _Interactsh:
                 "raw_excerpt": re.sub(r"\s+", " ", str(obj.get("raw-request", "")))[:400],
                 "context": self._markers.get(uid, {}),
             })
+        # -wildcard sends apex-domain interactions as unencrypted JSON in tlddata.
+        # Keep only the configured apex; ordinary marker callbacks arrive in data.
+        apex = _domain().lower().rstrip(".")
+        for item in body.get("tlddata") or []:
+            try:
+                obj = json.loads(item)
+                full_id = str(obj.get("full-id", "")).lower().rstrip(".").split(":", 1)[0]
+                if full_id != apex or obj.get("protocol", "").lower() not in ("http", "https"):
+                    continue
+                key = f"root-{obj.get('timestamp','')}-{obj.get('protocol','')}-{obj.get('raw-request','')}"
+                if key in self._seen:
+                    continue
+                self._seen.add(key)
+                out.append({
+                    "protocol": (obj.get("protocol") or "").upper(),
+                    "remote_address": obj.get("remote-address", ""),
+                    "timestamp": obj.get("timestamp", ""),
+                    "full_id": obj.get("full-id", ""),
+                    "q_type": obj.get("q-type", ""),
+                    "raw_excerpt": re.sub(r"\s+", " ", str(obj.get("raw-request", "")))[:400],
+                    "context": {"direct_domain": True},
+                })
+            except (TypeError, ValueError):
+                continue
         return out
 
     def status(self) -> dict:

@@ -49,7 +49,7 @@ Description=interactsh-server (OOB collaborator)
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/interactsh-server -domain ${DOMAIN} -ip ${IP} ${AUTH_ARG}
+ExecStart=/usr/local/bin/interactsh-server -domain ${DOMAIN} -ip ${IP} -wildcard ${AUTH_ARG}
 Restart=always
 RestartSec=3
 AmbientCapabilities=CAP_NET_BIND_SERVICE

@@ -111,6 +111,46 @@ def test_mint_and_poll_decrypt(monkeypatch):
     assert _run(oob.poll()) == []
 
 
+def test_apex_domain_callback_without_marker(monkeypatch):
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return _Resp({"message": "registration successful"})
+
+        async def get(self, *args, **kwargs):
+            def event(host):
+                return json.dumps({"protocol": "http", "full-id": host,
+                                   "raw-request": f"GET /test Host: {host}",
+                                   "remote-address": "203.0.113.9",
+                                   "timestamp": "2026-01-01T00:00:00Z"})
+            return _Resp({"data": [], "tlddata": [event("oob.example.com"),
+                                                   event("other.oob.example.com")]})
+
+    monkeypatch.setattr(oob.httpx, "AsyncClient", _Client)
+    interactions = _run(oob.poll())  # polling registers even without {{oob}}
+    assert len(interactions) == 1
+    assert interactions[0]["full_id"] == "oob.example.com"
+    assert interactions[0]["context"] == {"direct_domain": True}
+    assert _run(oob.poll()) == []
+
+
 def test_disabled_returns_nothing(monkeypatch):
     monkeypatch.setenv("OOB_ENABLED", "false")
     assert not oob.enabled()

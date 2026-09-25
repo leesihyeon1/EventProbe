@@ -47,7 +47,7 @@ git clone <이 저장소>  # 또는 setup.sh 만 복사
 sudo bash deploy/interactsh/setup.sh <도메인> <VM_공인IP> <원하는_인증토큰>
 # 예: sudo bash deploy/interactsh/setup.sh oob.example.com 203.0.113.10 s3cr3t-oob
 ```
-스크립트가 하는 일: 최신 interactsh-server 릴리스 설치 → iptables 개방 → systemd 등록·기동.
+스크립트가 하는 일: 최신 interactsh-server 릴리스 설치 → iptables 개방 → `-wildcard`를 포함한 systemd 등록·기동.
 
 ## 6) 동작 검증
 아무 데서나:
@@ -66,6 +66,17 @@ OOB_TOKEN=<setup.sh 에 준 토큰>     # -auth 로 띄웠으면 필수
 ```
 그러면 페이로드의 `{{oob}}` 가 `<랜덤>.<상관ID>.<도메인>` 으로 치환되고, 툴이 이 서버를
 폴링해 응답 탭 **OOB 콜백** 탭에 시간·출처 IP·프로토콜(DNS/HTTP)을 표시합니다.
+
+기본 도메인 자체에 대한 HTTP 접속도 같은 탭에서 확인할 수 있습니다. VM의 서비스가
+`-wildcard`로 실행 중이고 대시보드 백엔드가 해당 서버에 등록된 상태에서
+`http://<도메인>/test`에 접속하면, 직접 접속 이벤트가 표시됩니다. 이는 연결 확인용이며
+대상 시스템의 취약점 확증은 아닙니다. 기존 서비스에 `-wildcard`가 없다면 갱신된
+`setup.sh`를 VM에서 다시 실행하고 `systemctl status interactsh`로 기동을 확인하세요.
+HTTPS 기본 도메인 접속은 해당 이름을 포함하는 인증서가 있어야 합니다. Interactsh가
+자동 발급하는 `*.<도메인>` 인증서는 기본 도메인을 포함하지 않으므로, 별도 인증서가
+없으면 `http://<도메인>/test`로 직접 접속을 시험하세요. 폴링 API의 HTTPS 주소는
+와일드카드 인증서가 적용되는 `https://ns1.<도메인>`을 `OOB_SERVER`로 지정하고,
+`OOB_DOMAIN`은 원래 기본 도메인으로 유지할 수 있습니다.
 
 ## 비용 요약
 - Oracle 무료 VM + eu.org/afraid.org 무료 도메인 → **완전 $0** (도메인 NS 위임이 까다로움)

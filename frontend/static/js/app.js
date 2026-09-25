@@ -1807,8 +1807,9 @@ function renderOob() {
         + '<code>.env</code> 에 <code>OOB_ENABLED=true</code> 와 <code>OOB_SERVER</code>(공개 oast.fun 또는 self-host)를 설정하면,<br>'
         + '페이로드의 <code>{{oob}}</code> 가 콜백 호스트로 치환되고 대상의 아웃바운드 호출이 여기 표시됩니다.</div>';
     } else {
-      el.innerHTML = '<div style="color:var(--text-muted);padding:6px;line-height:1.6">대기 중… 대상이 아웃바운드로 '
-        + '<code>{{oob}}</code> 호스트를 호출(DNS/HTTP)하면 여기 표시됩니다. 콜백은 수초~수분 뒤 올 수 있습니다.</div>';
+      el.innerHTML = '<div style="color:var(--text-muted);padding:6px;line-height:1.6">대기 중… '
+        + '<code>OOB_DOMAIN</code> 기본 도메인에 직접 접속하거나 <code>{{oob}}</code> 호스트를 호출하면 여기 표시됩니다. '
+        + '기본 도메인 접속은 연결 확인용이며 취약점 확증이 아닙니다.</div>';
     }
     return;
   }
@@ -1816,7 +1817,8 @@ function renderOob() {
     const proto = escapeHtml(it.protocol || '');
     const pc = proto === 'DNS' ? 'tag-orange' : (proto === 'HTTP' || proto === 'HTTPS' ? 'tag-red' : 'tag-blue');
     const ctx = it.context || {};
-    const linked = ctx.payload ? escapeHtml(String(ctx.payload).slice(0, 50)) : (ctx.url ? escapeHtml(ctx.url) : '-');
+    const linked = ctx.direct_domain ? '기본 도메인 직접 접속' :
+      (ctx.payload ? escapeHtml(String(ctx.payload).slice(0, 50)) : (ctx.url ? escapeHtml(ctx.url) : '-'));
     const ts = escapeHtml((it.timestamp || '').replace('T', ' ').replace('Z', '').slice(0, 19));
     return `<tr>
       <td style="white-space:nowrap;color:var(--text-muted)">${ts}</td>
@@ -1827,7 +1829,7 @@ function renderOob() {
     </tr>`;
   }).join('');
   el.innerHTML = `
-    <div style="margin-bottom:6px;color:var(--success);font-weight:600">OOB 콜백 ${n}건 수신 — blind 취약 확증(대상이 우리 서버로 아웃바운드 요청함)</div>
+    <div style="margin-bottom:6px;color:var(--success);font-weight:600">OOB 요청 ${n}건 수신 — 기본 도메인 직접 접속은 연결 확인용</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">
       <thead><tr style="text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border)">
         <th style="padding:3px 6px">시간</th><th style="padding:3px 6px">프로토콜</th>
