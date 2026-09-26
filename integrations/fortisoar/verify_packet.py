@@ -10,7 +10,8 @@ FortiSOAR '버튼②(검증)' 플레이북의 Execute Python Block 에 이 파�
     scheme      : 패킷 URI 가 상대경로일 때 대상 스킴      (기본 https)
     host        : 대상 Host override                       (선택)
     category    : 페이로드 카테고리 힌트(예 cve)            (선택)
-    baseline    : {"status_code":302,"location":"/login"}   정상(우회 안 한) 응답 — 우회 확증용(선택)
+    baseline    : 실제 측정한 정상 응답(선택). 상태 전이만으로 우회 확정 불가;
+                  protected_marker 에 비공개 응답의 고유 표식이 있어야 직접 응답으로 확증.
     timeout     : 대상 요청 타임아웃 초                     (기본 10)
     verify_tls  : 검증도구 호출 시 TLS 검증 여부            (기본 False)
     http_timeout: 검증도구 호출 자체의 타임아웃 초          (기본 30)

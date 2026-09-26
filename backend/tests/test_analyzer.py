@@ -91,17 +91,31 @@ _LOGIN_FORM = ('<form><input name="tbUsername"><input type="password" name="tbPa
 _LOGGED_IN = '<div>Welcome admin</div><a href="/logout.aspx">Logout</a><div>Your account</div>'
 
 
-def test_login_sqli_authbypass_both_200_is_success():
-    """로그인폼 SQLi 인증우회: 대조군(실패)=로그인폼, 공격=로그인폼 사라짐+logout 등장.
-    둘 다 200 이고 인증실패 문구도 없어도 인증우회(성공)로 확증한다."""
+def test_login_sqli_authbypass_both_200_needs_private_content():
+    """로그인 폼 소멸과 Logout 링크만으로는 실제 인증 성공을 확정하지 않는다."""
     r = analyze_response(200, {"content-type": "text/html", "set-cookie": "frmLogin=1"},
                          _LOGGED_IN, 120, payload="admin'--", category="sqli",
-                         baseline={"status_code": 200, "body": _LOGIN_FORM},
+                         baseline={"status_code": 200, "body": _LOGIN_FORM,
+                                   "request": {"method": "POST", "url": "http://h/login.aspx",
+                                               "body": "tbUsername=wrong&tbPassword="}},
                          url="http://h/login.aspx",
                          req_body="tbUsername=admin'--&tbPassword=", method="POST")
-    assert r["attack_outcome"] == "success"
-    f = next(x for x in r["findings"] if x["verdict"] == "성공" and "인증 우회" in x["why"])
+    assert r["attack_outcome"] == "suspicious"
+    f = next(x for x in r["findings"] if x["verdict"] == "의심" and "로그인 폼" in x["why"])
     assert "로그인 폼 사라짐" in f["evidence"] or "logout" in f["evidence"].lower()
+
+
+def test_login_sqli_private_content_is_success():
+    marker = "private-account-record-97531"
+    r = analyze_response(200, {"content-type": "text/html"}, _LOGGED_IN + marker, 120,
+                         payload="admin'--", category="sqli",
+                         baseline={"status_code": 200, "body": _LOGIN_FORM,
+                                   "protected_marker": marker,
+                                   "request": {"method": "POST", "url": "http://h/login.aspx",
+                                               "body": "tbUsername=wrong&tbPassword="}},
+                         url="http://h/login.aspx", req_body="tbUsername=admin'--&tbPassword=",
+                         method="POST")
+    assert r["attack_outcome"] == "success"
 
 
 def test_login_failed_injection_both_loginform_not_success():
@@ -209,7 +223,9 @@ def test_blocked_without_baseline_hedges_path_vs_payload():
 
 def test_blocked_with_baseline_no_hint():
     r = analyze_response(403, {}, "403", 234, payload="../../etc/passwd", category="lfi",
-                         baseline={"status_code": 403, "body": "403"})
+                         baseline={"status_code": 403, "body": "403",
+                                   "request": {"method": "GET", "url": "http://h/x"}},
+                         url="http://h/x", method="GET")
     why = next(f["why"] for f in r["findings"] if f["name"] == "차단됨")
     assert "baseline" not in why
 
@@ -313,11 +329,13 @@ def test_xss_exec_context_reflection_success():
 
 
 def test_sql_error_leak_is_escalated():
-    """SQL 문법 에러가 응답에 노출되면 error-based 성공/누출 → high 이상."""
+    """SQL 오류 정보 누출은 기록하되 주입 성공으로 단정하지 않는다."""
     body = "You have an error in your SQL syntax; check the manual for MySQL"
     r = analyze_response(200, {}, body, 100, payload="1'", category="sqli")
     assert r["error_leaks"]
     assert r["risk_level"] in ("high", "critical")
+    assert r["attack_outcome"] == "suspicious"
+    assert not any(f["verdict"] == "성공" for f in r["findings"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -550,10 +568,10 @@ def test_ssti_detected_in_body_without_category():
 
 
 def test_sqli_error_detected_urlencoded_body_without_category():
-    """붙여넣기 요청의 URL 인코딩 본문(%27)도 디코딩해 SQLi 로 인식."""
+    """붙여넣기 요청의 URL 인코딩 본문도 SQLi 시도로 인식하되 오류만으로 확정하지 않는다."""
     r = analyze_response(200, {}, "You have an error in your SQL syntax; check MySQL", 80,
                          payload="", category="", req_body="q=1%27 OR %271%27=%271")
-    assert r["attack_outcome"] == "success"
+    assert r["attack_outcome"] == "suspicious"
     assert any("SQL" in n for n in _names(r))
 
 
@@ -1007,11 +1025,11 @@ def test_det_verdict_always_present():
     assert d["summary"] and d["priority"] and d["remediation"]
 
 
-def test_det_verdict_success_gives_type_remediation():
+def test_det_verdict_sql_error_suspicion_gives_type_remediation():
     body = "You have an error in your SQL syntax; check the manual near '1''"
     r = analyze_response(200, {}, body, 100, payload="1'", category="sqli")
     d = r["det_verdict"]
-    assert r["attack_outcome"] == "success"
+    assert r["attack_outcome"] == "suspicious"
     assert "쿼리" in d["remediation"] or "바인딩" in d["remediation"]
 
 
@@ -1331,7 +1349,9 @@ def test_xss_inconclusive_flags_browser():
 
 def test_suspicious_has_next_action_with_lead():
     r = analyze_response(200, {}, "row " * 900, 60, payload="1 AND 1=1", category="sqli",
-                         baseline={"status_code": 200, "body": "none"})
+                         baseline={"status_code": 200, "body": "none",
+                                   "request": {"method": "GET", "url": "http://h/search?q=0"}},
+                         url="http://h/search?q=1%20AND%201=1", method="GET")
     assert r["attack_outcome"] == "suspicious"
     na = r["next_action"]
     assert na and na["outcome"] == "suspicious"

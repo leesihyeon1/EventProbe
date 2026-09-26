@@ -39,16 +39,16 @@ def test_probe_plan_empty_for_unsupported():
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLi — 시간 기반
 # ─────────────────────────────────────────────────────────────────────────────
-def test_sqli_time_based_confirmed():
-    """SLEEP(5)가 SLEEP(0)보다 임계값 이상 느리고, 대조가 충분히 빠르면 확증."""
+def test_sqli_time_based_single_pair_is_observation():
+    """SLEEP(5)가 한 번 느린 것만으로는 회선·서버 지연과 구분할 수 없다."""
     results = [
         _r("baseline"),
         _r("time0", time_ms=200),
         _r("time5", time_ms=5200),   # Δ5000 >= 3500, 대조 200 < 2500
     ]
     d = confirm.decide("sqli", results)
-    assert d["confirmed"]
-    assert any("시간 기반" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("시간 기반" in o["name"] for o in d["observations"])
 
 
 def test_sqli_time_based_rejected_when_control_slow():
@@ -75,24 +75,34 @@ def test_sqli_time_based_rejected_when_delta_small():
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLi — 불린 기반
 # ─────────────────────────────────────────────────────────────────────────────
-def test_sqli_boolean_confirmed_by_length_diff():
+def test_sqli_boolean_length_difference_is_observation():
     results = [
         _r("baseline"),
         _r("bool_true", body="X" * 1000),
         _r("bool_false", body="X" * 500),   # 길이차 500 >= 40
     ]
     d = confirm.decide("sqli", results)
-    assert any("불린 기반" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("불린 기반" in o["name"] for o in d["observations"])
 
 
-def test_sqli_boolean_confirmed_by_status_diff():
+def test_sqli_boolean_server_error_is_invalid_observation():
     results = [
         _r("baseline"),
         _r("bool_true", status=200, body="same"),
         _r("bool_false", status=500, body="same"),
     ]
     d = confirm.decide("sqli", results)
-    assert any("불린 기반" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any(o["level"] == "invalid" for o in d["observations"])
+
+
+def test_sqli_boolean_rate_limit_is_not_confirmed():
+    d = confirm.decide("sqli", [
+        _r("baseline", body="products"), _r("bool_true", body="products"),
+        _r("bool_false", status=429, body="rate limited")])
+    assert not d["confirmed"]
+    assert d["observations"][0]["level"] == "invalid"
 
 
 def test_sqli_error_based_confirmed_by_marker():
@@ -104,16 +114,17 @@ def test_sqli_error_based_confirmed_by_marker():
     assert any("에러 기반" in t["name"] for t in d["techniques"])
 
 
-def test_sqli_error_based_confirmed_by_db_error():
-    """대조엔 없던 SQL 에러가 주입 시 발생하면 error-based 확증."""
+def test_sqli_error_based_db_error_is_observation():
+    """대조엔 없던 SQL 에러는 주입 지점 후보지만 실행 확증은 아니다."""
     results = [_r("baseline", body="normal page"),
                _r("errn", body="You have an error in your SQL syntax near line 1")]
     d = confirm.decide("sqli", results)
-    assert d["confirmed"]
+    assert not d["confirmed"]
+    assert any("SQL 에러" in o["name"] for o in d["observations"])
 
 
 def test_sqli_error_based_cross_dbms():
-    """대상 DB 를 몰라도, 주입으로 깨진 각 DBMS 의 에러 문구를 폭넓게 인식해 확증."""
+    """DBMS 에러는 폭넓게 인식하되 고유 마커 없이는 확정하지 않는다."""
     errors = {
         "mysql": "You have an error in your SQL syntax near 'x'",
         "postgres": "ERROR: syntax error at or near \"x\"",
@@ -125,7 +136,8 @@ def test_sqli_error_based_cross_dbms():
     }
     for db, err in errors.items():
         d = confirm.decide("sqli", [_r("baseline", body="normal home page"), _r("err", body=err)])
-        assert d["confirmed"], f"{db} 에러가 확증되지 않음"
+        assert not d["confirmed"], f"{db} 에러만으로 확정되면 안 됨"
+        assert d["observations"], f"{db} 에러 관측 누락"
 
 
 def test_sqli_error_based_not_confirmed_when_baseline_already_errors():
@@ -163,6 +175,19 @@ def test_cmdi_id_command_confirmed():
     assert any("id 실행" in t["name"] for t in d["techniques"])
 
 
+def test_cmdi_single_delay_is_not_confirmed():
+    d = confirm.decide("cmdi", [_r("baseline"), _r("time0", time_ms=200),
+                                _r("time5", time_ms=5200)])
+    assert not d["confirmed"]
+    assert any("지연" in o["name"] for o in d["observations"])
+
+
+def test_cmdi_id_output_already_in_baseline_is_not_confirmed():
+    body = "uid=0(root) gid=0(root)"
+    d = confirm.decide("cmdi", [_r("baseline", body=body), _r("idcmd", body=body)])
+    assert not d["confirmed"]
+
+
 def test_ssti_evaluation_confirmed():
     # 고유 곱(7*191=1337)이 계산 결과로 등장 → 확증
     results = [_r("baseline"), _r("e_curly", body="output 1337 done")]
@@ -184,11 +209,12 @@ def test_ssti_not_confirmed_when_product_in_baseline():
     assert not d["confirmed"]
 
 
-def test_xss_marker_reflection_confirmed():
+def test_xss_marker_reflection_needs_browser_confirmation():
     body = f"<div>{confirm._XSS_BREAK}</div>"   # 마커가 인코딩 없이 반사
     results = [_r("baseline"), _r("probe", body=body)]
     d = confirm.decide("xss", results)
-    assert d["confirmed"]
+    assert not d["confirmed"]
+    assert any("XSS" in o["name"] for o in d["observations"])
 
 
 def test_xss_not_confirmed_when_encoded():
@@ -227,7 +253,7 @@ def test_nosql_supported_and_probe_plan():
     assert "n_true" in roles and "n_false" in roles
 
 
-def test_nosql_boolean_confirmed_by_status_diff():
+def test_nosql_boolean_status_diff_needs_repetition():
     results = [
         _r("baseline"),
         _r("n_true", status=200, body="X" * 500),
@@ -236,8 +262,8 @@ def test_nosql_boolean_confirmed_by_status_diff():
         _r("n_false2", status=200, body="y"),
     ]
     d = confirm.decide("nosql", results)
-    assert d["confirmed"]
-    assert any("NoSQL" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("NoSQL" in o["name"] for o in d["observations"])
 
 
 def test_nosql_clean_not_confirmed():
@@ -260,7 +286,7 @@ def test_idor_probe_plan_numeric_only():
     assert confirm.probe_plan("idor", "abc-uuid") == []   # 숫자형만 열거 가능
 
 
-def test_idor_confirmed_when_neighbor_accessible():
+def test_idor_neighbor_access_is_not_ownership_proof():
     results = [
         _r("baseline", status=200, body="A" * 400),
         _r("id_down", status=200, body="B" * 380),      # 다른 실제 객체
@@ -268,8 +294,19 @@ def test_idor_confirmed_when_neighbor_accessible():
         _r("nonexistent", status=404, body="not found"),  # 대조군 실패
     ]
     d = confirm.decide("business", results)
-    assert d["confirmed"]
-    assert any("IDOR" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("IDOR" in o["name"] for o in d["observations"])
+
+
+def test_public_catalog_does_not_confirm_idor():
+    results = [
+        _r("baseline", body='{"id":1,"visibility":"public","name":"Product A"}'),
+        _r("id_up", body='{"id":2,"visibility":"public","name":"Product B"}'),
+        _r("nonexistent", status=404, body="not found"),
+    ]
+    d = confirm.decide("idor", results)
+    assert not d["confirmed"]
+    assert d["observations"]
 
 
 def test_idor_not_confirmed_when_all_same_spa():
@@ -300,7 +337,7 @@ def test_ldap_supported_and_probe_plan():
     assert "l_wild" in roles and "l_true" in roles
 
 
-def test_ldap_boolean_confirmed_by_wildcard():
+def test_ldap_boolean_wildcard_is_observation():
     results = [
         _r("baseline"),
         _r("l_wild", status=200, body="USER " * 300),   # * → 전체 매칭
@@ -309,8 +346,8 @@ def test_ldap_boolean_confirmed_by_wildcard():
         _r("l_false", status=200, body="x"),
     ]
     d = confirm.decide("ldap", results)
-    assert d["confirmed"]
-    assert any("LDAP" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("LDAP" in o["name"] for o in d["observations"])
 
 
 def test_ldap_clean_not_confirmed():
@@ -329,19 +366,31 @@ def test_auth_supported_and_probe_plan():
     assert "byp_sql" in roles
 
 
-def test_auth_confirmed_by_session_and_redirect():
+def test_auth_session_and_redirect_alone_are_unconfirmed():
     ctrl = _r("baseline", status=401, body="Invalid credentials")
     byp = _r("byp_sql", status=302, body="",
              headers={"Set-Cookie": "session=abc; HttpOnly"}, value="' OR '1'='1'-- -")
     d = confirm.decide("auth", [ctrl, byp])
-    assert d["confirmed"]
-    assert any("인증 우회" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("인증" in o["name"] for o in d["observations"])
 
 
-def test_auth_confirmed_by_failure_message_gone():
+def test_auth_failure_message_gone_needs_private_content():
     ctrl = _r("baseline", status=200, body="로그인 실패: 올바르지 않은 정보")
     byp = _r("byp_or", status=200, body="환영합니다 대시보드", value="' OR 1=1#")
-    assert confirm.decide("auth", [ctrl, byp])["confirmed"]
+    d = confirm.decide("auth", [ctrl, byp])
+    assert not d["confirmed"]
+    assert d["observations"]
+
+
+def test_auth_private_content_confirms_when_not_echoed():
+    marker = "private-record-97531"
+    ctrl = _r("baseline", status=401, body="Invalid credentials")
+    byp = _r("byp_or", status=200, body="account=" + marker, value="' OR 1=1#")
+    assert confirm.decide("auth", [ctrl, byp], protected_marker=marker)["confirmed"]
+    echoed = confirm.decide("auth", [ctrl, byp], protected_marker=marker,
+                            request_parts=("lookup=" + marker,))
+    assert not echoed["confirmed"]
 
 
 def test_auth_not_confirmed_when_bypass_also_fails():
@@ -382,16 +431,21 @@ def test_decide_method_no_false_confirm():
     assert decide_method({"Allow": "GET, HEAD, POST, OPTIONS"}, None, None, "", m) == []
 
 
-def test_decide_authbypass_confirms_on_transition():
+def test_decide_authbypass_requires_private_content():
     from core.confirm import decide_authbypass
-    # 정상(헤더 제거)=403 거부, 우회(헤더 포함)=200 제공 → 확증
+    # 정상(헤더 제거)=403, 우회=200 만으로는 보호 자원 제공이 확인되지 않는다.
     t = decide_authbypass({"status": 403, "location": "", "body": ""},
                           {"status": 200, "location": "", "body": "secret"})
+    assert t == []
+    # 명시한 보호 콘텐츠가 우회 응답에서만 확인돼야 확정한다.
+    t = decide_authbypass({"status": 403, "body": ""},
+                          {"status": 200, "body": "private-record-97531"},
+                          protected_marker="private-record-97531")
     assert t and "인가 우회" in t[0]["name"]
-    # 로그인 리다이렉트 거부 → 우회 200 도 확증
+    # 로그인 리다이렉트 거부 → 우회 200 이더라도 표식 없으면 미확정
     t2 = decide_authbypass({"status": 302, "location": "/login", "body": ""},
                            {"status": 200, "location": "", "body": "ok"})
-    assert t2
+    assert t2 == []
 
 
 def test_decide_authbypass_no_false_positive():

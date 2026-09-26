@@ -51,6 +51,7 @@ from core.tlsscan import tls_scan
 from core import rag
 from core import oob
 from core.ai_privacy import SENSITIVE_HEADERS, sanitize_headers
+from core.verification_context import compact as compact_verification_events
 
 router = APIRouter(prefix="/api")
 
@@ -174,6 +175,7 @@ class ConfirmRequest(BaseModel):
     target: ConfirmTarget
     category: str                 # 확증할 카테고리(로드된 페이로드 기준)
     timeout: int = 10
+    protected_marker: str = ""    # 호출자가 알고 있는 비공개 응답 표식(헤더/인증 우회 확정용)
 
 # 포트 스캔
 class PortScanRequest(BaseModel):
@@ -459,6 +461,8 @@ async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
                                      "score": h.get("score"), "excerpt": (h.get("text", "") or "")[:220]}
                                     for h in hits]
     if ai_verdict_enabled():
+        history = compact_verification_events(getattr(req, "context_events", []),
+                     session_id=getattr(req, "session_id", ""), current_url=getattr(req, "url", ""))
         analysis["ai_verdict"] = await ai_verdict({
             "category": _atype, "status": status_code, "time": resp_time,
             "outcome": analysis.get("attack_outcome"),
@@ -466,6 +470,8 @@ async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
             "findings": _fnd, "request": _blur,
             "alerts": [{"name": a["name"], "risk": a["risk"]} for a in analysis.get("alerts", [])],
             "retrieved": hits,
+            "context_events": history,
+            "baseline_check": analysis.get("baseline_check"),
         })
 
 
@@ -493,6 +499,8 @@ class EnrichRequest(BaseModel):
     full_body_len: Optional[int] = None
     payload_id: Optional[str] = None
     custom_alert_rules: list = []
+    session_id: str = ""
+    context_events: list = []
 
 
 @router.post("/analyze/enrich")
@@ -505,6 +513,10 @@ async def analyze_enrich(req: EnrichRequest):
     """
     analysis = dict(req.analysis or {})
     out: dict = {}
+    history = compact_verification_events(req.context_events, session_id=req.session_id,
+                                          current_url=req.url)
+    if history and (response_analysis_enabled() or ai_verdict_enabled()):
+        out["context_used"] = len(history)
 
     async def _detail():
         if not response_analysis_enabled():
@@ -516,6 +528,8 @@ async def analyze_enrich(req: EnrichRequest):
             "resp_headers": req.resp_headers, "resp_body": (req.resp_body or "")[:BODY_LIMIT],
             "base_verdict": analysis.get("verdict"),
             "base_alerts": [a.get("name") for a in analysis.get("alerts", [])],
+            "context_events": history,
+            "baseline_check": analysis.get("baseline_check"),
         })
 
     async def _verdict():
@@ -1525,7 +1539,7 @@ async def _run_authbypass_probe(req: "ConfirmRequest", headers_base: dict):
     상태 전이(거부→제공)로 확증. 리다이렉트 거부를 봐야 하므로 따라가지 않는다."""
     present = [h for h in headers_base if h.lower() in confirm_scan._BYPASS_HEADERS]
     if not present:
-        return [], []
+        return [], [], []
     normal_headers = {k: v for k, v in headers_base.items()
                       if k.lower() not in confirm_scan._BYPASS_HEADERS}
     url = _url_with_params(req.url, req.params)
@@ -1547,8 +1561,13 @@ async def _run_authbypass_probe(req: "ConfirmRequest", headers_base: dict):
                 out[role] = {"status": 0, "location": "", "body": ""}
                 probes.append({"role": f"authbypass:{role}", "label": role, "value": req.url,
                                "status": 0, "time_ms": 0, "error": str(e)[:120]})
-    techniques = confirm_scan.decide_authbypass(out.get("normal", {}), out.get("bypass", {}))
-    return techniques, probes
+    normal, bypass = out.get("normal", {}), out.get("bypass", {})
+    request_parts = (req.url, req.body, " ".join(str(v) for v in (req.params or {}).values()),
+                     " ".join(str(v) for v in headers_base.values()))
+    techniques = confirm_scan.decide_authbypass(
+        normal, bypass, req.protected_marker, request_parts)
+    observations = [] if techniques else confirm_scan.observe_authbypass(normal, bypass)
+    return techniques, probes, observations
 
 
 @router.post("/confirm-scan")
@@ -1561,7 +1580,7 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
     """
     cat = (req.category or "").lower()
     sent_headers_base = merge_headers(req.headers, req.default_headers, req.use_defaults)
-    techniques, all_probes, ran = [], [], []
+    techniques, observations, all_probes, ran = [], [], [], []
 
     # 1) 카테고리 오라클 (선택 페이로드 계열)
     if cat and cat != "auth" and confirm_scan.is_supported(cat):
@@ -1569,7 +1588,9 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         if plan:
             results, probes = await _run_confirm_probes(
                 req, sent_headers_base, plan, follow=(cat != "redirect"))
-            techniques += confirm_scan.decide(cat, results)["techniques"]
+            judged = confirm_scan.decide(cat, results)
+            techniques += judged["techniques"]
+            observations += judged["observations"]
             all_probes += probes
             ran.append(cat)
 
@@ -1578,7 +1599,11 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
     if cat == "auth" or _looks_login(req):
         aplan = confirm_scan.probe_plan("auth", req.target.base_value)
         results, probes = await _run_confirm_probes(req, sent_headers_base, aplan, follow=False)
-        techniques += confirm_scan.decide("auth", results)["techniques"]
+        request_parts = (req.url, req.body, " ".join(str(v) for v in (req.params or {}).values()),
+                         " ".join(str(v) for v in sent_headers_base.values()))
+        judged = confirm_scan.decide("auth", results, req.protected_marker, request_parts)
+        techniques += judged["techniques"]
+        observations += judged["observations"]
         all_probes += [{**pp, "role": "auth:" + pp["role"]} for pp in probes]
         ran.append("인증우회")
 
@@ -1591,9 +1616,10 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
 
     # 3-b) 인가 우회 헤더 차분 — 우회 헤더(X-Middleware-Subrequest 등)가 있으면 제거 vs 포함 비교.
     if cat == "authbypass" or any(h.lower() in confirm_scan._BYPASS_HEADERS for h in sent_headers_base):
-        atech, aprobes = await _run_authbypass_probe(req, sent_headers_base)
+        atech, aprobes, aobs = await _run_authbypass_probe(req, sent_headers_base)
         if aprobes:
             techniques += atech
+            observations += aobs
             all_probes += aprobes
             ran.append("인가우회(헤더)")
 
@@ -1635,6 +1661,16 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
             "message": f"'{cat}' 은(는) 확증 프로브 미지원 — 단발 전송으로 확인하세요.",
         }
 
+    failed_probes = [p for p in all_probes if p.get("timeout") or p.get("error")
+                     or int(p.get("status") or 0) <= 0]
+    if failed_probes:
+        observations.append({
+            "name": "확증 프로브 응답 누락",
+            "level": "invalid",
+            "evidence": f"{len(failed_probes)}개 프로브가 실패하거나 시간 초과됨",
+            "next_action": "실패한 요청을 재실행하고 대조군과 같은 조건에서 다시 비교하세요.",
+        })
+
     return {
         "supported": True,
         "category": "+".join(ran),
@@ -1642,6 +1678,7 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         "probes_sent": len(all_probes),
         "confirmed": bool(techniques),
         "techniques": techniques,
+        "observations": observations,
         "probes": all_probes,
     }
 

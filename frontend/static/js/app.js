@@ -1148,6 +1148,11 @@ async function confirmScan() {
   const param = (document.getElementById('injectKey').value || '').trim()
     || (location === 'header' ? 'X-Test-Payload' : 'q');
   const baseValue = _confirmBaseValue(location, param);
+  const confirmHeaders = getHeadersObj();
+  const protectedMarker = (document.getElementById('protectedMarker')?.value || '').trim();
+  if (protectedMarker && protectedMarker.length < 8) {
+    toast('보호 응답 표식은 8자 이상 입력하세요', 'error'); return;
+  }
 
   const btn = document.getElementById('confirmScanBtn');
   const orig = btn.textContent;
@@ -1155,14 +1160,16 @@ async function confirmScan() {
   try {
     const res = await API.confirmScan({
       method: req.method, url: req.url, params: req.params, body: req.body,
-      headers: getHeadersObj(), default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
+      headers: confirmHeaders, default_headers: getDefaultHeaderProfile(), use_defaults: getUseDefaults(),
       target: { location, param, base_value: baseValue }, category: cat, timeout: 10,
+      protected_marker: protectedMarker,
     });
     if (res.supported === false) { toast(res.message || '이 카테고리는 확증 미지원', 'info'); return; }
     if (res.error) { toast('확증 실패: ' + res.error, 'error'); return; }
     // 확증된 취약을 분석 findings 에 '성공'으로 병합 → 결과기반 후속이 이 확증을 근거로 승격한다.
     // (기존엔 확증 결과가 카드로만 표시되고 후속으로 흐르지 않아 '확증→후속'이 끊겨 있었음.)
-    if (res.confirmed && Array.isArray(res.techniques) && res.techniques.length
+    const sameRequest = _confirmMatchesLastRequest(req, confirmHeaders);
+    if (res.confirmed && Array.isArray(res.techniques) && res.techniques.length && sameRequest
         && state.lastResult && state.lastResult.analysis) {
       const a = state.lastResult.analysis;
       a.findings = a.findings || [];
@@ -1174,9 +1181,26 @@ async function confirmScan() {
       });
       a.attack_outcome = 'success';
     }
-    renderConfirmResult(res, param);
+    if (!res.confirmed && Array.isArray(res.observations) && res.observations.length && sameRequest
+        && state.lastResult && state.lastResult.analysis) {
+      const a = state.lastResult.analysis;
+      a.findings = a.findings || [];
+      res.observations.forEach(o => {
+        if (o && o.name && !a.findings.some(x => x.name === o.name)) {
+          a.findings.push({ name: o.name, verdict: o.level === 'invalid' ? '미확인' : '의심',
+                            confidence: o.level === 'invalid' ? 30 : 55,
+                            why: o.next_action || '', evidence: o.evidence || '' });
+        }
+      });
+      if (res.observations.some(o => o.level !== 'invalid')
+          && ['safe', 'inconclusive'].includes(a.attack_outcome)) a.attack_outcome = 'suspicious';
+    }
+    renderConfirmResult(res, param, sameRequest);
+    recordConfirmHistory(req, res, sameRequest);
     switchView('request');
-    toast(res.confirmed ? '✅ 취약점 확증됨' : '깨끗 — 확증되지 않음', res.confirmed ? 'success' : 'info');
+    toast(res.confirmed ? '✅ 취약점 확증됨'
+      : (res.observations || []).length ? '응답 변화 관측 — 추가 확인 필요' : '확증 신호 없음',
+      res.confirmed ? 'success' : 'info');
   } catch (e) {
     toast('확증 오류: ' + e.message, 'error');
   } finally {
@@ -1195,15 +1219,22 @@ function _ellipsisMid(s, max = 90) {
   return s.slice(0, head) + '…' + s.slice(s.length - tail);
 }
 
-function renderConfirmResult(res, param) {
+function renderConfirmResult(res, param, sameRequest = true) {
   const container = document.getElementById('analysisContent');
   if (!container) return;
+  const hasObservations = Array.isArray(res.observations) && res.observations.length > 0;
   document.getElementById('analysisVerdict').innerHTML =
-    res.confirmed ? '<span class="tag tag-red">확증됨</span>' : '<span class="tag tag-green">미확증</span>';
+    res.confirmed ? '<span class="tag tag-red">확증됨</span>'
+      : hasObservations ? '<span class="tag tag-orange">추가 확인 필요</span>'
+      : '<span class="tag tag-green">미확증</span>';
 
   const techRows = (res.techniques || []).map(t => `
     <div class="detail-item"><span class="tag tag-red">✅ ${escapeHtml(t.name)}</span>
       <span style="color:var(--text-muted);margin-left:6px">${escapeHtml(t.evidence || '')}</span></div>`).join('');
+  const observationRows = (res.observations || []).map(o => `
+    <div class="detail-item"><span class="tag tag-orange">${escapeHtml(o.name)}</span>
+      <span style="color:var(--text-muted);margin-left:6px">${escapeHtml(o.evidence || '')}</span>
+      <div style="color:var(--text-muted)">${escapeHtml(o.next_action || '')}</div></div>`).join('');
 
   const probeRows = (res.probes || []).map(p => {
     const st = p.timeout ? '<span style="color:var(--warning)">timeout</span>'
@@ -1229,13 +1260,16 @@ function renderConfirmResult(res, param) {
   const card = document.createElement('div');
   card.className = 'analysis-card';
   card.setAttribute('data-card-id', 'confirm');
-  card.style.borderColor = res.confirmed ? 'rgba(248,81,73,.5)' : 'rgba(63,185,80,.35)';
+  card.style.borderColor = res.confirmed ? 'rgba(248,81,73,.5)'
+    : hasObservations ? 'rgba(210,153,34,.5)' : 'rgba(63,185,80,.35)';
   card.innerHTML = `
     <div class="analysis-card-header">확증 스캔 — ${escapeHtml(res.category)} · ${escapeHtml(param)} <span style="margin-left:auto;font-size:9px;color:var(--text-muted);font-weight:400">${res.probes_sent}발</span></div>
     <div class="analysis-card-body">
+      ${sameRequest ? '' : '<div class="detail-item" style="color:var(--warning)">현재 폼으로 실행한 검사입니다. 직전 응답의 분석 판정에는 합치지 않았습니다.</div>'}
       ${res.confirmed
-        ? `<div style="margin-bottom:6px">${techRows}</div>`
-        : `<div class="detail-item" style="color:var(--text-muted)">대조 프로브 간 유의미한 차이 없음 — 이 파라미터에서 ${escapeHtml(res.category)} 미확증.</div>`}
+        ? `<div style="margin-bottom:6px">${techRows}${observationRows}</div>`
+        : hasObservations ? `<div style="margin-bottom:6px">${observationRows}</div>`
+        : `<div class="detail-item" style="color:var(--text-muted)">확증 신호 없음 — 이 검사만으로 취약 여부를 단정할 수 없습니다.</div>`}
       ${whereRow}
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
         <thead><tr style="color:var(--text-muted);font-size:10px">
@@ -1266,6 +1300,16 @@ function _currentRequestForm() {
     body: document.getElementById('bodyEditor').value.trim() || null,
     headerNames: (state.kvHeaders || []).map(r => r.key).filter(Boolean),
   };
+}
+
+function _confirmMatchesLastRequest(req, headers) {
+  const previous = state.lastResult?._req;
+  if (!previous) return false;
+  const pairs = obj => Object.keys(obj || {}).sort().map(k => [k, String(obj[k])]);
+  return String(previous.method || '').toUpperCase() === String(req.method || '').toUpperCase()
+    && previous.url === req.url && (previous.body || null) === (req.body || null)
+    && JSON.stringify(pairs(previous.params)) === JSON.stringify(pairs(req.params))
+    && JSON.stringify(pairs(previous.headers)) === JSON.stringify(pairs(headers));
 }
 
 // 직전 응답에서 기술스택 지문 추출(로컬 CVE 매칭용 — 우리 백엔드에서만 사용, AI로는 미전송)
@@ -1950,11 +1994,14 @@ async function sendRequest() {
         // 차분 탐지기(인가우회 등)가 정상 요청의 거부 형태를 정확히 보도록 헤더·Location 도 전달
         headers: baseline.headers || {},
         location: _headerVal(baseline.headers, 'location'),
+        protected_marker: (document.getElementById('protectedMarker')?.value || '').trim(),
+        request: baseline.request,
       } : null,
     };
 
     const result = await API.request(reqPayload);
     result._req = reqPayload;   // 요청 원본 첨부
+    result._verificationId = _newVerificationId();
     if (result.sent_headers) reqPayload._sentHeaders = result.sent_headers;
     // 도구가 실제로 보낸 body(VIEWSTATE 갱신·Content-Type 등 자동 보정 반영) — 원본과
     // 다르면 Request 미리보기가 '실제 전송본'을 보여주도록 첨부.
@@ -2014,10 +2061,12 @@ async function enrichAnalysis(reqPayload, result) {
       baseline: reqPayload.baseline, redirect_chain: result.redirect_chain,
       body_truncated: a.body_truncated, full_body_len: a.body_len_full,
       payload_id: reqPayload.payload_id, custom_alert_rules: reqPayload.custom_alert_rules || [],
+      session_id: _verificationSession(),
+      context_events: _contextEvents(result),
       analysis: {
         verdict: a.verdict, attack_type: a.attack_type, attack_outcome: a.attack_outcome,
         attack_type_ambiguous: a.attack_type_ambiguous, det_verdict: a.det_verdict,
-        findings: a.findings || [], alerts: a.alerts || [],
+        findings: a.findings || [], alerts: a.alerts || [], baseline_check: a.baseline_check,
       },
     });
     // 그 사이 다른 요청을 보냈으면 옛 결과로 화면을 덮지 않는다
@@ -2050,6 +2099,7 @@ async function enrichAnalysis(reqPayload, result) {
     a._enrich = 'error';
     a._enrichError = e.message;
   }
+  updateHistoryAnalysis(result);
   renderAnalysis(a, result);
 }
 
@@ -2060,12 +2110,25 @@ let baseline = null;   // { status_code, response_time, body_size, body, headers
 
 function saveBaseline() {
   if (!state.lastResult) { toast('먼저 요청을 전송하세요', 'error'); return; }
+  const original = state.lastResult._req;
+  if (!original || !state.lastResult.status_code) {
+    toast('정상 응답의 요청 조건이 없어 대조군을 저장할 수 없습니다', 'error'); return;
+  }
+  if (original.payload) {
+    toast('페이로드가 실린 공격 요청은 대조군으로 저장할 수 없습니다', 'error'); return;
+  }
+  const snapshotUrl = new URL(original.url);
+  Object.entries(original.params || {}).forEach(([k, v]) => snapshotUrl.searchParams.set(k, v));
   baseline = {
     status_code:   state.lastResult.status_code,
     response_time: state.lastResult.response_time,
     body_size:     state.lastResult.body_size,
     body:          state.lastResult.body || '',
     headers:       state.lastResult.headers || {},
+    request:       { method: original.method, url: snapshotUrl.href,
+                     headers: state.lastResult.sent_headers || original.headers || {},
+                     body: state.lastResult.sent_body ?? original.body ?? '',
+                     payload: original.payload || '' },
   };
   // 버튼 시각적 표시
   const btn = document.getElementById('baselineBtn');
@@ -4687,6 +4750,38 @@ function switchSidebarTab(tab) {
    ══════════════════════════════════════════════════════════════════ */
 const HISTORY_KEY  = 'eventprobe_history';
 const HISTORY_MAX  = 100;
+const VERIFICATION_SESSION_KEY = 'eventprobe_verification_session';
+const _verificationFallbackSession = _newVerificationId();
+
+function _newVerificationId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function _verificationSession() {
+  try {
+    let id = sessionStorage.getItem(VERIFICATION_SESSION_KEY);
+    if (!id) { id = _newVerificationId(); sessionStorage.setItem(VERIFICATION_SESSION_KEY, id); }
+    return id;
+  } catch { return _verificationFallbackSession; }
+}
+
+function _sameOrigin(a, b) {
+  try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+}
+
+// AI 문맥에는 응답 본문·요청 헤더·페이로드를 싣지 않고 동일 세션·동일 출처의 판정 요약만 보낸다.
+function _contextEvents(result) {
+  const id = result?._verificationId;
+  const url = result?._req?.url;
+  return loadHistory().filter(h => h.session_id === _verificationSession()
+    && h.verification_id !== id && _sameOrigin(h.url, url)).slice(0, 5)
+    .map(h => ({ verification_id: h.verification_id, session_id: h.session_id,
+      kind: h.kind || 'request',
+      method: h.method, url: h.url, status: h.status,
+      outcome: h.attack_outcome || '', category: h.category || '',
+      confirmed: !!h.confirmed, baseline_valid: h.baseline_valid === true }));
+}
 
 function loadHistory() {
   try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
@@ -4700,7 +4795,10 @@ function saveHistory(list) {
 function addHistory(req, result) {
   const list = loadHistory();
   list.unshift({
-    id:           Date.now(),
+    id:           result._verificationId || _newVerificationId(),
+    verification_id: result._verificationId,
+    session_id:   _verificationSession(),
+    kind:         'request',
     ts:           new Date().toISOString(),
     method:       req.method?.toUpperCase() || 'GET',
     url:          req.url || '',
@@ -4715,12 +4813,50 @@ function addHistory(req, result) {
     alert_count:  result.analysis?.alerts?.length || 0,
     payload:      req.payload || null,
     category:     req.category || null,
+    attack_outcome: result.analysis?.attack_outcome || '',
+    baseline_valid: result.analysis?.baseline_check?.valid === true,
+    confirm_runs: [],
   });
   saveHistory(list);
   // 히스토리 탭이 열려있으면 즉시 갱신
   if (document.querySelector('.sidebar-tab[data-stab="history"]')?.classList.contains('active')) {
     renderHistoryList();
   }
+}
+
+function recordConfirmHistory(req, res, sameRequest) {
+  const list = loadHistory();
+  const parentId = sameRequest ? state.lastResult?._verificationId : null;
+  const run = { id: _newVerificationId(), ts: new Date().toISOString(),
+    category: res.category || req.category || '', confirmed: !!res.confirmed,
+    techniques: (res.techniques || []).map(t => t.name).filter(Boolean).slice(0, 10),
+    observations: (res.observations || []).map(o => o.name).filter(Boolean).slice(0, 10),
+    probes_sent: res.probes_sent || 0 };
+  const parent = list.find(h => h.verification_id === parentId && h.session_id === _verificationSession());
+  if (parent) {
+    parent.confirm_runs = parent.confirm_runs || [];
+    parent.confirm_runs.unshift(run);
+    parent.confirmed = parent.confirm_runs.some(r => r.confirmed);
+    if (parent.confirmed) parent.attack_outcome = 'success';
+  } else {
+    list.unshift({ id: run.id, verification_id: run.id, session_id: _verificationSession(),
+      kind: 'confirmation', ts: run.ts, method: req.method, url: req.url,
+      headers: {}, params: {}, body: null, status: 0, verdict: 'unknown',
+      attack_outcome: res.confirmed ? 'success' : 'inconclusive', category: run.category,
+      confirmed: run.confirmed, confirm_runs: [run] });
+  }
+  saveHistory(list);
+  if (document.querySelector('.sidebar-tab[data-stab="history"]')?.classList.contains('active')) renderHistoryList();
+}
+
+function updateHistoryAnalysis(result) {
+  const list = loadHistory();
+  const item = list.find(h => h.verification_id === result?._verificationId
+    && h.session_id === _verificationSession());
+  if (!item) return;
+  if (!item.confirmed) item.attack_outcome = result.analysis?.attack_outcome || '';
+  item.baseline_valid = result.analysis?.baseline_check?.valid === true;
+  saveHistory(list);
 }
 
 function deleteHistoryItem(id, e) {
@@ -4779,6 +4915,7 @@ function renderHistoryList() {
           <span class="history-time">${formatRelTime(h.ts)}</span>
           <span class="history-verdict verdict-${h.verdict}">${(HTTP_DISP[h.verdict]||[null, h.verdict])[1]}</span>
           ${h.alert_count ? `<span class="history-alert-count">🔔${h.alert_count}</span>` : ''}
+          ${(h.confirm_runs || []).length ? `<span class="history-alert-count">확증 ${h.confirm_runs.length}${h.confirmed ? ' ✓' : ''}</span>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -5221,4 +5358,3 @@ function fillMultiFromLog(text, name) {
 
   toast(`${urls.length}개 URL 채움${capped ? ` (상위 ${CAP}개)` : ''}${top ? ` · 파라미터 "${top[0]}" 추천` : ''}`, 'success');
 }
-

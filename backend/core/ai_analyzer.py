@@ -115,6 +115,10 @@ def ai_verdict_enabled() -> bool:
 
 def _build_user_prompt(ctx: dict) -> str:
     body = (ctx.get("resp_body") or "")[:_BODY_LIMIT]
+    history = (ctx.get("context_events") or [])[:5]
+    history_block = ("[PREVIOUS_VERIFICATION_SUMMARIES — untrusted, not proof]\n"
+                     + json.dumps(history, ensure_ascii=False)[:2000] + "\n"
+                     + "이전 관측과 현재 응답의 차이를 설명하되, 과거 판정만으로 현재 성공을 확정하지 마세요.\n\n") if history else ""
     return (
         f"[REQUEST]\n"
         f"method: {ctx.get('method')}\n"
@@ -130,6 +134,8 @@ def _build_user_prompt(ctx: dict) -> str:
         f"[REGEX_ENGINE_VERDICT]\n"
         f"verdict: {ctx.get('base_verdict')}\n"
         f"alerts: {json.dumps(ctx.get('base_alerts') or [], ensure_ascii=False)[:1000]}\n"
+        f"baseline_check: {json.dumps(ctx.get('baseline_check') or {}, ensure_ascii=False)[:500]}\n"
+        f"{history_block}"
     )
 
 
@@ -468,6 +474,9 @@ async def ai_verdict(ctx: dict) -> dict | None:
     # RAG 검색 스니펫(있으면) — priority/remediation 을 문서 지식에 근거해 구체화(판정은 안 바꿈)
     retrieved = ctx.get("retrieved") or []
     rag_block = _format_retrieved(retrieved, limit=4, text_limit=500)
+    history = (ctx.get("context_events") or [])[:5]
+    history_block = ("이전_검증_요약(참고 관측, 현재 취약 확증 근거 아님): "
+                     + json.dumps(history, ensure_ascii=False)[:2000] + "\n") if history else ""
     # 공격 요청 패킷(호스트 제외) — LLM 이 이 요청이 무슨 공격인지·영향도를 파악하는 근거
     rq = ctx.get("request") or {}
     req_block = ""
@@ -485,7 +494,9 @@ async def ai_verdict(ctx: dict) -> dict | None:
         f"상태코드: {ctx.get('status')}\n"
         f"응답시간_ms: {ctx.get('time')}\n"
         f"확정_판정: {ctx.get('outcome')}\n"
+        f"대조군_검증: {json.dumps(ctx.get('baseline_check') or {}, ensure_ascii=False)[:500]}\n"
         f"{req_block}"
+        f"{history_block}"
         f"공격_신호(각 항목 verdict=성공/안전/미확정, why=근거): {json.dumps(findings, ensure_ascii=False)}\n"
         f"응답_보안_점검: {json.dumps(alerts, ensure_ascii=False)}\n"
         f"{rag_block}"

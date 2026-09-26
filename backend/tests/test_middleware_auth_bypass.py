@@ -10,6 +10,7 @@ from core.analyzer import analyze_response
 _MW = "middleware:middleware:middleware:middleware:middleware"
 _HDRS = {"x-middleware-subrequest": _MW, "host": "test.com"}
 _URL = "http://test.com/123/v1/js/common/vendor.js"
+_PRIVATE = "tenant-private-receipt-97531"
 
 
 def _find(r, kw="CVE-2025-29927"):
@@ -31,7 +32,7 @@ def test_original_url_header_judged_by_detector():
                          url="http://test.com/admin", req_headers={"x-original-url": "/admin"},
                          baseline={"status_code": 403, "body": "Forbidden"})
     fs = [f for f in r["findings"] if "우회" in f["name"]]
-    assert fs and fs[0]["verdict"] == "성공"
+    assert fs and fs[0]["verdict"] == "의심"
     assert "x-original-url" in fs[0]["evidence"].lower()
 
 
@@ -51,14 +52,18 @@ def test_single_request_is_suspicious_with_next_action():
     assert "CVE-2025-29927" in fs[0]["name"]
     na = r.get("next_action") or {}
     assert na.get("confirm_scan") is True
-    assert "정상 요청" in na.get("text", "")
+    assert "보호 콘텐츠" in na.get("text", "")
 
 
-# ── 판정: 대조군 차분(정상 거부 → 우회 제공) → 성공 확증 ───────────────────────
+# ── 판정: 상태 전이 + 명시한 비공개 콘텐츠 확인 → 성공 확증 ──────────────────
 def test_baseline_redirect_login_attack_200_is_success():
-    r = analyze_response(200, {}, "secret dashboard" * 20, 40,
-                         payload="", category="", url="http://test.com/admin", req_headers=_HDRS,
-                         baseline={"status_code": 302, "location": "/login", "body": ""})
+    r = analyze_response(200, {}, "secret dashboard " + _PRIVATE, 40,
+                         payload="", category="", url="http://test.com/admin", method="GET", req_headers=_HDRS,
+                         baseline={"status_code": 302, "location": "/login", "body": "",
+                                   "protected_marker": _PRIVATE,
+                                   "request": {"method": "GET", "url": "http://test.com/admin",
+                                               "headers": {"host": "test.com"}}})
+    assert r["baseline_check"]["valid"], r["baseline_check"]
     assert r["attack_outcome"] == "success"
     fs = _find(r)
     assert fs and fs[0]["verdict"] == "성공"
@@ -66,11 +71,23 @@ def test_baseline_redirect_login_attack_200_is_success():
 
 
 def test_baseline_401_attack_200_is_success():
-    r = analyze_response(200, {}, "admin panel" * 10, 40,
-                         payload="", category="", url="http://test.com/admin", req_headers=_HDRS,
-                         baseline={"status_code": 401, "body": "Unauthorized"})
+    r = analyze_response(200, {}, "admin panel " + _PRIVATE, 40,
+                         payload="", category="", url="http://test.com/admin", method="GET", req_headers=_HDRS,
+                         baseline={"status_code": 401, "body": "Unauthorized",
+                                   "protected_marker": _PRIVATE,
+                                   "request": {"method": "GET", "url": "http://test.com/admin",
+                                               "headers": {"host": "test.com"}}})
+    assert r["baseline_check"]["valid"], r["baseline_check"]
     assert r["attack_outcome"] == "success"
     assert _find(r)[0]["verdict"] == "성공"
+
+
+def test_generic_200_after_403_is_not_confirmed():
+    r = analyze_response(200, {}, "Service temporarily unavailable", 40,
+                         url="http://test.com/admin", req_headers=_HDRS,
+                         baseline={"status_code": 403, "body": "Forbidden"})
+    assert r["attack_outcome"] == "suspicious"
+    assert not any(f["verdict"] == "성공" for f in _find(r))
 
 
 # ── 판정: 우회 요청도 거부 → 미우회(안전), 허위 의심 없음 ──────────────────────

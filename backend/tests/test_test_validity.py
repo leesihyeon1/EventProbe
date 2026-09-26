@@ -80,9 +80,13 @@ def test_analyze_downgrades_safe_to_inconclusive_on_challenge():
 def test_analyze_success_not_downgraded():
     """실제 성공 증거가 있으면 유효성 경고로 강등하지 않는다."""
     LF = '<form><input name="u"><input type="password" name="p"></form>'
-    LI = '<div>Welcome</div><a href="/logout">Logout</a>' * 40
+    marker = "private-account-record-97531"
+    LI = '<div>Welcome</div><a href="/logout">Logout</a>' * 40 + marker
     r = analyze_response(200, {"content-type": "text/html"}, LI, 120,
                          payload="admin'--", category="sqli",
-                         baseline={"status_code": 200, "body": LF},
+                         baseline={"status_code": 200, "body": LF,
+                                   "protected_marker": marker,
+                                   "request": {"method": "POST", "url": "http://t/login.aspx",
+                                               "body": "u=wrong&p="}},
                          url="http://t/login.aspx", req_body="u=admin'--&p=", method="POST")
     assert r["attack_outcome"] == "success"

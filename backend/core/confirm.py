@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 
-from core.detectors import auth_rejected, auth_served
+from core.detectors import auth_rejected, auth_served, protected_content_evidence, _LOGIN_FORM_RE
 from core import error_signatures as _error_signatures
 from typing import Optional
 
@@ -70,20 +70,31 @@ _BYPASS_HEADERS = {"x-middleware-subrequest", "x-original-url", "x-rewrite-url",
                    "x-custom-ip-authorization", "x-real-ip"}
 
 
-def decide_authbypass(normal: dict, bypass: dict) -> list[dict]:
-    """인가 우회 헤더 차분 판정 — 헤더 제거(정상)는 거부인데 헤더 포함(우회)이 리소스를
-    제공하면 인가 우회 확증. normal/bypass: {status, location, body}.
-    거부/제공 판정은 detectors.auth_rejected/auth_served 공유 오라클을 사용."""
+def decide_authbypass(normal: dict, bypass: dict, protected_marker: str = "",
+                      request_parts=()) -> list[dict]:
+    """헤더 차분에서 직접 응답의 보호 콘텐츠까지 확인됐을 때만 인가 우회를 확정한다."""
     def rej(r):
         return auth_rejected(r.get("status"), r.get("location", ""))
 
-    def served(r):
-        return auth_served(r.get("status"), r.get("location", ""))
-
-    if rej(normal) and served(bypass):
+    if (rej(normal) and int(bypass.get("status") or 0) in (200, 201)
+            and protected_content_evidence(bypass.get("body") or "",
+                                           {"body": normal.get("body"),
+                                            "protected_marker": protected_marker}, request_parts)):
         return [{"name": "인가 우회 확증 (헤더 차분)",
                  "evidence": f"우회 헤더 제거 시 HTTP {normal.get('status')}(거부) → 헤더 포함 시 "
-                             f"HTTP {bypass.get('status')}(보호 리소스 제공) → 인가 우회 확증"}]
+                             f"HTTP {bypass.get('status')} · 지정한 보호 콘텐츠 확인"}]
+    return []
+
+
+def observe_authbypass(normal: dict, bypass: dict) -> list[dict]:
+    """상태 전이만 관측한 경우의 미확정 증거. 확증 techniques 와 구분한다."""
+    if auth_rejected(normal.get("status"), normal.get("location", "")) and \
+            auth_served(bypass.get("status"), bypass.get("location", "")):
+        return [{"name": "인가 우회 의심 (헤더 차분)",
+                 "level": "suspicious",
+                 "evidence": f"헤더 제거 HTTP {normal.get('status')} → 포함 HTTP {bypass.get('status')}; "
+                             "보호 콘텐츠 제공 여부 미확인",
+                 "next_action": "보호 자원에서만 반환되는 표식을 지정해 다시 확인하세요."}]
     return []
 
 
@@ -256,44 +267,54 @@ def _has_session_cookie(headers: dict) -> bool:
     return False
 
 
-def decide(category: str, results: list[dict]) -> dict:
+def decide(category: str, results: list[dict], protected_marker: str = "",
+           request_parts=()) -> dict:
     """프로브 응답들을 비교해 확증 여부를 판정.
 
-    반환: {"confirmed": bool, "techniques": [{"name","evidence"}], "category": str}
-    techniques 가 비어 있으면 '깨끗'(확증 실패).
+    반환: confirmed 는 직접 증거가 있는 techniques 만 반영한다. 상태·길이·단발 지연
+    같은 후보 신호는 observations 로 반환하며 안전 판정으로 취급하지 않는다.
     """
     cat = _norm_cat(category)
     by = {r["role"]: r for r in results}
     techniques: list[dict] = []
+    observations: list[dict] = []
 
     def ok(role: str) -> bool:
         r = by.get(role)
         return bool(r) and int(r.get("status") or 0) > 0
 
+    def observe_boolean(name: str, true: dict, false: dict, base: dict = None) -> None:
+        status_diff = true["status"] != false["status"]
+        len_diff = abs(len(true.get("body") or "") - len(false.get("body") or ""))
+        if not status_diff and len_diff < _LEN_DELTA_MIN:
+            return
+        statuses = [int(r.get("status") or 0) for r in (true, false, base) if r]
+        invalid = any(s == 0 or s == 429 or s >= 500 for s in statuses)
+        observations.append({
+            "name": f"{name} 비교 {'무효' if invalid else '차이 관측'}",
+            "level": "invalid" if invalid else "suspicious",
+            "evidence": f"참/거짓 HTTP {true['status']}/{false['status']} · 본문 길이차 {len_diff}B",
+            "next_action": ("오류·요청 제한이 없는 조건에서 대조군과 참/거짓 요청을 재실행하세요."
+                            if invalid else "동일 조건에서 반복해 변화가 조건과 함께 재현되는지 확인하세요."),
+        })
+
     if cat == "sqli":
-        # 시간 기반 — 문자열/숫자 컨텍스트 각각
+        # 단발 시간 차이는 회선/서버 부하와 구별되지 않는다.
         for c0, c5, ctx in (("time0", "time5", "문자열"), ("time0n", "time5n", "숫자")):
             if ok(c0) and ok(c5):
                 t0, t5 = by[c0]["time_ms"], by[c5]["time_ms"]
                 if t0 < _TIME_CTRL_MAX and (t5 - t0) >= _TIME_DELTA_MIN:
-                    techniques.append({
-                        "name": f"시간 기반 SQLi ({ctx} 컨텍스트)",
+                    observations.append({
+                        "name": f"시간 기반 SQLi 지연 관측 ({ctx} 컨텍스트)",
+                        "level": "suspicious" if all(by[k]["status"] < 400 for k in (c0, c5)) else "invalid",
                         "evidence": f"SLEEP(5)={t5:.0f}ms vs SLEEP(0)={t0:.0f}ms (Δ{t5 - t0:.0f}ms)",
+                        "next_action": "정상·지연 프로브를 번갈아 반복해 지연이 일관되게 재현되는지 확인하세요.",
                     })
-        # 불린 기반 — 참/거짓 응답이 갈리는가
+        # 한 번의 상태·길이 차이는 WAF/레이트리밋/동적 페이지와 구분할 수 없다.
         if ok("baseline") and ok("bool_true") and ok("bool_false"):
-            bt, bf = by["bool_true"], by["bool_false"]
-            status_diff = bt["status"] != bf["status"]
-            len_diff = abs(len(bt.get("body") or "") - len(bf.get("body") or ""))
-            if status_diff or len_diff >= _LEN_DELTA_MIN:
-                ev = []
-                if status_diff:
-                    ev.append(f"상태 참={bt['status']}/거짓={bf['status']}")
-                if len_diff >= _LEN_DELTA_MIN:
-                    ev.append(f"본문 길이차 {len_diff}B")
-                techniques.append({"name": "불린 기반 SQLi", "evidence": "; ".join(ev)})
+            observe_boolean("불린 기반 SQLi", by["bool_true"], by["bool_false"], by["baseline"])
         # 에러 기반 — EXTRACTVALUE 로 hex 마커를 되돌리게 하고, 응답에 '평문' 마커가 나오면
-        # DB 가 실제로 평가한 것(요청엔 hex 만 있음). 또는 대조엔 없던 SQL 에러가 뜨면 확증.
+        # DB 가 실제로 평가한 것(요청엔 hex 만 있음). 새 DB 에러만으로는 원인 확정 불가.
         base_body = (by.get("baseline") or {}).get("body") or ""
         base_has_err = bool(_SQL_ERROR_RE.search(base_body))
         for role in ("err", "errn"):
@@ -309,9 +330,11 @@ def decide(category: str, results: list[dict]) -> dict:
                 break
             if not base_has_err and _SQL_ERROR_RE.search(body):
                 m = _SQL_ERROR_RE.search(body)
-                techniques.append({
-                    "name": "에러 기반 SQLi (DB 에러 유발)",
+                observations.append({
+                    "name": "SQL 에러 신규 발생(SQLi 미확정)",
+                    "level": "suspicious",
                     "evidence": f"대조엔 없던 SQL 에러가 주입 시 발생: '{m.group(0)[:60]}'",
+                    "next_action": "고유 마커 반환 등 실제 쿼리 실행 증거를 확인하세요.",
                 })
                 break
 
@@ -320,12 +343,15 @@ def decide(category: str, results: list[dict]) -> dict:
             if ok(c0) and ok(c5):
                 t0, t5 = by[c0]["time_ms"], by[c5]["time_ms"]
                 if t0 < _TIME_CTRL_MAX and (t5 - t0) >= _TIME_DELTA_MIN:
-                    techniques.append({
-                        "name": f"명령 주입 (시간 기반, {ctx})",
+                    observations.append({
+                        "name": f"명령 주입 지연 관측 ({ctx})",
+                        "level": "suspicious" if all(by[k]["status"] < 400 for k in (c0, c5)) else "invalid",
                         "evidence": f"sleep5={t5:.0f}ms vs sleep0={t0:.0f}ms (Δ{t5 - t0:.0f}ms)",
+                        "next_action": "정상·지연 프로브를 반복하거나 출력/OOB 증거로 재확인하세요.",
                     })
         r = by.get("idcmd")
-        if r and _UID_RE.search(r.get("body") or ""):
+        if (r and _UID_RE.search(r.get("body") or "")
+                and not _UID_RE.search((by.get("baseline") or {}).get("body") or "")):
             m = _UID_RE.search(r["body"])
             techniques.append({"name": "명령 주입 (id 실행)", "evidence": f"응답에 '{m.group(0)}' 등장"})
 
@@ -348,11 +374,13 @@ def decide(category: str, results: list[dict]) -> dict:
     elif cat == "xss":
         r = by.get("probe")
         body = (r or {}).get("body") or ""
-        # 마커 브레이크가 '인코딩 없이' 그대로 반사되면 실행 가능
+        # 미인코딩 반사는 실행 가능성만 뜻한다. 실행 확정은 브라우저 확증이 맡는다.
         if r and _XSS_BREAK in body:
-            techniques.append({
-                "name": "반사형 XSS (미인코딩 반사)",
+            observations.append({
+                "name": "반사형 XSS 의심 (미인코딩 반사)",
+                "level": "suspicious",
                 "evidence": f"주입한 '{_XSS_MARKER}\"><svg …>' 가 원문 그대로 반사됨",
+                "next_action": "브라우저에서 실제 스크립트 실행 여부를 확인하세요.",
             })
 
     elif cat == "lfi":
@@ -376,26 +404,13 @@ def decide(category: str, results: list[dict]) -> dict:
             })
 
     elif cat == "nosql":
-        # 불린 기반 — 항상 참/거짓 응답이 유의미하게 갈리면 확증(SQLi 불린과 동일 원리).
+        # 참/거짓 한 쌍의 차이는 후보 신호다. 반복·원인 검증 전에는 확정하지 않는다.
         for t, f, ctx in (("n_true", "n_false", "작은따옴표"), ("n_true2", "n_false2", "큰따옴표")):
             if ok(t) and ok(f):
-                rt, rf = by[t], by[f]
-                status_diff = rt["status"] != rf["status"]
-                len_diff = abs(len(rt.get("body") or "") - len(rf.get("body") or ""))
-                if status_diff or len_diff >= _LEN_DELTA_MIN:
-                    ev = []
-                    if status_diff:
-                        ev.append(f"상태 참={rt['status']}/거짓={rf['status']}")
-                    if len_diff >= _LEN_DELTA_MIN:
-                        ev.append(f"본문 길이차 {len_diff}B")
-                    techniques.append({
-                        "name": f"NoSQL 불린 기반 ({ctx} 컨텍스트)",
-                        "evidence": "; ".join(ev),
-                    })
+                observe_boolean(f"NoSQL 불린 기반 ({ctx} 컨텍스트)", by[t], by[f], by.get("baseline"))
 
     elif cat == "idor":
-        # 이웃 객체 ID 차등 — 원본 ID 는 실제 객체(200·본문 O), 없는 ID 는 실패(대조),
-        # 이웃 ID 가 200·'다른' 실제 객체를 주면 소유권 검사 없이 임의 접근 → IDOR.
+        # 이웃 객체 열람은 공개 정보일 수도 있다. 소유권/권한 정보 없이 IDOR 를 확정하지 않는다.
         base = by.get("baseline")
         b_body = (base or {}).get("body") or ""
         b_len = len(b_body)
@@ -410,33 +425,24 @@ def decide(category: str, results: list[dict]) -> dict:
                     r = by.get(role)
                     nb = (r or {}).get("body") or ""
                     if r and int(r.get("status") or 0) == 200 and nb and nb != b_body and len(nb) >= 0.5 * b_len:
-                        techniques.append({
-                            "name": "IDOR (직접 객체 참조)",
-                            "evidence": f"이웃 ID({lbl})가 200·다른 객체 반환, 없는 ID 는 실패 "
-                                        f"({int(ne.get('status') or 0)}) → 소유권 검사 없음",
+                        observations.append({
+                            "name": "IDOR 의심 (객체 열거)",
+                            "level": "suspicious",
+                            "evidence": f"이웃 ID({lbl})가 200·다른 객체 반환, 없는 ID 는 "
+                                        f"{int(ne.get('status') or 0)}. 객체 소유권/공개 여부 미확인",
+                            "next_action": "해당 객체가 다른 계정의 비공개 자원인지 소유권·권한을 확인하세요.",
                         })
                         break
 
     elif cat == "ldap":
-        # 불린 기반 — 참/거짓 쌍의 응답이 유의미하게 갈리면 확증(SQLi/NoSQL 불린과 동일).
+        # 한 쌍의 차이는 후보 신호이며, 반복/실제 LDAP 결과 검증 전에는 확정하지 않는다.
         for t, f, ctx in (("l_wild", "l_none", "와일드카드"), ("l_true", "l_false", "필터 브레이크아웃")):
             if ok(t) and ok(f):
                 rt, rf = by[t], by[f]
-                status_diff = rt["status"] != rf["status"]
-                len_diff = abs(len(rt.get("body") or "") - len(rf.get("body") or ""))
-                if status_diff or len_diff >= _LEN_DELTA_MIN:
-                    ev = []
-                    if status_diff:
-                        ev.append(f"상태 참={rt['status']}/거짓={rf['status']}")
-                    if len_diff >= _LEN_DELTA_MIN:
-                        ev.append(f"본문 길이차 {len_diff}B")
-                    techniques.append({
-                        "name": f"LDAP 불린 기반 ({ctx})",
-                        "evidence": "; ".join(ev),
-                    })
+                observe_boolean(f"LDAP 불린 기반 ({ctx})", rt, rf, by.get("baseline"))
 
     elif cat == "auth":
-        # 인증 우회 — 실패 대조군(baseline) 대비, 우회 payload 가 '인증 성공' 신호를 보이면 확증.
+        # 인증 상태 변화는 후보 신호다. 명시된 보호 콘텐츠가 응답에 있어야 확정한다.
         c = by.get("baseline")
         if c and int(c.get("status") or 0) > 0:
             c_status = int(c.get("status") or 0)
@@ -454,9 +460,9 @@ def decide(category: str, results: list[dict]) -> dict:
                 # ① 세션 쿠키 획득(대조군엔 없던)
                 if _has_session_cookie(r.get("headers") or {}) and not c_sess:
                     signals.append("세션 쿠키 발급")
-                # ② 로그인 성공 리다이렉트(대조군은 리다이렉트 아님)
+                # ② 로그인 후 페이지로 보이는 리다이렉트(대조군은 리다이렉트 아님)
                 if b_status in (301, 302, 303, 307, 308) and not c_redir:
-                    signals.append(f"성공 리다이렉트({b_status})")
+                    signals.append(f"리다이렉트 변화({b_status})")
                 # ③ 상태 개선(대조 401/403 → 우회가 리소스 제공). 3xx 는 로그인/에러로의
                 #    리다이렉트면 '거부'지 우회가 아니므로 제외 — auth_served 공유 오라클로 판정.
                 if c_status in (401, 403) and auth_served(b_status, _loc_header(r.get("headers") or {})):
@@ -466,13 +472,24 @@ def decide(category: str, results: list[dict]) -> dict:
                 if c_fail and b_status == 200 and not _AUTH_FAIL_RE.search(b_body):
                     signals.append("인증 실패 문구 사라짐")
                 if signals:
-                    techniques.append({
-                        "name": "인증 우회",
-                        "evidence": f"'{r.get('value')}' → " + ", ".join(signals),
+                    proven = (b_status in (200, 201)
+                              and (c_fail or auth_rejected(c_status, _loc_header(c.get("headers") or {}))
+                                   or bool(_LOGIN_FORM_RE.search(c_body)))
+                              and protected_content_evidence(
+                                  b_body, {"body": c_body, "protected_marker": protected_marker},
+                                  (*request_parts, r.get("value"))))
+                    target = techniques if proven else observations
+                    target.append({
+                        "name": "인증 우회" if proven else "인증 상태 변화(우회 미확정)",
+                        "evidence": f"'{r.get('value')}' → " + ", ".join(signals)
+                                    + (" · 지정한 보호 콘텐츠 확인" if proven else " · 보호 콘텐츠 미확인"),
+                        **({} if proven else {"next_action": "로그인 이후에만 보이는 보호 콘텐츠를 지정해 확인하세요."}),
+                        **({} if proven else {"level": "suspicious"}),
                     })
                     break
 
-    return {"confirmed": bool(techniques), "techniques": techniques, "category": cat}
+    return {"confirmed": bool(techniques), "techniques": techniques,
+            "observations": observations, "category": cat}
 
 
 # ── L3: 파일 노출 catch-all 차분 확증 (순수 판정) ─────────────────
