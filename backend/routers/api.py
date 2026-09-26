@@ -1329,6 +1329,20 @@ def _looks_login(req: "ConfirmRequest") -> bool:
     return False
 
 
+def _probe_req_info(location, param, method, final_url, value):
+    """확증 프로브가 '어디에 주입됐는지' — 위치·파라미터·최종 URL·주입 표현. 표시/감사용."""
+    loc = (location or "param").lower()
+    pname = param or ("q" if loc in ("param", "body") else "")
+    if loc == "header":
+        injected = "%s: %s" % (pname or "X-Test-Payload", value)
+    elif loc == "body":
+        injected = "body %s=%s" % (pname or "q", value)
+    else:               # param/path 는 최종 URL 에 이미 반영됨
+        injected = final_url
+    return {"location": loc, "param": pname, "req_method": (method or "GET").upper(),
+            "req_url": final_url, "injected": injected}
+
+
 async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: list, follow: bool):
     """프로브 세트를 순차 전송(타이밍 정확도) 후 (results, probes_out) 반환."""
     results, probes_out = [], []
@@ -1340,6 +1354,8 @@ async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: l
                 req.url, params, req.body, headers,
                 req.target.location, req.target.param, p["value"],
             )
+            _reqinfo = _probe_req_info(req.target.location, req.target.param,
+                                       req.method, final_url, p["value"])
             try:
                 start = time.time()
                 resp = await client.request(
@@ -1355,17 +1371,19 @@ async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: l
                     "role": p["role"], "label": p["label"], "value": p["value"],
                     "status": resp.status_code, "time_ms": round(elapsed),
                     "len": len(resp.text),   # 응답 크기 — 불린 기반 길이차를 표에서 눈으로 비교
+                    **_reqinfo,
                 })
             except httpx.TimeoutException:
                 results.append({"role": p["role"], "status": 0, "time_ms": float(req.timeout) * 1000,
                                 "body": "", "headers": {}, "value": p["value"]})
                 probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
-                                   "status": 0, "time_ms": round(float(req.timeout) * 1000), "timeout": True})
+                                   "status": 0, "time_ms": round(float(req.timeout) * 1000), "timeout": True,
+                                   **_reqinfo})
             except Exception as e:
                 results.append({"role": p["role"], "status": 0, "time_ms": 0.0,
                                 "body": "", "headers": {}, "value": p["value"]})
                 probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
-                                   "status": 0, "time_ms": 0, "error": str(e)[:120]})
+                                   "status": 0, "time_ms": 0, "error": str(e)[:120], **_reqinfo})
     return results, probes_out
 
 

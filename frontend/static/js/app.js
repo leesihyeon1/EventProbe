@@ -1214,9 +1214,17 @@ function renderConfirmResult(res, param) {
       <td style="padding:2px 8px 2px 0">${st}</td>
       <td style="padding:2px 8px 2px 0;color:var(--text-muted)">${p.time_ms}ms</td>
       <td style="padding:2px 8px 2px 0;color:var(--text-muted)">${p.len != null ? p.len + 'B' : '-'}</td>
-      <td style="padding:2px 0;color:var(--text-muted);font-family:var(--font-mono);font-size:10px;word-break:break-all;white-space:normal" title="${escapeHtml(String(p.value))}">${escapeHtml(_ellipsisMid(p.value, 90))}</td>
+      <td style="padding:2px 8px 2px 0;color:var(--text-muted);font-family:var(--font-mono);font-size:10px;word-break:break-all;white-space:normal" title="${escapeHtml(String(p.value))}">${escapeHtml(_ellipsisMid(p.value, 60))}</td>
+      <td style="padding:2px 0;color:var(--accent);font-family:var(--font-mono);font-size:10px;word-break:break-all;white-space:normal" title="${escapeHtml(((p.req_method || '') + ' ' + (p.req_url || p.injected || '')).trim())}">${escapeHtml(_ellipsisMid(p.injected || '-', 70))}</td>
     </tr>`;
   }).join('');
+
+  // 주입 위치(어디에 넣었나) — 모든 프로브 공통. 표 위에 한 줄로 명시.
+  const _p0 = (res.probes || [])[0] || {};
+  const _locLabel = { param: '쿼리 파라미터', body: '본문(body)', path: '경로(path)', header: '헤더' }[_p0.location] || _p0.location || '';
+  const whereRow = _p0.location
+    ? `<div class="detail-item" style="color:var(--text-secondary);margin-bottom:4px">주입 위치: <b>${escapeHtml(_locLabel)}</b>${_p0.param ? ` · <code style="font-family:var(--font-mono)">${escapeHtml(_p0.param)}</code>` : ''}${_p0.req_method ? ` · ${escapeHtml(_p0.req_method)}` : ''}</div>`
+    : '';
 
   const card = document.createElement('div');
   card.className = 'analysis-card';
@@ -1228,10 +1236,11 @@ function renderConfirmResult(res, param) {
       ${res.confirmed
         ? `<div style="margin-bottom:6px">${techRows}</div>`
         : `<div class="detail-item" style="color:var(--text-muted)">대조 프로브 간 유의미한 차이 없음 — 이 파라미터에서 ${escapeHtml(res.category)} 미확증.</div>`}
+      ${whereRow}
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
         <thead><tr style="color:var(--text-muted);font-size:10px">
           <th style="text-align:left;padding:2px 8px 4px 0">프로브</th><th style="text-align:left;padding:2px 8px 4px 0">상태</th>
-          <th style="text-align:left;padding:2px 8px 4px 0">시간</th><th style="text-align:left;padding:2px 8px 4px 0">크기</th><th style="text-align:left;padding:2px 0 4px 0">값</th>
+          <th style="text-align:left;padding:2px 8px 4px 0">시간</th><th style="text-align:left;padding:2px 8px 4px 0">크기</th><th style="text-align:left;padding:2px 8px 4px 0">값</th><th style="text-align:left;padding:2px 0 4px 0">요청</th>
         </tr></thead>
         <tbody>${probeRows}</tbody>
       </table>
