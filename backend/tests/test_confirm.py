@@ -184,11 +184,12 @@ def test_ssti_not_confirmed_when_product_in_baseline():
     assert not d["confirmed"]
 
 
-def test_xss_marker_reflection_confirmed():
+def test_xss_marker_reflection_requires_execution():
     body = f"<div>{confirm._XSS_BREAK}</div>"   # 마커가 인코딩 없이 반사
     results = [_r("baseline"), _r("probe", body=body)]
     d = confirm.decide("xss", results)
-    assert d["confirmed"]
+    assert not d["confirmed"]
+    assert d['suspicions']
 
 
 def test_xss_not_confirmed_when_encoded():
@@ -260,7 +261,7 @@ def test_idor_probe_plan_numeric_only():
     assert confirm.probe_plan("idor", "abc-uuid") == []   # 숫자형만 열거 가능
 
 
-def test_idor_confirmed_when_neighbor_accessible():
+def test_idor_neighbor_requires_ownership_policy():
     results = [
         _r("baseline", status=200, body="A" * 400),
         _r("id_down", status=200, body="B" * 380),      # 다른 실제 객체
@@ -268,8 +269,8 @@ def test_idor_confirmed_when_neighbor_accessible():
         _r("nonexistent", status=404, body="not found"),  # 대조군 실패
     ]
     d = confirm.decide("business", results)
-    assert d["confirmed"]
-    assert any("IDOR" in t["name"] for t in d["techniques"])
+    assert not d["confirmed"]
+    assert any("IDOR" in t["name"] for t in d["suspicions"])
 
 
 def test_idor_not_confirmed_when_all_same_spa():

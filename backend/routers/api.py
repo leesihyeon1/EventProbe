@@ -40,7 +40,7 @@ def _url_with_params(url: str, params: dict) -> str:
     )
     return url + ("&" if "?" in url else "?") + q
 from core.ai_analyzer import ai_analyze, ai_generate_variants, ai_suggest_payloads, ai_verdict, ai_classify_attack, is_enabled as ai_enabled, response_analysis_enabled, ai_verdict_enabled
-from core.raw_http import raw_send, parse_raw_request
+from core.raw_http import raw_send, raw_send_packet, parse_raw_request
 from core.cve_matcher import match_cve_payloads
 from core.followup import hot_families, escalation_candidates
 from core import confirm as confirm_scan
@@ -1018,6 +1018,7 @@ class RawRequest(BaseModel):
     use_defaults: bool = False            # raw 충실도: 기본 미주입
     inline_ai: bool = False
     custom_alert_rules: list = []
+    wire: bool = False                    # 요청줄·헤더 순서·중복을 보존해 소켓으로 전송
 
 
 @router.post("/request/raw")
@@ -1032,6 +1033,28 @@ async def send_request_raw(req: RawRequest):
     if not parsed.get("url") or parsed["url"].startswith("/"):
         return {"error": "대상 URL 을 구성할 수 없습니다 — Host 헤더가 없거나 절대 URL 이 아닙니다. "
                          "host 필드로 대상을 지정하거나 요청라인에 절대 URL 을 쓰세요."}
+    if req.wire:
+        if len(req.raw.encode("utf-8")) > 65536:
+            return {"error": "원문 패킷은 64KB 이하로 입력하세요."}
+        try:
+            result = await asyncio.to_thread(raw_send_packet, req.raw, parsed["url"],
+                                             float(max(1, min(req.timeout, 30))))
+        except Exception as e:
+            return {"error": f"원문 전송 실패: {type(e).__name__}: {e}"}
+        analysis = analyze_response(
+            status_code=result["status_code"], headers=result["headers"],
+            body=result["body"], response_time=result["response_time"],
+            payload=req.payload, category=req.category, baseline=req.baseline,
+            url=parsed["url"], req_body=parsed["body"], method=parsed["method"],
+            req_headers=parsed["headers"], custom_alert_rules=req.custom_alert_rules,
+        )
+        return {**result, "analysis": analysis, "raw_mode": True,
+                "sent_headers": parsed["headers"], "sent_body": parsed["body"],
+                "redirect_chain": [], "followed_redirects": False,
+                "parsed_request": {"method": parsed["method"], "url": parsed["url"],
+                                   "http_version": parsed.get("http_version") or "",
+                                   "header_count": len(parsed["headers"]),
+                                   "has_body": bool(parsed["body"])}}
     single = SingleRequest(
         method=parsed["method"], url=parsed["url"], headers=parsed["headers"],
         body=parsed["body"] or None, params={}, payload=req.payload, category=req.category,
@@ -1543,7 +1566,7 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
     """
     cat = (req.category or "").lower()
     sent_headers_base = merge_headers(req.headers, req.default_headers, req.use_defaults)
-    techniques, all_probes, ran = [], [], []
+    techniques, all_probes, ran, suspicions = [], [], [], []
 
     # 1) 카테고리 오라클 (선택 페이로드 계열)
     if cat and cat != "auth" and confirm_scan.is_supported(cat):
@@ -1551,7 +1574,9 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         if plan:
             results, probes = await _run_confirm_probes(
                 req, sent_headers_base, plan, follow=(cat != "redirect"))
-            techniques += confirm_scan.decide(cat, results)["techniques"]
+            decision = confirm_scan.decide(cat, results)
+            techniques += decision["techniques"]
+            suspicions += decision.get("suspicions", [])
             all_probes += probes
             ran.append(cat)
 
@@ -1592,11 +1617,12 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
     if cat == "xss" or re.search(r"<script|<svg|<img|on(?:error|load|toggle)\s*=|javascript:|alert\(|prompt\(", _xss_blob, re.I):
         # 브라우저 확증엔 '원시 URL' 사용 — _url_with_params 의 공백→%20 인코딩이
         # <svg%20onload=...> 처럼 DOM 파싱을 깨뜨려 실행을 막기 때문(실제 브라우저 동작과 불일치).
-        target_url = req.url
-        if req.params:
-            from urllib.parse import urlencode
-            target_url += ("&" if "?" in target_url else "?") + urlencode(req.params)
-        xr = await xss_confirm.confirm_xss(target_url, timeout=min(req.timeout, 20))
+        marker = "ep_xss_" + secrets.token_hex(10)
+        xparams, xheaders = dict(req.params), dict(sent_headers_base)
+        target_url, xbody = _inject_probe(req.url, xparams, req.body, xheaders,
+            req.target.location, req.target.param, '\"><svg onload=alert("' + marker + '")>')
+        xr = await xss_confirm.confirm_xss(target_url, timeout=min(req.timeout, 20),
+            expected_marker=marker, method=req.method, headers=xheaders, body=xbody)
         if xr.get("executed"):
             sig = ", ".join(f"{s[0]}({s[1]})" if isinstance(s, list) and len(s) > 1 else str(s)
                             for s in xr.get("signals", [])) or f"주입 실행형 요소 {xr.get('injected_elements', 0)}개"
@@ -1624,6 +1650,7 @@ async def confirm_scan_endpoint(req: ConfirmRequest):
         "probes_sent": len(all_probes),
         "confirmed": bool(techniques),
         "techniques": techniques,
+        "suspicions": suspicions,
         "probes": all_probes,
     }
 

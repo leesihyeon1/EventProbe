@@ -75,6 +75,8 @@ async def _no_cache(request, call_next):
 # 라우터 등록
 from routers.api import router as api_router
 app.include_router(api_router)
+from routers.agent import router as agent_router
+app.include_router(agent_router)
 
 # 정적 파일
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "static")
@@ -97,6 +99,12 @@ if __name__ == "__main__":
                         help="바인딩 주소 (기본 127.0.0.1). 네트워크 공개 시 0.0.0.0")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")),
                         help="포트 (기본 8000)")
+    # reload 는 '부모+워커' 2프로세스를 띄워, 종료/편집 시 한쪽이 포트를 물고 남는 좀비가
+    # 생기기 쉽다(서버가 안 뜨거나 낡은 코드로 응답). 기본은 단일 프로세스(안정)로 두고,
+    # 코드 수정 자동반영이 필요한 개발 중에만 --reload 또는 RELOAD=1 로 켠다.
+    parser.add_argument("--reload", action="store_true",
+                        default=os.getenv("RELOAD", "").strip().lower() in ("1", "true", "yes", "on"),
+                        help="코드 변경 자동 reload(개발용). 기본 꺼짐 — 좀비 프로세스 방지.")
     args = parser.parse_args()
 
     host, port = args.host, args.port
@@ -108,4 +116,6 @@ if __name__ == "__main__":
         print("    .env 에 EVENTPROBE_TOKEN 을 설정해 접근을 제한하세요.")
         print("=" * 70 + "\n")
 
-    uvicorn.run("main:app", host=host, port=port, reload=True)
+    if args.reload:
+        print("⚠️  reload 모드(개발용) — 종료 시 'taskkill /F /IM python.exe' 등으로 자식 워커까지 정리하세요.")
+    uvicorn.run("main:app", host=host, port=port, reload=args.reload)

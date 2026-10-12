@@ -21,6 +21,7 @@
   </div>
 
   <div class="topbar-actions">
+    <button class="btn btn-secondary" onclick="openAgent()">맥락 에이전트</button>
     <button class="btn btn-success" onclick="openBulkModal()">일괄 테스트</button>
     <button class="btn btn-secondary" onclick="generateReport()">📄 리포트 생성</button>
   </div>
@@ -123,7 +124,7 @@
 
     <!-- ── URL Bar ── -->
     <div class="url-bar">
-      <select id="methodSelect" class="method-select">
+      <select id="methodSelect" class="method-select" onchange="onMethodChange()" title="HTTP 메서드. '직접 입력…' 선택 시 임의/비표준 메서드(PROPFIND·FOO 등)를 그대로 보낼 수 있습니다.">
         <option>GET</option>
         <option>POST</option>
         <option>PUT</option>
@@ -133,7 +134,9 @@
         <option>OPTIONS</option>
         <option>TRACE</option>
         <option>CONNECT</option>
+        <option value="__custom__">직접 입력…</option>
       </select>
+      <input id="methodCustom" class="url-input" type="text" placeholder="예: PROPFIND" style="display:none;max-width:120px;flex:0 0 auto" title="임의/비표준 메서드 문자열을 그대로 전송" oninput="onMethodChange()">
       <select id="httpVersionSelect" class="method-select" style="width:110px" title="요청라인 HTTP 버전 (HTTP/1.1 외 선택 시 raw 소켓으로 그대로 전송)" onchange="onHttpVersionChange()">
         <option value="HTTP/1.1">HTTP/1.1</option>
         <option value="HTTP/1.0">HTTP/1.0</option>
@@ -155,6 +158,7 @@
       <button class="btn btn-secondary" onclick="openHeaderProfileModal()" title="기본 헤더 프로파일 편집" style="white-space:nowrap">⚙️</button>
       <button class="btn btn-secondary" onclick="clearRequest()" title="요청·응답·분석을 모두 초기화" style="white-space:nowrap">초기화</button>
       <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
+      <button id="abortBtn" class="btn btn-secondary" onclick="abortSend()" title="전송 중인 요청을 중단합니다(타임아웃·지연 시)" style="display:none;white-space:nowrap;border-color:rgba(248,81,73,.4);color:var(--danger)">⨯ 중단</button>
     </div>
 
     <!-- ── Inject Bar ── -->
@@ -407,6 +411,7 @@
     <div class="modal-body">
       <div class="form-group">
         <label class="form-label">SOAR·Burp의 raw 패킷, 또는 curl·wget 명령을 그대로 붙여넣으세요 <span style="color:var(--text-muted);font-weight:400">(형식 자동 감지)</span></label>
+        <button class="btn btn-secondary" type="button" onclick="loadMalformedRequestExample()" style="margin-bottom:8px">예시 패킷 불러오기</button>
         <textarea id="importRaw" class="code-editor" rows="11" spellcheck="false" oninput="previewImport()"
           placeholder="예) POST /api/login HTTP/1.1&#10;Host: target.example.com&#10;Content-Type: application/json&#10;&#10;{&quot;user&quot;:&quot;admin&quot;}&#10;&#10;예) curl 'https://target/api?q=1' -H 'Authorization: Bearer x' --data '{&quot;a&quot;:1}'&#10;&#10;예) wget --method=POST --header='Content-Type: application/json' --body-data='{...}' https://target/api"
           style="min-height:200px;font-size:12px"></textarea>
@@ -424,9 +429,15 @@
       <div style="font-size:11px;color:var(--text-muted);line-height:1.6">
         ℹ️ 명령을 서버에서 실행하지 않고 <b>파싱만</b> 합니다. URL·헤더·바디·쿼리가 폼에 채워지며, 이후 페이로드 주입·전송을 이어서 할 수 있습니다.
       </div>
+      <div class="form-group" style="margin-top:10px">
+        <label class="form-label" for="rawWireScheme">원문 전송 연결 방식</label>
+        <select id="rawWireScheme" class="form-select" style="width:120px"><option value="http">HTTP</option><option value="https">HTTPS</option></select>
+        <span style="font-size:11px;color:var(--text-muted)">Host 헤더의 서버에 연결합니다. 요청줄과 중복 헤더는 편집한 그대로 보냅니다.</span>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeImportModal()">취소</button>
+      <button id="rawSendBtn" class="btn btn-secondary" onclick="sendRawImport()">▶ 원문 전송</button>
       <button class="btn btn-primary" onclick="applyImport()">✓ 폼에 채우기</button>
     </div>
   </div>
@@ -796,5 +807,7 @@
 <div class="toast-container" id="toastContainer"></div>
 
 <script src="/static/js/app.js"></script>
+<link rel="stylesheet" href="/static/css/agent.css">
+<script src="/static/js/agent.js"></script>
 </body>
 </html>

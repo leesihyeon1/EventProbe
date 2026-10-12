@@ -16,8 +16,8 @@ async function _asJson(r, what) {
 }
 
 const API = {
-  async request(data) {
-    const r = await fetch('/api/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+  async request(data, signal) {
+    const r = await fetch('/api/request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data), signal });
     return _asJson(r, '요청 전송');
   },
   // 규칙 기반 판정에 AI·RAG 만 나중에 덧붙인다 — /api/request 를 붙잡지 않기 위해 분리.
@@ -478,12 +478,7 @@ function ensureTestHeader(rows) {
 }
 
 function fillFromParsed(n) {
-  const ms = document.getElementById('methodSelect');
-  if (n.method) {
-    const opt = [...ms.options].find(o => o.value.toUpperCase() === n.method);
-    if (opt) ms.value = opt.value;
-    else { const o = document.createElement('option'); o.textContent = n.method; ms.appendChild(o); ms.value = n.method; }
-  }
+  if (n.method) setMethod(n.method);   // 비표준 메서드는 '직접 입력…' 으로 자동 전환
   document.getElementById('urlInput').value = n.url || '';
 
   state.kvParams = n.params.length ? n.params : [];
@@ -519,7 +514,7 @@ function fillFromParsed(n) {
 // 전체 초기화 — 요청 패킷(메서드/URL/헤더/파라미터/바디) + 응답 + 분석을 빈 상태로 되돌림
 function clearRequest() {
   // 메서드/URL/HTTP버전
-  const ms = document.getElementById('methodSelect'); if (ms) ms.value = 'GET';
+  setMethod('GET');
   const urlInput = document.getElementById('urlInput'); if (urlInput) urlInput.value = '';
   const ver = document.getElementById('httpVersionSelect');
   if (ver) { ver.value = 'HTTP/1.1'; }
@@ -697,6 +692,63 @@ function openImportModal() {
 
 function closeImportModal() {
   document.getElementById('importModal').classList.add('hidden');
+}
+
+function loadMalformedRequestExample() {
+  document.getElementById('importRaw').value = [
+    'TMAE /',
+    'User-Agent: Mozilla/5.0 (compatible)',
+    'Host: test.com',
+    'Cneonction: close',
+    'Connection: Keep-Alive',
+    'X-Forwarded-For: 35.195.78.196',
+    '', ''
+  ].join('\n');
+  previewImport();
+  document.getElementById('importRaw').focus();
+}
+
+async function sendRawImport() {
+  const raw = document.getElementById('importRaw').value;
+  if (!raw.trim()) { toast('원문 패킷을 입력하세요', 'error'); return; }
+  if (!/^\S+\s+\S+/.test(raw.split(/\r?\n/, 1)[0])) {
+    toast('첫 줄에 메서드와 경로를 입력하세요', 'error'); return;
+  }
+  const btn = document.getElementById('rawSendBtn');
+  // 전송 중엔 같은 버튼을 '중단'으로 토글 — 타임아웃/지연 시 fetch 를 끊는다.
+  const _ac = new AbortController();
+  state._rawSendAbort = _ac;
+  btn.textContent = '⨯ 중단';
+  btn.onclick = () => { try { _ac.abort(); } catch (e) {} };
+  try {
+    const res = await fetch('/api/request/raw', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({raw, wire: true,
+        scheme: document.getElementById('rawWireScheme').value, use_defaults: false}),
+      signal: _ac.signal,
+    });
+    const result = await res.json();
+    if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`);
+    const parsed = result.parsed_request || {};
+    const reqPayload = {method: parsed.method || '', url: parsed.url || '',
+      headers: result.sent_headers || {}, body: result.sent_body || '',
+      raw_request: raw, http_version: parsed.http_version || ''};
+    result._req = reqPayload;
+    state.lastResult = result;
+    renderResponse(result);
+    renderAnalysis(result.analysis, result);
+    addHistory(reqPayload, result);
+    closeImportModal();
+    toast('원문 패킷을 전송했습니다', 'success');
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || _ac.signal.aborted)) toast('원문 전송을 중단했습니다', 'info');
+    else toast('원문 전송 실패: ' + e.message, 'error');
+  } finally {
+    state._rawSendAbort = null;
+    btn.onclick = null;        // 인라인 onclick="sendRawImport()" 복구
+    btn.disabled = false;
+    btn.textContent = '▶ 원문 전송';
+  }
 }
 
 function previewImport() {
@@ -980,8 +1032,7 @@ function applyCveRequest(p) {
   state.kvParams = [];
   renderKvEditor('paramsKv', state.kvParams);
 
-  const ms = document.getElementById('methodSelect');
-  if (ms) { ms.value = String(p.method || 'GET').toUpperCase(); ms.dispatchEvent(new Event('change')); }
+  setMethod(p.method || 'GET');
 
   // 바디: location=body 면 payload(또는 p.body)를 바디로, 그 외엔 p.body 만
   const bodyEl = document.getElementById('bodyEditor');
@@ -1227,7 +1278,8 @@ function renderConfirmResult(res, param) {
     <div class="analysis-card-body">
       ${res.confirmed
         ? `<div style="margin-bottom:6px">${techRows}</div>`
-        : `<div class="detail-item" style="color:var(--text-muted)">대조 프로브 간 유의미한 차이 없음 — 이 파라미터에서 ${escapeHtml(res.category)} 미확증.</div>`}
+        : `<div class="detail-item" style="color:var(--text-muted)">이 검사에서 ${escapeHtml(res.category)} 확증 근거 부족.</div>`}
+      ${(res.suspicions || []).map(s => `<div class="detail-item">의심: ${escapeHtml(s.name)} — ${escapeHtml(s.evidence)}</div>`).join('')}
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
         <thead><tr style="color:var(--text-muted);font-size:10px">
           <th style="text-align:left;padding:2px 8px 4px 0">프로브</th><th style="text-align:left;padding:2px 8px 4px 0">상태</th>
@@ -1251,7 +1303,7 @@ function renderConfirmResult(res, param) {
 // 현재 메인 폼의 요청 스냅샷
 function _currentRequestForm() {
   return {
-    method: document.getElementById('methodSelect').value,
+    method: getMethod(),
     url: document.getElementById('urlInput').value.trim(),
     params: kvToObj(state.kvParams),
     body: document.getElementById('bodyEditor').value.trim() || null,
@@ -1260,9 +1312,22 @@ function _currentRequestForm() {
 }
 
 // 직전 응답에서 기술스택 지문 추출(로컬 CVE 매칭용 — 우리 백엔드에서만 사용, AI로는 미전송)
+function sameRequestContext(previous, current, baselineMode = false) {
+  if (!previous || !current) return false;
+  const sorted = obj => JSON.stringify(Object.entries(obj || {}).sort(([a], [b]) => a.localeCompare(b)));
+  try {
+    const a = new URL(previous.url), b = new URL(current.url);
+    if (a.origin !== b.origin || a.pathname !== b.pathname || previous.method !== current.method) return false;
+    const normalizeHeaders = obj => Object.fromEntries(Object.entries(obj || {}).map(([k,v]) => [k.toLowerCase(),v]));
+    if (sorted(normalizeHeaders(previous.headers)) !== sorted(normalizeHeaders(getHeadersObj()))) return false;
+    return baselineMode || (a.search === b.search && sorted(previous.params) === sorted(current.params)
+      && (previous.body || '') === (current.body || ''));
+  } catch { return false; }
+}
+
 function buildFingerprint() {
   const r = state.lastResult;
-  if (!r || !r.headers) return {};
+  if (!r || !r.headers || !sameRequestContext(r._req, _currentRequestForm())) return {};
   const h = {};
   Object.entries(r.headers).forEach(([k, v]) => { h[String(k).toLowerCase()] = String(v); });
   return {
@@ -1274,7 +1339,7 @@ function buildFingerprint() {
 // 직전 요청 결과가 있으면 '결과 기반 후속 페이로드' API 요청 본문을 구성(없으면 null).
 // 신호는 '라벨만' 전송(증거·응답본문 미포함) — 유출 방지.
 function _followupRequestBody(req) {
-  if (!state.lastResult || !state.lastResult.analysis) return null;
+  if (!state.lastResult || !state.lastResult.analysis || !sameRequestContext(state.lastResult._req, req)) return null;
   const a = state.lastResult.analysis;
   const rq = state.lastResult._req || {};
 
@@ -1648,10 +1713,7 @@ function applyAiCandidate(idx) {
     }
   }
   // 단일 POST/raw CVE: method·추가 헤더·body 까지 폼에 세팅
-  if (c.method) {
-    const ms = document.getElementById('methodSelect');
-    if (ms) { ms.value = String(c.method).toUpperCase(); ms.dispatchEvent(new Event('change')); }
-  }
+  if (c.method) setMethod(c.method);
   if (c.headers && typeof c.headers === 'object') {
     Object.entries(c.headers).forEach(([k, v]) => _setKv(state.kvHeaders, k, String(v), 'replace'));
     renderKvEditor('headersKv', state.kvHeaders);
@@ -1899,6 +1961,43 @@ function getHttpVersion() {
   if (sel.value === '__custom__') return (document.getElementById('httpVersionCustom').value || 'HTTP/1.1').trim();
   return sel.value;
 }
+
+// ── HTTP 메서드: 드롭다운 + '직접 입력…' 커스텀(비표준 메서드 테스트용) ──
+function getMethod() {
+  const sel = document.getElementById('methodSelect');
+  if (!sel) return 'GET';
+  if (sel.value === '__custom__') return (document.getElementById('methodCustom').value || 'GET').trim();
+  return sel.value;
+}
+function setMethod(m) {
+  const sel = document.getElementById('methodSelect');
+  if (!sel) return;
+  const cust = document.getElementById('methodCustom');
+  const v = String(m == null ? 'GET' : m).trim() || 'GET';
+  // 표준 옵션에 있으면 그걸 선택, 없으면 '직접 입력…' + 커스텀 입력에 그대로.
+  const opt = [...sel.options].find(o => o.value !== '__custom__' && o.value.toUpperCase() === v.toUpperCase());
+  if (opt) { sel.value = opt.value; if (cust) cust.value = ''; }
+  else { sel.value = '__custom__'; if (cust) cust.value = v; }
+  onMethodChange();
+}
+function onMethodChange() {
+  const sel = document.getElementById('methodSelect');
+  const cust = document.getElementById('methodCustom');
+  if (sel && cust) {
+    cust.style.display = sel.value === '__custom__' ? '' : 'none';
+    if (sel.value === '__custom__' && document.activeElement !== cust) cust.focus();
+  }
+  // 페이로드 삽입 위치 자동 전환 — '유효 메서드' 기준(커스텀 포함)
+  const target = document.getElementById('injectTarget');
+  if (target) {
+    const bodyMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    if (bodyMethods.includes(getMethod().toUpperCase())) {
+      target.value = 'body'; if (typeof switchReqTab === 'function') switchReqTab('body');
+    } else {
+      target.value = 'param'; if (typeof switchReqTab === 'function') switchReqTab('params');
+    }
+  }
+}
 function onHttpVersionChange() {
   const sel = document.getElementById('httpVersionSelect');
   const cust = document.getElementById('httpVersionCustom');
@@ -1910,12 +2009,17 @@ async function sendRequest() {
   const url = document.getElementById('urlInput').value.trim();
   if (!url) { toast('URL을 입력하세요', 'error'); return; }
 
-  const method = document.getElementById('methodSelect').value;
+  const method = getMethod();
   const body = document.getElementById('bodyEditor').value.trim() || null;
 
   const btn = document.getElementById('sendBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> 전송 중';
+  // 전송 중단용 — 타임아웃/지연 시 사용자가 fetch 를 끊을 수 있게 AbortController 노출
+  const _ac = new AbortController();
+  state._sendAbort = _ac;
+  const _abortBtn = document.getElementById('abortBtn');
+  if (_abortBtn) _abortBtn.style.display = '';
 
   // 응답 초기화
   document.getElementById('responseBody').textContent = '요청 중...';
@@ -1936,7 +2040,7 @@ async function sendRequest() {
       http_version: getHttpVersion(),
       follow_redirects: getFollowRedirects(),
       custom_alert_rules: getCustomAlertRules(),
-      baseline: baseline ? {
+      baseline: baseline && sameRequestContext(baseline.request, _currentRequestForm(), true) ? {
         status_code: baseline.status_code, body: baseline.body,
         // 차분 탐지기(인가우회 등)가 정상 요청의 거부 형태를 정확히 보도록 헤더·Location 도 전달
         headers: baseline.headers || {},
@@ -1944,7 +2048,7 @@ async function sendRequest() {
       } : null,
     };
 
-    const result = await API.request(reqPayload);
+    const result = await API.request(reqPayload, _ac.signal);
     result._req = reqPayload;   // 요청 원본 첨부
     if (result.sent_headers) reqPayload._sentHeaders = result.sent_headers;
     // 도구가 실제로 보낸 body(VIEWSTATE 갱신·Content-Type 등 자동 보정 반영) — 원본과
@@ -1963,21 +2067,45 @@ async function sendRequest() {
     addHistory(reqPayload, result);   // 히스토리 저장
     if (willEnrich) enrichAnalysis(reqPayload, result);
   } catch(e) {
-    toast('요청 실패: ' + e.message, 'error');
-    document.getElementById('responseBody').textContent = '요청 실패: ' + e.message;
-    // 분석 패널이 '분석 중…' 에 멈춰 있지 않도록 사유를 남긴다
-    document.getElementById('analysisVerdict').innerHTML = '';
-    document.getElementById('analysisContent').innerHTML =
-      `<div class="analysis-card" style="border-color:rgba(248,81,73,.45)">
-         <div class="analysis-card-header" style="color:var(--danger)">요청을 보내지 못했습니다</div>
-         <div class="analysis-card-body">
-           <div class="detail-item" style="font-family:var(--font-mono);font-size:11px;word-break:break-all">${escapeHtml(e.message)}</div>
-           <div class="detail-item" style="color:var(--text-muted)">분석이 수행되지 않았으므로 <b>취약/안전 어느 쪽도 판정되지 않았습니다</b>.</div>
-         </div>
-       </div>`;
+    const aborted = (e && (e.name === 'AbortError' || _ac.signal.aborted));
+    if (aborted) {
+      // 사용자가 중단 — 실패가 아니라 '중단'으로 표기(취약/안전 판정 안 됨)
+      toast('요청을 중단했습니다', 'info');
+      document.getElementById('responseBody').textContent = '요청이 사용자에 의해 중단되었습니다(타임아웃/지연).';
+      document.getElementById('analysisVerdict').innerHTML = '';
+      document.getElementById('analysisContent').innerHTML =
+        `<div class="analysis-card">
+           <div class="analysis-card-header">요청 중단됨</div>
+           <div class="analysis-card-body">
+             <div class="detail-item" style="color:var(--text-muted)">전송을 중단해 응답을 받지 못했습니다 — <b>취약/안전 어느 쪽도 판정되지 않았습니다</b>.</div>
+           </div>
+         </div>`;
+    } else {
+      toast('요청 실패: ' + e.message, 'error');
+      document.getElementById('responseBody').textContent = '요청 실패: ' + e.message;
+      // 분석 패널이 '분석 중…' 에 멈춰 있지 않도록 사유를 남긴다
+      document.getElementById('analysisVerdict').innerHTML = '';
+      document.getElementById('analysisContent').innerHTML =
+        `<div class="analysis-card" style="border-color:rgba(248,81,73,.45)">
+           <div class="analysis-card-header" style="color:var(--danger)">요청을 보내지 못했습니다</div>
+           <div class="analysis-card-body">
+             <div class="detail-item" style="font-family:var(--font-mono);font-size:11px;word-break:break-all">${escapeHtml(e.message)}</div>
+             <div class="detail-item" style="color:var(--text-muted)">분석이 수행되지 않았으므로 <b>취약/안전 어느 쪽도 판정되지 않았습니다</b>.</div>
+           </div>
+         </div>`;
+    }
   } finally {
+    state._sendAbort = null;
+    if (_abortBtn) _abortBtn.style.display = 'none';
     btn.disabled = false;
     btn.innerHTML = '▶ 전송';
+  }
+}
+
+// 전송 중단 — 전송 버튼 옆 '중단' 버튼에서 호출. 진행 중인 fetch 를 끊는다.
+function abortSend() {
+  if (state._sendAbort) {
+    try { state._sendAbort.abort(); } catch (e) {}
   }
 }
 
@@ -2052,6 +2180,7 @@ let baseline = null;   // { status_code, response_time, body_size, body, headers
 function saveBaseline() {
   if (!state.lastResult) { toast('먼저 요청을 전송하세요', 'error'); return; }
   baseline = {
+    request: structuredClone(state.lastResult._req || {}),
     status_code:   state.lastResult.status_code,
     response_time: state.lastResult.response_time,
     body_size:     state.lastResult.body_size,
@@ -4781,7 +4910,7 @@ function restoreHistory(id) {
 
   // URL / Method 복원
   document.getElementById('urlInput').value    = item.url;
-  document.getElementById('methodSelect').value = item.method;
+  setMethod(item.method);
 
   // Headers / Params 복원 (KV 모드로 전환 후 채움)
   if (headerMode !== 'kv') switchHeaderMode('kv');
@@ -4829,19 +4958,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // (?id=..&pw=..)를 추가해도 대상 목록에 즉시 반영되도록. injectKey 입력값은 건드리지 않음.
   document.getElementById('urlInput').addEventListener('input', _syncInjectParamList);
 
-  // 메서드 변경 시 페이로드 삽입 위치 자동 전환
-  document.getElementById('methodSelect').addEventListener('change', e => {
-    const bodyMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
-    const target = document.getElementById('injectTarget');
-    if (bodyMethods.includes(e.target.value)) {
-      target.value = 'body';
-      // Body 탭도 자동 전환
-      switchReqTab('body');
-    } else {
-      target.value = 'param';
-      switchReqTab('params');
-    }
-  });
+  // 메서드 변경 시 페이로드 삽입 위치 자동 전환 — onMethodChange()(HTML onchange/oninput)로 일원화.
+  // 커스텀 메서드 입력도 같은 핸들러가 '유효 메서드' 기준으로 처리한다.
 
   // Sidebar search
   document.getElementById('sidebarSearchInput').addEventListener('input', e => {
@@ -4872,14 +4990,16 @@ function looksLikeRequest(text) {
   if (t.length < 8) return false;
   const first = t.split(/\s+/)[0].toLowerCase().replace(/^\$/, '');
   if (first === 'curl' || first === 'wget') return true;
-  const firstLine = t.split('\n')[0].trim();
+  const lines = t.replace(/\r\n?/g, '\n').split('\n');
+  const firstLine = lines[0].trim();
   // HTTP 버전이 있으면 확실한 요청(URI 에 공백이 있어도 무방 — 마지막 토큰이 HTTP/x.x).
   if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|CONNECT)\s+.+\s+HTTP\/\d/i.test(firstLine)) return true;
   // 버전이 없어도 METHOD + '/path' 또는 'http(s)://' 로 시작하고 다음 줄이 헤더면 요청으로 인정.
   // URI 에 인코딩 안 된 공백(SQLi 의 ' AND ...', '-- -' 등)이 있어도 인식되도록 $ 앵커/\S* 제거.
-  if (/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|CONNECT)\s+(\/|https?:\/\/)/i.test(firstLine)) {
-    const second = (t.split('\n')[1] || '').trim();
-    if (/^[\w-]+:\s*\S/.test(second)) return true;   // 둘째 줄이 헤더면 요청으로 확신
+  if (/^[A-Za-z]+\s+(\/|https?:\/\/)/i.test(firstLine)) {
+    const second = (lines[1] || '').trim();
+    if (/^[!#$%&'*+.^_`|~0-9A-Za-z-]+:\s*\S/.test(second) &&
+        lines.some(line => /^Host:\s*\S/i.test(line.trim()))) return true;
   }
   return false;
 }
@@ -4887,7 +5007,7 @@ function looksLikeRequest(text) {
 // 현재 요청 폼 스냅샷 (실행취소용)
 function captureRequestForm() {
   return {
-    method: document.getElementById('methodSelect').value,
+    method: getMethod(),
     url: document.getElementById('urlInput').value,
     body: document.getElementById('bodyEditor').value,
     rawHeaders: document.getElementById('headersRawEditor').value,
@@ -4898,7 +5018,7 @@ function captureRequestForm() {
 }
 
 function restoreRequestForm(s) {
-  document.getElementById('methodSelect').value = s.method;
+  setMethod(s.method);
   document.getElementById('urlInput').value = s.url;
   document.getElementById('bodyEditor').value = s.body;
   document.getElementById('headersRawEditor').value = s.rawHeaders;
@@ -4937,7 +5057,9 @@ function onGlobalPaste(e) {
   const ae = document.activeElement;
   const isUrlBar = ae && ae.id === 'urlInput';
   const editing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable);
-  // URL 바에 붙여넣은 요청은 import 의도로 간주. 그 외 편집 필드(Body/헤더/모달 textarea 등)는 평소대로.
+
+  // URL 바나 편집창 밖에서 붙여넣으면 임의 메서드도 다른 요청과 같이 폼에 채운다.
+  // 본문·헤더 편집 중인 필드에는 평소 붙여넣기를 유지한다.
   if (editing && !isUrlBar) return;
 
   let n;

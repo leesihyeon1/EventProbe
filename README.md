@@ -16,6 +16,10 @@ EventProbe는 WAF/IDS/IPS 보안 장비의 이벤트 탐지 여부를 검증하�
 
 ## 주요 기능
 
+- **맥락 에이전트** — 현재 요청을 시작점으로 관측·후속 테스트·반복 확증을 수행하고 실행 기록을 저장합니다.
+  상단 **맥락 에이전트**에서 시작하며, 계정별 세션과 객체 접근 정책을 설정할 수 있습니다.
+  [사용 방법과 지원 범위](docs/context-agent.md)
+
 - 🗂 **치트시트 연동** — SQLi / XSS / SSRF / LFI / Command Injection / Header Injection 페이로드 내장
 - 📡 **API 요청 테스터** — Method, Headers, Params, Body 설정 후 원클릭 전송
 - 🔍 **응답 자동 분석** — WAF 제품 탐지, 차단 여부, 에러 누출, 민감정보 노출 판정

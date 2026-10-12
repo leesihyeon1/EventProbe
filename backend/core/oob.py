@@ -15,6 +15,7 @@ DNS/HTTP 콜백을 보내야 확인된다. interactsh 서버(공개 oast.fun 또
 """
 import os
 import re
+import asyncio
 import base64
 import json
 import uuid
@@ -74,22 +75,26 @@ class _Interactsh:
     """단일 세션 클라이언트 — 프로세스당 한 번 register 하고 여러 마커를 발급/폴링한다."""
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()   # async 컨텍스트 전용 — threading.Lock 을 await 가로질러
+                                      # 쥐면 둘째 poll 의 동기 acquire 가 이벤트 루프를 멈춘다.
         self._priv = None
         self._corr = ""
         self._secret = ""
         self._registered = False
         self._markers: dict = {}        # 33자 unique-id → {url, payload, ts, location}
         self._seen: set = set()         # 중복 콜백 제거(interaction unique key)
+        self._poll_error = ""
 
     # ── 등록 ────────────────────────────────────────────────────────────────
     async def _ensure_registered(self) -> bool:
         if self._registered:
             return True
-        with self._lock:
+        async with self._lock:
             if self._registered:
                 return True
-            self._priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            # RSA-2048 키 생성은 CPU 바운드(수십~수백 ms) — 이벤트 루프를 막지 않도록 스레드로.
+            self._priv = await asyncio.to_thread(
+                rsa.generate_private_key, public_exponent=65537, key_size=2048)
             pub_pem = self._priv.public_key().public_bytes(
                 serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
             self._corr = _rand(20)
@@ -126,15 +131,19 @@ class _Interactsh:
         """서버에서 새 콜백을 받아 복호. [{protocol, remote_address, timestamp, full_id,
         raw_excerpt, marker_context}] 반환(새 것만)."""
         if not await self._ensure_registered():
+            self._poll_error = "등록 실패"
             return []
         try:
             async with httpx.AsyncClient(timeout=20, verify=True) as c:
                 r = await c.get(f"{_server()}/poll",
                                 params={"id": self._corr, "secret": self._secret})
             if r.status_code != 200:
+                self._poll_error = f"HTTP {r.status_code}"
                 return []
             body = r.json()
-        except Exception:
+            self._poll_error = ""
+        except Exception as exc:
+            self._poll_error = type(exc).__name__
             return []
         data = body.get("data") or []
         aes_key = None
@@ -145,6 +154,7 @@ class _Interactsh:
                     padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
                                  algorithm=hashes.SHA256(), label=None))
             except Exception:
+                self._poll_error = "콜백 복호화 실패"
                 data = []
         out = []
         for item in data:
@@ -197,6 +207,7 @@ class _Interactsh:
 
     def status(self) -> dict:
         return {"enabled": enabled(), "registered": self._registered,
+                "poll_error": self._poll_error,
                 "server": _server(), "domain": _domain(), "markers": len(self._markers)}
 
 
@@ -222,7 +233,11 @@ async def mint(context: Optional[dict] = None) -> Optional[str]:
 async def poll() -> list:
     if not enabled():
         return []
-    return await _get().poll()
+    events = await _get().poll()
+    if events:
+        from core.agent_store import record_oob
+        record_oob(events)
+    return events
 
 
 def status() -> dict:

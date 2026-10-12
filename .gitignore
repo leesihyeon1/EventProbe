@@ -7,5 +7,6 @@ __pycache__/
 Thumbs.db
 .venv/
 *.env
+backend/data/agent/
 
 # (RAG 인제스트 코퍼스는 이제 저장소에 포함)

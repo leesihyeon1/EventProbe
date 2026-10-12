@@ -23,7 +23,8 @@ _INIT_SCRIPT = r"""
 """
 
 
-def _confirm_sync(url: str, timeout: float) -> dict:
+def _confirm_sync(url: str, timeout: float, expected_marker: str = "", method: str = "GET",
+                  headers: dict | None = None, body: str | None = None) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:
@@ -35,6 +36,26 @@ def _confirm_sync(url: str, timeout: float) -> dict:
             browser = p.chromium.launch(headless=True)
             ctx = browser.new_context(ignore_https_errors=True, locale="ko-KR")
             page = ctx.new_page()
+            from urllib.parse import urlsplit
+            source = urlsplit(url)
+            first_navigation = True
+
+            def route_request(route):
+                nonlocal first_navigation
+                target = urlsplit(route.request.url)
+                if (target.scheme, target.netloc) != (source.scheme, source.netloc):
+                    route.abort()
+                    return
+                merged = dict(route.request.headers)
+                merged.update({k: str(v) for k, v in (headers or {}).items()
+                               if k.lower() not in ('host', 'content-length', 'connection')})
+                if first_navigation and route.request.is_navigation_request():
+                    first_navigation = False
+                    route.continue_(method=method.upper(), post_data=body, headers=merged)
+                else:
+                    route.continue_(headers=merged)
+
+            ctx.route('**/*', route_request)
             page.add_init_script(_INIT_SCRIPT)
             # 네이티브 대화상자(우리가 못 감싼 경로)도 백업으로 포착 후 자동 닫기
             page.on("dialog", lambda d: (fired.append(["dialog", (d.message or "")[:120]]), d.dismiss()))
@@ -65,7 +86,7 @@ def _confirm_sync(url: str, timeout: float) -> dict:
         return {"error": f"{type(e).__name__}: {str(e)[:200]}", "supported": True}
 
     hooks = list(hooks or [])
-    executed = bool(fired) or bool(hooks)
+    executed = marker_executed(fired + hooks, expected_marker)
     return {
         "supported": True,
         "executed": executed,
@@ -74,7 +95,12 @@ def _confirm_sync(url: str, timeout: float) -> dict:
     }
 
 
-async def confirm_xss(url: str, timeout: float = 15) -> dict:
+def marker_executed(signals, expected_marker):
+    return bool(expected_marker) and any(isinstance(s, (list, tuple)) and len(s) > 1
+                                        and str(s[1]) == expected_marker for s in signals)
+
+
+async def confirm_xss(url: str, timeout: float = 15, **context) -> dict:
     """동기 Playwright 확증을 워커 스레드에서 실행(이벤트 루프 충돌 회피)."""
     import asyncio
-    return await asyncio.to_thread(_confirm_sync, url, timeout)
+    return await asyncio.to_thread(_confirm_sync, url, timeout, **context)

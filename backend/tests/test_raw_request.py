@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from routers import api as api_mod
-from core.raw_http import parse_raw_request
+from core.raw_http import parse_raw_request, raw_send_packet
 
 client = TestClient(app)
 
@@ -68,6 +68,34 @@ def test_parse_no_http_version():
     p = parse_raw_request("GET /p\r\nHost: h\r\n\r\n")
     assert p["http_version"] == ""
     assert p["url"] == "https://h/p"
+
+
+def test_wire_packet_preserves_malformed_method_and_headers(monkeypatch):
+    import core.raw_http as raw_http
+
+    class FakeSocket:
+        def __init__(self):
+            self.sent = b""
+
+        def sendall(self, data):
+            self.sent = data
+
+        def settimeout(self, timeout):
+            pass
+
+        def recv(self, size):
+            return b""
+
+        def close(self):
+            pass
+
+    sock = FakeSocket()
+    monkeypatch.setattr(raw_http.socket, "create_connection", lambda *args, **kwargs: sock)
+    packet = ("TMAE /\nHost: test.com\nCneonction: close\n"
+              "Connection: Keep-Alive\nConnection: close\n\n")
+    result = raw_send_packet(packet, "http://test.com/")
+    assert sock.sent == packet.replace("\n", "\r\n").encode()
+    assert result["request_line"] == "TMAE /"
 
 
 def test_parse_single_line_flattened_packet_reflow():

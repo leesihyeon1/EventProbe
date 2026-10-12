@@ -49,7 +49,8 @@ def _recv_all(sock, timeout: float) -> bytes:
     return b"".join(chunks)
 
 
-def raw_send(method: str, url: str, headers: dict, body, http_version: str, timeout: float = 10.0):
+def raw_send(method: str, url: str, headers: dict, body, http_version: str,
+             timeout: float = 10.0, wire_data: bytes = None):
     """소켓으로 직접 요청 전송 후 응답 파싱. 실패 시 예외 발생(호출부에서 처리)."""
     parts = urlsplit(url)
     scheme = (parts.scheme or "http").lower()
@@ -73,11 +74,16 @@ def raw_send(method: str, url: str, headers: dict, body, http_version: str, time
     if "connection" not in lower:
         hdrs["Connection"] = "close"   # 응답 끝까지 읽기 위해
 
-    # 요청 바이트 구성
-    req_line = f"{method.upper()} {path} {version}\r\n"
-    head = req_line + "".join(f"{k}: {v}\r\n" for k, v in hdrs.items()) + "\r\n"
-    raw_request = head + (body_bytes.decode("latin1") if body_bytes else "")
-    data = head.encode("latin1", "ignore") + body_bytes
+    # 원문 모드는 요청줄과 중복·오타 헤더를 포함한 편집 내용을 그대로 전송한다.
+    if wire_data is not None:
+        data = wire_data
+        raw_request = data.decode("utf-8", "replace")
+        req_line = raw_request.split("\r\n", 1)[0] + "\r\n"
+    else:
+        req_line = f"{method.upper()} {path} {version}\r\n"
+        head = req_line + "".join(f"{k}: {v}\r\n" for k, v in hdrs.items()) + "\r\n"
+        raw_request = head + (body_bytes.decode("latin1") if body_bytes else "")
+        data = head.encode("latin1", "ignore") + body_bytes
 
     start = time.time()
     raw_sock = socket.create_connection((host, port), timeout=timeout)
@@ -140,6 +146,14 @@ def raw_send(method: str, url: str, headers: dict, body, http_version: str, time
         "request_line": req_line.strip(),
         "raw_request": raw_request[:8000],
     }
+
+
+def raw_send_packet(raw: str, url: str, timeout: float = 10.0):
+    """편집한 텍스트 패킷을 HTTP 헤더 보정 없이 전송한다."""
+    text = raw.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    if not text.endswith("\r\n\r\n") and "\r\n\r\n" not in text:
+        text += "\r\n\r\n"
+    return raw_send("", url, {}, b"", "", timeout, wire_data=text.encode("utf-8"))
 
 
 def _dechunk(data: bytes) -> bytes:

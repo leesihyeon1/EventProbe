@@ -265,6 +265,7 @@ def decide(category: str, results: list[dict]) -> dict:
     cat = _norm_cat(category)
     by = {r["role"]: r for r in results}
     techniques: list[dict] = []
+    suspicions: list[dict] = []
 
     def ok(role: str) -> bool:
         r = by.get(role)
@@ -348,9 +349,9 @@ def decide(category: str, results: list[dict]) -> dict:
     elif cat == "xss":
         r = by.get("probe")
         body = (r or {}).get("body") or ""
-        # 마커 브레이크가 '인코딩 없이' 그대로 반사되면 실행 가능
+        # Reflection alone does not establish script execution.
         if r and _XSS_BREAK in body:
-            techniques.append({
+            suspicions.append({
                 "name": "반사형 XSS (미인코딩 반사)",
                 "evidence": f"주입한 '{_XSS_MARKER}\"><svg …>' 가 원문 그대로 반사됨",
             })
@@ -410,10 +411,10 @@ def decide(category: str, results: list[dict]) -> dict:
                     r = by.get(role)
                     nb = (r or {}).get("body") or ""
                     if r and int(r.get("status") or 0) == 200 and nb and nb != b_body and len(nb) >= 0.5 * b_len:
-                        techniques.append({
+                        suspicions.append({
                             "name": "IDOR (직접 객체 참조)",
                             "evidence": f"이웃 ID({lbl})가 200·다른 객체 반환, 없는 ID 는 실패 "
-                                        f"({int(ne.get('status') or 0)}) → 소유권 검사 없음",
+                                        f"({int(ne.get('status') or 0)}) — 객체 소유권·접근 정책 검증 필요",
                         })
                         break
 
@@ -472,7 +473,7 @@ def decide(category: str, results: list[dict]) -> dict:
                     })
                     break
 
-    return {"confirmed": bool(techniques), "techniques": techniques, "category": cat}
+    return {"confirmed": bool(techniques), "techniques": techniques, "suspicions": suspicions, "category": cat}
 
 
 # ── L3: 파일 노출 catch-all 차분 확증 (순수 판정) ─────────────────
