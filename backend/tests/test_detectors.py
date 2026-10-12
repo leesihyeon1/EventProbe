@@ -60,9 +60,14 @@ def test_auth_oracle_shared_by_confirm():
     from core import confirm as C
     assert C.auth_rejected is D.auth_rejected
     assert C.auth_served is D.auth_served
-    # 헤더 차분 확증이 공유 오라클로 동작
+    # 상태 전이만으로는 우회 확정이 아니며, 보호 콘텐츠가 확인돼야 한다.
     out = C.decide_authbypass({"status": 403, "location": ""},
                               {"status": 200, "location": ""})
+    assert out == []
+    assert C.observe_authbypass({"status": 403}, {"status": 200})
+    out = C.decide_authbypass({"status": 403, "body": ""},
+                              {"status": 200, "body": "private-record-97531"},
+                              protected_marker="private-record-97531")
     assert out and "우회" in out[0]["name"]
     # 우회 응답이 로그인으로 리다이렉트(거부)면 확증 안 됨
     assert C.decide_authbypass({"status": 403}, {"status": 302, "location": "/login"}) == []
@@ -115,7 +120,7 @@ def test_run_registered_survives_broken_detector():
     try:
         out = run_registered(_ctx(status_code=200, body="x", payload="p", category="sqli",
                                    baseline={"status_code": 401, "body": "invalid"}))
-        assert any(f["verdict"] == "성공" for f in out)   # 나머지 탐지기는 정상 동작
+        assert any(f["verdict"] == "의심" for f in out)   # 나머지 탐지기는 정상 동작
     finally:
         D.REGISTRY[:] = [d for d in D.REGISTRY if d.id != "boom"]
 
@@ -125,25 +130,52 @@ def test_tier_filter():
     ctx = _ctx(status_code=200, body="x", payload="' OR 1=1", category="sqli",
                baseline={"status_code": 401, "body": "invalid password"})
     assert run_registered(ctx, max_tier=1) == []          # differential 은 tier2 → 제외
-    assert any(f["verdict"] == "성공" for f in run_registered(ctx, max_tier=2))
+    assert any(f["verdict"] == "의심" for f in run_registered(ctx, max_tier=2))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 차분 탐지기 — 강/중/약 등급
 # ─────────────────────────────────────────────────────────────────────────────
-def test_diff_auth_bypass_status_is_success():
+def test_diff_auth_bypass_status_needs_protected_content():
     ctx = _ctx(status_code=200, body="welcome", payload="' OR '1'='1", category="sqli",
                baseline={"status_code": 403, "body": "forbidden"})
     out = run_registered(ctx)
-    assert out and out[0]["verdict"] == "성공"
+    assert out and out[0]["verdict"] == "의심"
     assert "401" in out[0]["evidence"] or "403" in out[0]["evidence"]
 
 
-def test_diff_fail_message_disappears_is_success():
+def test_diff_fail_message_disappears_needs_protected_content():
     ctx = _ctx(status_code=200, body="Dashboard", payload="admin'-- -", category="sqli",
                baseline={"status_code": 200, "body": "Invalid username or password"})
     out = run_registered(ctx)
-    assert out and out[0]["verdict"] == "성공"
+    assert out and out[0]["verdict"] == "의심"
+
+
+def test_diff_private_marker_confirms_but_request_echo_does_not():
+    marker = "private-record-97531"
+    base = {"status_code": 403, "body": "Forbidden", "protected_marker": marker}
+    ctx = _ctx(status_code=200, body="account=" + marker, category="authbypass",
+               baseline=base)
+    out = [f for f in run_registered(ctx) if f["detector_id"] == "differential"]
+    assert out[0]["verdict"] == "성공"
+    echo = _ctx(status_code=200, body="account=" + marker, category="authbypass",
+                req_body="lookup=" + marker, baseline=base)
+    out = [f for f in run_registered(echo) if f["detector_id"] == "differential"]
+    assert out[0]["verdict"] == "의심"
+
+
+def test_diff_same_length_changed_content_is_not_safe():
+    ctx = _ctx(status_code=200, body='{"owner":"user-b"}', category="idor",
+               baseline={"status_code": 200, "body": '{"owner":"user-a"}'})
+    out = [f for f in run_registered(ctx) if f["detector_id"] == "differential"]
+    assert out[0]["verdict"] == "미확인"
+
+
+def test_analyzer_same_length_changed_content_is_not_safe():
+    r = analyze_response(200, {}, '{"owner":"user-b"}', 40, category="idor",
+                         url="https://review.invalid/api/items/2",
+                         baseline={"status_code": 200, "body": '{"owner":"user-a"}'})
+    assert r["attack_outcome"] != "safe"
 
 
 def test_diff_body_size_delta_is_suspicious():
@@ -194,11 +226,12 @@ def test_jwt_none_alg_flagged_suspicious():
     assert out and out[0]["verdict"] == "의심"
 
 
-def test_jwt_none_alg_confirmed_by_diff():
-    """대조군이 거부(401)인데 alg=none 토큰이 통과(200) → 서명 우회 확증(성공)."""
-    ctx = _ctx(status_code=200, body="admin area", category="jwt",
+def test_jwt_none_alg_confirmed_by_protected_content():
+    """대조군이 거부되고 응답에 사전 지정한 비공개 내용이 있을 때만 확정."""
+    ctx = _ctx(status_code=200, body="admin area private-record-97531", category="jwt",
                req_headers={"authorization": f"Bearer {_jwt('none')}"},
-               baseline={"status_code": 401, "body": "unauthorized"})
+               baseline={"status_code": 401, "body": "unauthorized",
+                         "protected_marker": "private-record-97531"})
     out = [f for f in run_registered(ctx) if f["detector_id"] == "jwt_none_alg"]
     assert out and out[0]["verdict"] == "성공"
 
@@ -217,17 +250,20 @@ def test_no_jwt_no_finding():
 # ─────────────────────────────────────────────────────────────────────────────
 # analyze_response 통합 — suspicious outcome 신설
 # ─────────────────────────────────────────────────────────────────────────────
-def test_analyze_auth_bypass_is_success():
+def test_analyze_auth_bypass_status_only_is_suspicious():
     r = analyze_response(200, {"content-type": "text/html"}, "<html>admin dashboard</html>", 60,
                          payload="' OR '1'='1-- -", category="sqli",
-                         baseline={"status_code": 401, "body": "Invalid username or password"})
-    assert r["attack_outcome"] == "success"
-    assert r["risk_level"] in ("high", "critical")
+                         baseline={"status_code": 401, "body": "Invalid username or password",
+                                   "request": {"method": "GET", "url": "http://h/login?q=normal"}},
+                         url="http://h/login?q=attack", method="GET")
+    assert r["attack_outcome"] == "suspicious"
 
 
 def test_analyze_boolean_is_suspicious():
     r = analyze_response(200, {}, "row " * 800, 60, payload="1 AND 1=1", category="sqli",
-                         baseline={"status_code": 200, "body": "no results"})
+                         baseline={"status_code": 200, "body": "no results",
+                                   "request": {"method": "GET", "url": "http://h/search?q=normal"}},
+                         url="http://h/search?q=attack", method="GET")
     assert r["attack_outcome"] == "suspicious"
     assert r["risk_level"] == "medium"
     assert any(f["verdict"] == "의심" for f in r["findings"])
@@ -240,20 +276,26 @@ def test_analyze_no_baseline_stays_inconclusive():
 
 def test_analyze_identical_baseline_is_safe():
     r = analyze_response(200, {}, "same body here", 60, payload="x' OR 1=1", category="sqli",
-                         baseline={"status_code": 200, "body": "same body here"})
+                         baseline={"status_code": 200, "body": "same body here",
+                                   "request": {"method": "GET", "url": "http://h/search?q=normal"}},
+                         url="http://h/search?q=attack", method="GET")
     assert r["attack_outcome"] == "safe"
 
 
 def test_suspicious_does_not_upgrade_to_bypass_verdict():
     """의심은 '성공'이 아니다 — verdict=bypass 로 격상하지 않는다(오탐 억제)."""
     r = analyze_response(200, {}, "row " * 800, 60, payload="1 AND 1=1", category="sqli",
-                         baseline={"status_code": 200, "body": "x"})
+                         baseline={"status_code": 200, "body": "x",
+                                   "request": {"method": "GET", "url": "http://h/search?q=normal"}},
+                         url="http://h/search?q=attack", method="GET")
     assert r["verdict"] != "bypass"
 
 
 def test_det_narrative_has_suspicious_summary():
     r = analyze_response(200, {}, "row " * 800, 60, payload="1 AND 1=1", category="sqli",
-                         baseline={"status_code": 200, "body": "x"})
+                         baseline={"status_code": 200, "body": "x",
+                                   "request": {"method": "GET", "url": "http://h/search?q=normal"}},
+                         url="http://h/search?q=attack", method="GET")
     assert "의심" in r["det_verdict"]["summary"]
 
 
@@ -572,23 +614,32 @@ def test_401_to_login_redirect_is_not_bypass():
     assert _diff(307, "/signin") == []
 
 
-def test_401_to_resource_redirect_is_bypass():
-    """401→302 Location:/dashboard 은 로그인 성공 리다이렉트 → 우회(성공)."""
+def test_401_to_resource_redirect_is_suspicious():
+    """401→302 Location:/dashboard 만으로는 최종 자원 접근을 알 수 없다."""
     out = _diff(302, "/app/dashboard")
-    assert out and out[0]["verdict"] == "성공"
+    assert out and out[0]["verdict"] == "의심"
 
 
 def test_307_preserves_method_noted_in_evidence():
     out = _diff(307, "/app/admin")
-    assert out and out[0]["verdict"] == "성공"
+    assert out and out[0]["verdict"] == "의심"
     assert "307" in out[0]["evidence"]
     assert "메소드" in out[0]["why"]      # 307/308 메소드 보존 명시
 
 
-def test_401_to_200_direct_bypass_still_success():
+def test_401_to_200_direct_bypass_needs_content():
     out = _diff(200, "")
-    assert out and out[0]["verdict"] == "성공"
-    assert "직접 통과" in out[0]["why"]
+    assert out and out[0]["verdict"] == "의심"
+    assert "보호 자원" in out[0]["why"]
+
+
+def test_login_redirect_baseline_with_private_content_confirms():
+    marker = "private-account-record-97531"
+    ctx = _ctx(status_code=200, body="account=" + marker, category="authbypass",
+               baseline={"status_code": 302, "location": "/login", "body": "",
+                         "protected_marker": marker})
+    out = [f for f in run_registered(ctx) if f["detector_id"] == "differential"]
+    assert out[0]["verdict"] == "성공"
 
 
 def test_308_to_login_not_bypass():
@@ -602,7 +653,7 @@ def test_jwt_bypass_via_307_to_resource():
                headers_lower={"location": "/admin/panel"},
                baseline={"status_code": 401, "body": "unauthorized"})
     out = [f for f in run_registered(ctx) if f["detector_id"] == "jwt_none_alg"]
-    assert out and out[0]["verdict"] == "성공"
+    assert out and out[0]["verdict"] == "의심"
 
 
 def test_jwt_no_bypass_via_login_redirect():

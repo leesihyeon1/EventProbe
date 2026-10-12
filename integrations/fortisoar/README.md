@@ -68,8 +68,9 @@ FortiSOAR incident 화면의 **버튼 두 개**로 동작합니다. 커넥터를
        "raw_request": "{{ vars.input.records[0].raw_request }}",
        "scheme":      "https",                     # 패킷 URI 가 상대경로일 때 대상 스킴
        "category":    "cve",                       # 선택
-       # 우회 확증을 원하면 '정상(우회 안 한)' 응답을 baseline 으로 — 없으면 생략(의심까지만 판정)
-       "baseline":    {"status_code": 302, "location": "/login"},
+       # baseline 은 같은 보호 자원에 우회 요소 없이 보낸 실제 응답만 입력.
+       # 상태코드 변화는 의심; 비공개 응답 고유 표식까지 확인돼야 우회 확정.
+       "baseline":    None,  # 예: {"status_code": 403, "body": "Forbidden", "protected_marker": "실제-비공개-응답-표식"}
        "verify_tls":  False,
    }
    output = main(params)

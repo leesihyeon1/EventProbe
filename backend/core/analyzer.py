@@ -17,6 +17,7 @@ from core.classify import (_FILE_READ_HINT, _SSRF_HINT, _SQLI_HINT, _REDIRECT_HI
                            _DANGEROUS_SCHEME, _CMDI_HINT, _XSS_HINT)
 from core import detectors as _detectors
 from core import test_validity
+from core import baseline_context
 from core import error_signatures as _error_signatures
 from core.confirm import SUPPORTED as _CONFIRM_SUPPORTED
 # '확증 스캔' 버튼 노출 = confirm 파라미터 오라클(SUPPORTED) + authbypass(헤더 차분 오라클).
@@ -3660,12 +3661,13 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     #   7*7=49 하드코딩을 일반화 — 임의 피연산자의 '곱'을 확인해 우연 일치(‘49’ 흔함)를 없앴다.
     #   (아래 ④ run_registered 에서 tier-1 로 실행됨)
 
-    # SQL/DB 에러 노출 — SQLi 처럼 보이는 요청일 때 error-based 성공 신호로 본다(카테고리 무관).
+    # SQL/DB 에러는 실제 정보 누출이지만 SQL 주입 실행의 확증은 아니다.
     if category == "sqli" or _SQLI_HINT.search(probe):
         for pat, desc in SQLI_ERROR_PATTERNS:   # 전역 + SQLi 문맥 전용(sqlmap 임포트분) 모두 적용
             if re.search(pat, body or "", re.I):
-                findings.append({"name": "SQL/DB 에러 노출", "verdict": "성공", "confidence": 85,
-                                 "why": f"{desc} — error-based 성공 가능", "evidence": desc})
+                findings.append({"name": "SQL/DB 에러 노출", "verdict": "의심", "confidence": 65,
+                                 "why": f"{desc} — DB 오류가 노출됐지만 주입 실행/데이터 추출은 미확정",
+                                 "evidence": desc})
                 break
         # UNION/버전 추출 성공 — 버전 함수 결과(DB 배너)가 응답에 노출되면 데이터 추출 확증.
         #   에러 기반이 아니라 '추출된 데이터'라 error 마커로는 안 잡히던 케이스.
@@ -3994,8 +3996,8 @@ _OOB_FAMILIES = {"cmdi", "ssrf", "xxe", "log4shell", "email", "deserial"}  # 블
 _BROWSER_FAMILIES = {"xss", "prototype", "domclob", "cssinj", "csti"}      # 브라우저 DOM 확증
 
 _UNDETERMINED_NEXT = {
-    "sqli": "확증 스캔 실행(time-based SLEEP·error-based EXTRACTVALUE) 또는 정상값으로 baseline 저장 후 "
-            "재요청해 불리언(참/거짓) 차이를 비교하세요.",
+    "sqli": "확증 스캔에서 고유 마커 반환 또는 재현 가능한 시간 차이를 확인하세요. "
+            "참/거짓 응답 차이만 있으면 요청 제한·동적 응답을 배제하고 반복 확인하세요.",
     "xss":  "payload 가 인코딩돼 반사됐는지(서버 방어) 확인하고, DOM 싱크가 있으면 브라우저로 실행을 확증하세요.",
     "lfi":  "다른 대상 파일(/etc/hosts·win.ini·/proc/self/environ)과 인코딩 변형(%2e··..%2f·이중인코딩)으로 재시도하세요.",
     "xxe":  "OOB DTD(외부 엔티티 콜백)나 error-based 파일읽기로 확증하세요 — 단일 응답으론 블라인드일 수 있습니다.",
@@ -4003,12 +4005,13 @@ _UNDETERMINED_NEXT = {
     "cmdi": "블라인드 계열 — time-based(;sleep 5) 또는 OOB 콜백(nslookup <마커>.oob)으로 확증하세요.",
     "ssrf": "OOB 콜백 URL(interactsh 류)로 아웃바운드 요청을 확인하세요 — 응답에 마커가 없으면 블라인드입니다.",
     "redirect": r"다양한 우회 표기로 재시도하세요(//evil·/\evil·https:evil·whitelisted.com@evil·인코딩).",
-    "nosql": "$where 에 time-based(sleep) 주입 또는 정상 대비 참/거짓 응답 차이를 비교하세요.",
-    "jwt":  "토큰 변형으로 재시도하세요(alg=none·약한 서명·kid 주입) — 서버 수용 여부는 대조군 상태전이로 확증됩니다.",
-    "ldap": "error-based(파서 에러 유발) 또는 참/거짓 필터 차이로 확증하세요.",
+    "nosql": "참/거짓 차이가 같은 조건에서 반복되는지 확인하고 요청 제한·오류 응답을 배제하세요.",
+    "jwt":  "서명 없는 토큰과 정상 대조군을 같은 보호 자원에서 비교하고, 비공개 응답 내용까지 확인하세요.",
+    "ldap": "필터 참/거짓 차이의 반복성과 실제 검색 결과를 확인하세요(상태·길이 차이만으로는 미확정).",
     "xpath": "error-based(XPath 파서 에러) 또는 참/거짓 표현식 차이로 확증하세요.",
-    "authbypass": "우회 헤더(X-Middleware-Subrequest 등)를 뺀 정상 요청과 비교하세요 — 정상이 거부"
-                  "(401/403·로그인 리다이렉트)인데 우회 요청이 보호 리소스를 200 으로 제공하면 인가 우회 확증.",
+    "authbypass": "우회 헤더를 뺀 같은 보호 자원 요청과 비교하세요. 거부→200/리다이렉트는 의심 신호이며, "
+                  "보호 콘텐츠가 우회 응답에만 나타나는지 확인해야 확증됩니다.",
+    "idor": "이웃 ID의 응답이 다르다면 해당 객체의 소유자·공개 여부와 현재 계정의 권한을 확인하세요.",
 }
 
 
@@ -4140,6 +4143,10 @@ def analyze_response(
     body_lower = body.lower()
     # 매칭은 소문자, 증거 표시는 원본 — HeaderView 가 둘 다 들고 있다.
     headers_lower = HeaderView(headers)
+    baseline_check = (baseline_context.validate(baseline, method=method, url=url,
+                        headers=req_headers, body=req_body) if baseline else None)
+    comparable_baseline = baseline if baseline_check and baseline_check["valid"] else None
+    result["baseline_check"] = baseline_check
 
     # 1. 상태코드 분석
     if status_code in [403, 406, 429, 503]:
@@ -4226,7 +4233,7 @@ def analyze_response(
     # 11. 공격 결과 분석(반사/카테고리 성공신호/타이밍/베이스라인) — 증거 기반.
     #     위험도 산정(10)보다 먼저 실행해, '차단 안 됨'이 아니라 '실제 증거'로 판정한다.
     findings, outcome, aconf = attack_findings(
-        status_code, headers_lower, body, response_time, payload, category, baseline, url, req_body, method,
+        status_code, headers_lower, body, response_time, payload, category, comparable_baseline, url, req_body, method,
         redirect_chain, req_headers, payload_id,
     )
     result["reflection"] = _detect_reflection(body, payload)
@@ -4264,7 +4271,7 @@ def analyze_response(
             and not result["sensitive_data"] and not result["error_leaks"]):
         _mprobe = _probe_all
         _sigs = _checked_desc_for(_mprobe, category)
-        _bn = "" if baseline else " · baseline 없음"
+        _bn = "" if comparable_baseline else " · 유효한 baseline 없음"
         _nx = _undetermined_next(result["attack_type"])
         findings.append({
             "name": "자동 판정 불가 — 다음 단계로 확증 필요", "verdict": "미확인", "confidence": 30,
@@ -4294,9 +4301,15 @@ def analyze_response(
         status_code=status_code, headers_lower=headers_lower, body=body, body_lower=body_lower,
         url=url or "", method=method or "", req_headers=req_headers, req_body=req_body or "",
         payload=payload or "", category=category or "", attack_type=result["attack_type"],
-        baseline=baseline, redirect_chain=redirect_chain,
+        baseline=comparable_baseline, redirect_chain=redirect_chain,
         followed_redirects=bool(redirect_chain), waf=result.get("waf_detected"))
     result["validity"] = _validity
+    if baseline_check and not baseline_check["valid"]:
+        _validity["warnings"].append({
+            "code": "baseline_invalid", "severity": "warn",
+            "why": baseline_check["reason"],
+            "fix": "같은 대상·메소드·인증 조건에서 공격 변수만 바꾼 대조군을 다시 저장하세요.",
+        })
     _has_block = any(w["severity"] == "block" for w in _validity["warnings"])
     if _has_block and outcome == "safe":
         outcome = "inconclusive"     # 테스트 무효 → '안전' 금지, 판정불가로

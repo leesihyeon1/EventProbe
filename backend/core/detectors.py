@@ -79,10 +79,22 @@ def auth_rejected(status, location: str = "") -> bool:
 
 
 def auth_served(status, location: str = "") -> bool:
-    """응답이 '리소스 제공(통과)'인가 — 200/201, 또는 로그인/에러가 아닌 곳으로의 3xx 리다이렉트.
-    (거부 리다이렉트가 아닌 3xx = 로그인 성공 리다이렉트일 가능성.)"""
+    """거부와 다른 응답인가. 200/201·비로그인 3xx 만으로 보호 자원 제공은 증명되지 않는다."""
     s = int(status or 0)
     return s in (200, 201) or (s in _REDIRECT_CODES and not _redirect_is_auth_reject(location or ""))
+
+
+def protected_content_evidence(body: str, baseline: Optional[dict], request_parts=()) -> bool:
+    """사전에 지정한 보호 콘텐츠가 현재 응답에만 있는지 확인한다.
+
+    대조군의 거부 응답이나 요청 자체에 실린 문자열은 에코/공통 페이지일 수 있으므로
+    인증우회 확정 근거로 사용하지 않는다. 표식은 호출자가 보호 자원에서 확인한 값이다.
+    """
+    base = baseline or {}
+    marker = str(base.get("protected_marker") or "")
+    if len(marker) < 8 or marker in (base.get("body") or ""):
+        return False
+    return all(marker not in str(part or "") for part in request_parts) and marker in (body or "")
 
 
 # ── 로그인 상태 전이 판정용(둘 다 200 이어도 인증우회를 잡는다) ────────────────
@@ -150,14 +162,14 @@ def run_registered(ctx: DetectionContext, max_tier: int = 2) -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# tier-2 차분 탐지기 — 대조군(baseline) 비교로 '통했는가'를 확증
+# tier-2 차분 탐지기 — 대조군(baseline) 비교로 응답 차이와 직접 증거를 구분
 # ══════════════════════════════════════════════════════════════════════════════
 # 블라인드 SQLi·인증우회·IDOR·불리언 등 '단일 응답으론 못 보고 정상 대비 차이로만 드러나는'
 # 공격을 판정한다. 예전엔 이 신호가 전부 '베이스라인 대비 변화(미확정)' 하나로 뭉개졌다.
 #
 # 강도 등급:
-#   성공(강): 인증 상태 전이(401/403 → 200/3xx) · 실패문구 소멸 + 200  → 인증우회 확증
-#   의심(중): 본문 크기 유의미 변화 · 상태 변화(비인증) · 5xx 에러 유발  → 추가 확인 필요
+#   성공(강): 거부된 대조군과 달리 공격 응답에 지정한 보호 콘텐츠가 나타남
+#   의심(중): 인증 상태 전이 · 실패문구 소멸 · 본문 크기 변화 · 5xx 에러 유발
 #   무시(약): 사소한 차이(< 임계)
 _BODY_DELTA_STRONG = 512      # 이 이상 본문 크기 차이 = 불리언 참/거짓 페이지 구분 가능성 높음
 _BODY_DELTA_WEAK = 64
@@ -184,16 +196,22 @@ class DifferentialDetector(Detector):
         b_fail = bool(_AUTH_FAIL_RE.search(b_body))
         c_fail = bool(_AUTH_FAIL_RE.search(c_body))
 
-        # ── 강: 인증 상태 전이 = 인증우회 확증 ──
-        # 대조(정상 파라미터)는 거부(401/403)인데 공격은 통과 → 우회. 단, 3xx 는 Location 을 봐야
-        # 한다: 로그인/에러 페이지로의 리다이렉트는 '거부를 리다이렉트로 표현'한 것이지 우회가 아니다.
-        # 307/308 은 메소드·본문을 보존하므로(RFC 7538) 증거에 그 사실을 함께 남긴다.
-        if b_status in (401, 403):
+        # 상태 전이는 후보 신호다. 명시한 보호 콘텐츠가 응답에 나타날 때만 확정한다.
+        protected = protected_content_evidence(
+            c_body, b, (ctx.url, ctx.payload, ctx.req_body,
+                        " ".join(str(v) for v in (ctx.req_headers or {}).values())))
+        b_loc = b.get("location") or _hdr(b.get("headers"), "location")
+        if auth_rejected(b_status, b_loc):
             loc = _hdr(ctx.headers_lower, 'location')
             if c_status in (200, 201):
-                return [self._f("성공", 84,
-                                f"인증 우회 — 정상 파라미터는 HTTP {b_status}(거부)인데 공격은 "
-                                f"HTTP {c_status}(직접 통과) → 접근제어 우회 확증",
+                if protected:
+                    return [self._f("성공", 88,
+                                    f"정상 요청은 HTTP {b_status}(거부), 공격은 HTTP {c_status}이며 "
+                                    "사전 지정한 보호 콘텐츠가 공격 응답에서만 확인됨 → 접근제어 우회 확증",
+                                    f"상태 {b_status}→{c_status} · 보호 콘텐츠 확인")]
+                return [self._f("의심", 60,
+                                f"정상 요청은 HTTP {b_status}(거부), 공격은 HTTP {c_status}. "
+                                "실제 보호 자원 제공 여부는 미확인 — 보호 콘텐츠를 지정해 재확인하세요",
                                 f"상태 {b_status}→{c_status}")]
             if c_status in (301, 302, 303, 307, 308):
                 if _redirect_is_auth_reject(loc):
@@ -203,22 +221,23 @@ class DifferentialDetector(Detector):
                 else:
                     _mp = " (307/308: 메소드·본문 보존)" if c_status in (307, 308) else ""
                     _to = f" → {loc[:60]}" if loc else ""
-                    return [self._f("성공", 78,
+                    return [self._f("의심", 55,
                                     f"인증 우회 가능 — 정상은 HTTP {b_status}(거부)인데 공격은 "
                                     f"HTTP {c_status} 리다이렉트{_to}{_mp}(로그인/에러 페이지 아님) → "
-                                    "로그인 성공 리다이렉트일 가능성. 따라가 본문을 확인해 확증하세요",
+                                    "목적지에서 보호 콘텐츠 제공 여부를 확인하세요",
                                     f"상태 {b_status}→{c_status}{_to}")]
-        # 실패 문구가 대조엔 있고 공격엔 없으며 200 → 로그인/인증 우회
+        # 실패 문구가 대조엔 있고 공격엔 없으며 200 → 로그인/인증 우회 후보
         if b_fail and not c_fail and c_status == 200:
-            return [self._f("성공", 80,
-                            "인증 우회 — 정상 요청엔 있던 인증 실패 문구가 공격 응답에선 사라지고 200 → "
-                            "우회로 인증을 통과했을 가능성이 높음(확증)",
+            return [self._f("성공" if protected else "의심", 88 if protected else 60,
+                            "인증 실패 문구 소멸 + HTTP 200" +
+                            (" · 지정한 보호 콘텐츠 확인 → 인증 우회 확증" if protected else
+                             " — 오류/일반 페이지 가능성 있음. 보호 콘텐츠를 확인하세요"),
                             "인증 실패 문구 소멸 + HTTP 200")]
 
-        # ── 강: 로그인 상태 전이 = 인증우회(둘 다 200 이어도) ──
+        # ── 로그인 상태 전이(둘 다 200 이어도) — 보호 콘텐츠 없이는 의심 ──
         # ASP.NET 등은 오답 로그인에도 401/403·실패문구 없이 폼을 200으로 다시 렌더한다.
         # 크리덴셜 인젝션에서 '대조군=로그인 폼'인데 공격 응답은 '폼이 사라짐/로그인-후
-        # 마커 등장/로그인 아닌 곳으로 리다이렉트'면, 상태코드가 같아도 인증우회로 본다.
+        # 마커 등장/로그인 아닌 곳으로 리다이렉트'면, 상태코드가 같아도 우회 후보로 본다.
         _cred = (ctx.category in ("sqli", "nosql", "authbypass")
                  or ctx.attack_type in ("sqli", "nosql", "authbypass")
                  or bool(_AUTHBYPASS_PAYLOAD_RE.search((ctx.payload or "") + " " + (ctx.req_body or ""))))
@@ -232,9 +251,12 @@ class DifferentialDetector(Detector):
             if c_status in (301, 302, 303, 307, 308) and loc and not _redirect_is_auth_reject(loc):
                 trans.append(f"로그인 아닌 곳으로 리다이렉트({loc[:50]})")
             if trans:
-                return [self._f("성공", 82,
-                                "인증 우회 — 대조군(실패)엔 로그인 폼이 있는데 공격 응답은 "
-                                + " · ".join(trans) + " → 크리덴셜 인젝션으로 인증을 통과(확증)",
+                return [self._f("성공" if protected and c_status in (200, 201) else "의심",
+                                88 if protected and c_status in (200, 201) else 60,
+                                "대조군(실패)엔 로그인 폼이 있는데 공격 응답은 "
+                                + " · ".join(trans) +
+                                (" · 지정한 보호 콘텐츠 확인 → 인증 우회 확증" if protected and c_status in (200, 201)
+                                 else " · 실제 인증 상태/보호 콘텐츠 확인 필요"),
                                 " · ".join(trans))]
 
         signals = []
@@ -263,11 +285,15 @@ class DifferentialDetector(Detector):
             ev = ", ".join(s[1] for s in signals)
             return [self._f("의심", 60, why, ev)]
 
-        # 사소한 차이만 → 대조군 비교 결과 '유의미한 차이 없음'(안전에 가까운 신호)
+        # 길이와 상태가 같아도 내용이 다르면 영향 없음이라고 단정할 수 없다.
         if abs(dl) < _BODY_DELTA_WEAK and (b_status == c_status):
-            return [self._f("안전", 65,
-                            "정상(대조군)과 응답이 거의 동일 — 이 벡터로는 관측되는 영향 없음",
-                            f"상태 동일({c_status}) · 본문 Δ{dl}B")]
+            if c_body == b_body:
+                return [self._f("안전", 65,
+                                "대조군과 상태·본문이 동일 — 이 검사에서 관측된 응답 변화 없음",
+                                f"상태 동일({c_status}) · 본문 동일")]
+            return [self._f("미확인", 45,
+                            "상태·본문 길이는 비슷하지만 내용이 다름 — 동적 값인지 공격 영향인지 확인 필요",
+                            f"상태 동일({c_status}) · 본문 Δ{dl}B · 내용 다름")]
         return []
 
     def _f(self, verdict, conf, why, ev):
@@ -293,7 +319,8 @@ class LoginBypassSingleSignalDetector(Detector):
     리다이렉트' 또는 '로그아웃 마커 등장 + 로그인 폼 없음' 이면 인증우회로 의심한다.
     단독 응답이라 '성공' 확증은 못 하므로 verdict=의심 — baseline(실패 로그인) 대조나
     리다이렉트 추적으로 확증하도록 안내한다. baseline 이 있으면 DifferentialDetector 가
-    '성공'으로 확증하므로 이 탐지기는 대조군이 없을 때만 동작한다(중복 방지)."""
+    대조군과 보호 콘텐츠 표식이 있으면 DifferentialDetector 가 확증을 판단하므로
+    이 탐지기는 대조군이 없을 때만 동작한다(중복 방지)."""
     id = "login_bypass_single"
     tier = 2
     attack_types = frozenset()
@@ -345,7 +372,7 @@ register(LoginBypassSingleSignalDetector())
 # tier-1 JWT 탐지기 — 요청의 토큰을 '구조'로 판정(응답 불필요)
 # ══════════════════════════════════════════════════════════════════════════════
 # jwt 는 등록 카테고리인데 판정 로직이 없던 '고아' 중 하나. alg:none·서명 없음은 요청만으로
-# 확인되는 구체 취약 신호다(서버가 받아주면 인증우회). 대조군이 있으면 수용 여부까지 확증.
+# 확인되는 공격 시도다. 대조군과 보호 콘텐츠가 있으면 실제 우회 여부를 검증한다.
 import base64
 import json as _json
 
@@ -384,20 +411,25 @@ class JwtNoneAlgDetector(Detector):
             alg = str(head.get("alg", "")).lower()
             sig = tok.split(".")[2] if tok.count(".") >= 2 else ""
             if alg == "none" or (alg == "" and not sig):   # alg:none, 또는 alg 없고 서명 없음
-                # 서버 수용 여부까지 보려면 대조군 필요 — 있으면 상태 전이로 확증
+                # 서명 없는 토큰의 수용 여부는 상태 전이만으로 확정할 수 없다.
                 verdict, conf, why = "의심", 62, (
                     "요청 JWT 의 alg=none(서명 없음) — 서버가 이를 받아주면 서명 검증 우회로 "
                     "임의 클레임 위조가 가능(인증우회). 서버 수용 여부를 확인하세요")
                 if ctx.has_control():
                     b_status = (ctx.baseline or {}).get("status_code")
                     _loc = _hdr(ctx.headers_lower, 'location')
-                    # 직접 통과(200/201)면 확증. 3xx 는 로그인/에러 리다이렉트가 아닐 때만(차분과 동일 기준).
+                    # 직접 응답에 사전 지정한 보호 콘텐츠가 나타난 경우에만 확정한다.
                     _passed = (ctx.status_code in (200, 201)) or (
                         ctx.status_code in (301, 302, 303, 307, 308) and not _redirect_is_auth_reject(_loc))
                     if b_status in (401, 403) and _passed:
-                        verdict, conf, why = "성공", 85, (
-                            "JWT alg=none 위조 토큰이 통과 — 정상은 거부(HTTP %s)인데 위조는 "
-                            "HTTP %s → 서명 검증 우회 확증" % (b_status, ctx.status_code))
+                        proven = ctx.status_code in (200, 201) and protected_content_evidence(
+                            ctx.body, ctx.baseline, (ctx.url, ctx.payload, ctx.req_body,
+                                                     " ".join(str(v) for v in (ctx.req_headers or {}).values())))
+                        verdict, conf, why = (
+                            ("성공", 88, "위조 JWT 응답에 지정한 보호 콘텐츠가 나타남 → 서명 우회 확증")
+                            if proven else ("의심", 62,
+                                            "정상 토큰은 거부되고 위조 JWT 응답은 달라졌으나 "
+                                            "보호 자원 접근은 미확인"))
                 out.append({"name": "JWT alg=none 서명 우회", "verdict": verdict, "confidence": conf,
                             "why": why, "evidence": f"header.alg={head.get('alg')} · sig={'없음' if not sig else '있음'}",
                             "method": "요청 토큰 구조 분석(+대조군)", "where": "요청 JWT 헤더",
@@ -462,18 +494,24 @@ class MiddlewareAuthBypassDetector(Detector):
                      "evidence": evidence, "method": "요청 헤더 구조 + 응답 상태",
                      "where": "요청 헤더", "detector_id": self.id, "tier": self.tier}]
 
-        # 대조군 차분: 정상(헤더 없음) 거부 → 우회 요청은 제공(200/201·비거부 3xx) = 우회 성공.
+        # 거부→응답 변화는 의심. 직접 응답의 보호 콘텐츠가 확인될 때만 성공.
         served = auth_served(ctx.status_code, loc)
         if ctx.has_control():
             b_status = (ctx.baseline or {}).get("status_code")
-            b_loc = (ctx.baseline or {}).get("location") or ""
+            b_loc = (ctx.baseline or {}).get("location") or _hdr((ctx.baseline or {}).get("headers"), "location")
             b_rejected = auth_rejected(b_status, b_loc)
             if b_rejected and served:
-                return [{"name": f"{name} — 우회 성공", "verdict": "성공", "confidence": 88,
-                         "why": f"{what}. 정상 요청(헤더 없음)은 거부(HTTP {b_status})인데 우회 헤더를 "
-                                f"넣자 HTTP {ctx.status_code} 로 보호 리소스가 제공됨 → 인가 우회 확증.",
+                proven = ctx.status_code in (200, 201) and protected_content_evidence(
+                    ctx.body, ctx.baseline, (ctx.url, ctx.payload, ctx.req_body,
+                                             " ".join(str(v) for v in (ctx.req_headers or {}).values())))
+                return [{"name": f"{name} — {'우회 성공' if proven else '응답 변화'}",
+                         "verdict": "성공" if proven else "의심", "confidence": 88 if proven else 60,
+                         "why": f"{what}. 정상 요청은 HTTP {b_status}(거부), 우회 헤더 요청은 "
+                                f"HTTP {ctx.status_code}. " +
+                                ("지정한 보호 콘텐츠가 공격 응답에서만 확인됨 → 인가 우회 확증."
+                                 if proven else "실제 보호 자원 제공 여부는 미확인 — 보호 콘텐츠를 확인하세요."),
                          "evidence": evidence + f" · baseline HTTP {b_status} → 공격 HTTP {ctx.status_code}",
-                         "method": "요청 헤더 구조 + 대조군 상태전이", "where": "요청 헤더 vs 대조군",
+                         "method": "요청 헤더 구조 + 대조군 비교", "where": "요청 헤더 vs 대조군",
                          "detector_id": self.id, "tier": self.tier}]
 
         # 대조군 없음/불충분 → 의심(시도 확인). 200 이면 우회 성공 가능성을 명시하되 확증은 대조군 필요.
