@@ -24,6 +24,7 @@ import httpx
 from core import classify as _classify
 from core import prompts as _prompts
 from core import ai_egress
+from core import public_shape as _public_shape
 from core.ai_privacy import sanitize_headers
 
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
@@ -347,6 +348,15 @@ async def ai_suggest_payloads(method: str, path: str, params: dict,
     if not key:
         return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
     model, base_url = _model(), _base_url()
+    # strict 반출 모드: 실제 값 대신 비식별 요청 구조(필드 이름+타입)와 공격 신호 토큰만 넘긴다(F2).
+    if ai_egress.is_strict():
+        shape = _public_shape.build(method=method, url=path, params=params, body=body or "",
+                                    headers={n: "" for n in (header_names or [])})
+        if not shape.shapeable:
+            return {"error": "엄격 반출 모드: 요청 본문을 비식별 구조로 변환할 수 없어 전송을 거부했습니다.",
+                    "model": model}
+        path, params = shape.path_template, shape.query_types()
+        body, header_names = shape.prompt_body(), shape.header_names
     hint_line = (f"이전 검증에서 확인된 신호(라벨): {hint}. 이 계열을 승격/우회하는 페이로드 위주로.\n"
                  if hint else "")
     rag_block = _format_retrieved(retrieved, limit=6, text_limit=500)
@@ -583,6 +593,18 @@ async def ai_classify_attack(ctx: dict) -> dict | None:
     if not key:
         return {"error": "AI 미설정 (.env 의 NVIDIA_API_KEY 없음)"}
     model, base_url = _model(), _base_url()
+
+    # strict 반출 모드: 비식별 구조 + 공격 신호 토큰만 넘긴다(분류엔 공격 패턴이 필요, 업무 값은 제외, F2).
+    if ai_egress.is_strict():
+        shape = _public_shape.build(method=ctx.get("method", "GET"), url=ctx.get("path", ""),
+                                    params=ctx.get("params"), body=ctx.get("body") or "",
+                                    headers=ctx.get("headers") or {})
+        if not shape.shapeable:
+            return {"error": "엄격 반출 모드: 요청 형식을 비식별 구조로 변환할 수 없어 전송을 거부했습니다.",
+                    "model": model}
+        ctx = {"method": shape.method, "path": shape.path_template,
+               "params": shape.query_types(), "body": shape.prompt_body(),
+               "headers": {n: "" for n in shape.header_names}}
 
     hdrs = sanitize_headers(ctx.get("headers"))
     hdr_lines = "\n".join(f"  {k}: {str(v)[:200]}" for k, v in list(hdrs.items())[:30])
