@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from core.agent import get_manager
+from core.agent import get_manager, generate_plan
 from core.agent_models import RunSpec
 
 router = APIRouter(prefix='/api/agent', tags=['context-agent'])
@@ -31,6 +31,17 @@ async def stop_runs():
 @router.get('/runs')
 def list_runs():
     return {'runs': get_manager().store.list()}
+
+
+@router.post('/plan')
+async def preview_plan(spec: RunSpec):
+    """비식별 입력으로 조건부 검증 계획을 1회 생성·검증해 돌려준다(실행하지 않음, 리뷰 Stage 3).
+    실행 중 분기는 로컬에서 처리되며 응답은 외부로 나가지 않는다."""
+    try:
+        plan = await generate_plan(spec)
+        return {'plan': plan.model_dump()}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post('/runs', status_code=201)

@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from core import ai_analyzer as ai, oob, confirm
 from core import ai_egress
 from core import public_shape
+from core import plan as plan_mod
 from core.ai_privacy import sanitize_headers
 from core.analyzer import analyze_response
 from core.agent_models import Action, RunSpec, origin
@@ -219,6 +220,76 @@ def _strict_context(ctx: dict) -> dict:
         obs.append(o)
     ctx['observations'] = obs
     return ctx
+
+
+# ── 응답-블라인드 계획 생성(리뷰 Stage 3 / 전체 F4) ──────────────────────────────
+# 외부 모델은 '첫 관측 이전'에 비식별 입력으로 조건부 계획을 한 번만 만든다. 응답은 전달하지
+# 않으며, 실행 중 분기는 core.plan.run_plan(로컬)이 처리한다. 모델이 돌려준 임의 코드는
+# 실행하지 않고 제한된 스키마(Plan)로만 검증한다.
+_ALLOWED_PLAN_CATEGORIES = {'sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql'}
+
+PLAN_SYSTEM = '''You produce ONE bounded conditional HTTP verification plan as a single JSON object.
+The plan runs LOCALLY and you will NOT receive any responses — encode all branching as conditions now.
+Use ONLY the provided endpoint IDs, actor IDs, and attack categories. Do not invent IDs, hosts, or values.
+The request is given as a de-identified shape (host and real values removed); craft payloads from field names/types.
+Schema: {"entry":"<action_id>","max_hops":<int<=16>,"steps":[
+ {"action_id":"<id>","action":{"kind":"observe|probe|confirm|access|finish","hypothesis":"Korean rationale",
+   "category":"<one of allowed_categories or empty>","location":"param|body|header","param":"<field name>",
+   "payload":"<literal test input>","actor_id":"<actor id>","endpoint_id":"<endpoint id>"},
+  "branches":[{"predicate":{"kind":"verdict_in","verdicts":["confirmed|suspicious|inconclusive|safe"]},"next":"<action_id or empty>"}],
+  "default_next":"<action_id or empty>"}]}
+predicate kinds: verdict_in(verdicts[]), status_in(statuses[]), signal_present(signal), always. next "" means stop.
+Prefer probe then confirm on suspicious; stop (empty next) when safe. Return only the JSON object.'''
+
+
+async def _default_plan_planner(ctx: dict) -> dict:
+    """기본 계획 생성기 — 비식별 ctx 를 외부 AI 에 한 번 보내 JSON 계획을 받는다(egress guard 적용)."""
+    key = ai._api_key()
+    if not key:
+        raise ValueError('AI 설정이 없습니다. NVIDIA/AI API 설정을 확인하세요.')
+    payload = {'model': ai._model(),
+               'messages': [{'role': 'system', 'content': PLAN_SYSTEM},
+                            {'role': 'user', 'content': json.dumps(ctx, ensure_ascii=False)}],
+               'temperature': 0.2, 'max_tokens': 1500}
+    r = await ai._post_chat(ai._base_url(), {'Authorization': 'Bearer ' + key,
+                            'Content-Type': 'application/json'}, payload, tries=1)
+    if r.status_code != 200:
+        raise ValueError(f'AI HTTP {r.status_code}; 계획 생성 실패.')
+    return ai._extract_json(r.json()['choices'][0]['message']['content'])
+
+
+def _plan_context(spec) -> dict:
+    """계획 생성에 보낼 비식별 입력. host·실제 값·목표 원문·객체 식별값은 포함하지 않는다(F2·F4)."""
+    shape = public_shape.build(method=spec.request.method, url=spec.request.url,
+                               params=spec.request.params, body=spec.request.body or '',
+                               headers=spec.request.headers)
+    return {
+        'request_shape': shape.to_dict(),               # host/값 제거된 구조 + 공격 신호
+        'goal_purpose': _purpose_code(spec.goal),        # 목표 원문 대신 목적 코드
+        'allowed_categories': sorted(_ALLOWED_PLAN_CATEGORIES),
+        'actors': [a.id for a in spec.actors],           # id 만(라벨 제외)
+        'endpoints': ['seed'],
+        'objects': [{'id': o.id, 'owner_actor': o.owner_actor, 'allowed_actors': o.allowed_actors}
+                    for o in spec.objects],              # identity_value/description 제외
+        'budget': {'max_steps': spec.max_steps, 'max_requests': spec.max_requests},
+    }
+
+
+async def generate_plan(spec, planner=None):
+    """비식별 입력으로 조건부 계획을 1회 생성하고 스키마·범위를 검증한다(리뷰 Stage 3).
+    planner(ctx)->dict 를 주입하면 외부 호출 없이 테스트할 수 있다. 검증 실패 시 ValueError."""
+    ctx = _plan_context(spec)
+    raw = await (planner or _default_plan_planner)(ctx)
+    try:
+        plan = plan_mod.Plan.model_validate(raw)
+    except Exception as e:
+        raise ValueError(f'계획 스키마 오류: {type(e).__name__}')
+    errors = plan_mod.validate_plan(
+        plan, allowed_categories=_ALLOWED_PLAN_CATEGORIES,
+        known_actor_ids={a.id for a in spec.actors}, known_endpoint_ids={'seed'})
+    if errors:
+        raise ValueError('허용되지 않은 계획: ' + '; '.join(errors[:5]))
+    return plan
 
 
 async def choose_action(context):
