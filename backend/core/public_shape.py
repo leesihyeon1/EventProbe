@@ -152,6 +152,11 @@ def _path_template(path: str) -> str:
     return "/".join(out) or "/"
 
 
+def template_path(path: str) -> str:
+    """경로의 동적 세그먼트(숫자·UUID·hex·장토큰)를 {id} 로 치환(공개 API)."""
+    return _path_template(path)
+
+
 def _collect_attack_tokens(values) -> list:
     out, seen = [], set()
     for v in values:

@@ -10,6 +10,8 @@ from anyio import fail_after
 from bs4 import BeautifulSoup
 
 from core import ai_analyzer as ai, oob, confirm
+from core import ai_egress
+from core import public_shape
 from core.ai_privacy import sanitize_headers
 from core.analyzer import analyze_response
 from core.agent_models import Action, RunSpec, origin
@@ -176,6 +178,47 @@ def discover(request, response):
         endpoints.append({'method': 'GET', 'url': p._replace(fragment='').geturl(),
                           'params': {}, 'body': '', 'headers': {}})
     return endpoints
+
+
+# strict 반출 모드: 목표 자유 텍스트를 사내에만 두고, planner 에는 '목적 코드'만 넘긴다(리뷰 F4).
+# 전체 F4(응답-블라인드 계획 + 로컬 분기)는 3단계 재설계 몫이다. 여기서는 반복 planner 를
+# 유지하되 고민감 필드(목표 원문·계정 라벨·객체 identity_value/description·응답 발췌)를 제거한다.
+_PURPOSE_KEYWORDS = (
+    ('access-control', ('인증', '권한', '접근', 'idor', 'auth', 'access', 'owner', 'privilege', '소유')),
+    ('injection', ('sqli', 'sql', '인젝션', 'injection', 'nosql', 'cmd', 'rce', '명령')),
+    ('xss', ('xss', '스크립트', 'script', 'dom')),
+    ('ssrf', ('ssrf', '내부망', 'metadata', 'oob')),
+    ('traversal', ('lfi', 'rfi', 'traversal', '경로', 'path', '파일', 'file')),
+    ('redirect', ('redirect', '리다이렉트', 'open redirect')),
+)
+
+
+def _purpose_code(goal: str) -> str:
+    g = (goal or '').lower()
+    for code, kws in _PURPOSE_KEYWORDS:
+        if any(k in g for k in kws):
+            return code
+    return 'general-verification'
+
+
+def _strict_context(ctx: dict) -> dict:
+    """planner 입력에서 외부로 내보내면 안 되는 식별·원문 필드를 제거한다(원본은 사내 store 유지)."""
+    ctx = dict(ctx)
+    ctx['goal_purpose'] = _purpose_code(ctx.pop('goal', ''))
+    ctx['export_mode'] = 'strict'
+    ctx['actors'] = [{'id': a.get('id')} for a in ctx.get('actors', [])]   # 라벨 제거
+    ctx['objects'] = [{'id': o.get('id'), 'path': public_shape.template_path(o.get('url', '')),
+                       'owner_actor': o.get('owner_actor'), 'allowed_actors': o.get('allowed_actors', [])}
+                      for o in ctx.get('objects', [])]                      # identity_value/description/pointer 제거
+    ctx['endpoints'] = [{**e, 'path': public_shape.template_path(e.get('path', ''))}
+                        for e in ctx.get('endpoints', [])]
+    obs = []
+    for o in ctx.get('observations', []):
+        o = {k: v for k, v in o.items() if k != 'untrusted_response_excerpt'}  # 응답 발췌 제거
+        o['path'] = public_shape.template_path(o.get('path', ''))
+        obs.append(o)
+    ctx['observations'] = obs
+    return ctx
 
 
 async def choose_action(context):
@@ -375,14 +418,16 @@ class AgentManager:
                     body_fields = list(dict(parse_qsl(req.get('body', ''))))
                 endpoints.append({'id': eid, 'path': urlsplit(req['url']).path, 'method': req['method'],
                                   'query_fields': list(query), 'body_fields': body_fields})
-            return {'goal': spec.goal, 'actors': [{'id': a.id, 'label': a.label} for a in spec.actors],
-                    'endpoints': endpoints, 'objects': [{**o.model_dump(), 'url': urlsplit(o.url).path} for o in spec.objects],
-                    'observations': observations,
-                    'previous_actions': [e['data'] for e in events if e['kind'] == 'action'][-12:],
-                    'verified_results': [e['data'] for e in events if e['kind'] == 'verification'][-8:],
-                    'recent_errors': [e['data'] for e in events if e['kind'] == 'error'][-3:],
-                    'oob': [{'step_id': e['step_id'], 'protocol': e['data'].get('protocol')} for e in events if e['kind'] == 'oob'][-8:],
-                    'remaining_requests': spec.max_requests - data['requests']}
+            ctx = {'goal': spec.goal, 'actors': [{'id': a.id, 'label': a.label} for a in spec.actors],
+                   'endpoints': endpoints, 'objects': [{**o.model_dump(), 'url': urlsplit(o.url).path} for o in spec.objects],
+                   'observations': observations,
+                   'previous_actions': [e['data'] for e in events if e['kind'] == 'action'][-12:],
+                   'verified_results': [e['data'] for e in events if e['kind'] == 'verification'][-8:],
+                   'recent_errors': [e['data'] for e in events if e['kind'] == 'error'][-3:],
+                   'oob': [{'step_id': e['step_id'], 'protocol': e['data'].get('protocol')} for e in events if e['kind'] == 'oob'][-8:],
+                   'remaining_requests': spec.max_requests - data['requests']}
+            # strict 반출 모드면 planner 로 나가기 전에 식별·원문 필드를 제거한다(리뷰 F4).
+            return _strict_context(ctx) if ai_egress.is_strict() else ctx
 
         try:
             for actor in spec.actors:
