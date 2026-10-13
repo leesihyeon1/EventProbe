@@ -50,6 +50,7 @@ from core import xss_confirm
 from core.tlsscan import tls_scan
 from core import rag
 from core import oob
+from core import ai_egress
 from core.ai_privacy import SENSITIVE_HEADERS, sanitize_headers
 from core.verification_context import compact as compact_verification_events
 
@@ -448,9 +449,32 @@ def _rag_ctx_fields(retrieved: list) -> dict:
     }
 
 
+def _local_verdict(analysis: dict, retrieved: list) -> dict:
+    """strict 반출 모드용 로컬 판정 — 외부 AI 를 부르지 않고 결정적 엔진 결과로 설명을 구성한다.
+
+    응답 유래 근거(findings.why/evidence·alerts·baseline·history)를 외부로 보내지 않으면서도
+    UI 가 기대하는 ai_verdict 모양을 유지한다(리뷰 F1). RAG 발췌는 로컬 검색 결과이므로
+    화면 표시용으로만 싣는다(반출 아님)."""
+    det = analysis.get("det_verdict") or {}
+    return {
+        "outcome": analysis.get("attack_outcome"),
+        "reasoning": det.get("summary") or "로컬 규칙 기반 판정입니다(엄격 반출 모드 — 외부 AI 미사용).",
+        "priority": det.get("priority", ""),
+        "remediation": det.get("remediation", ""),
+        "model": "local-template(strict-egress)",
+        "rag_refs_used": [],
+        "rag_used": 0,
+        "rag_retrieved": len(retrieved[:4]),
+        "rag_context": [{"title": r.get("title", ""), "loc": r.get("loc", ""), "score": r.get("score"),
+                         "excerpt": re.sub(r"\s+", " ", str(r.get("text", ""))).strip()[:240]}
+                        for r in retrieved[:4]],
+    }
+
+
 async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
     """RAG 관련 문서를 (AI 유무와 무관하게) analysis['related_docs'] 에 붙이고,
-    AI 판정이 켜져 있으면 '같은 검색 결과'로 판정을 생성한다(검색 1회로 공유)."""
+    AI 판정이 켜져 있으면 '같은 검색 결과'로 판정을 생성한다(검색 1회로 공유).
+    strict 반출 모드에서는 외부 판정 호출 대신 로컬 템플릿으로 판정을 만든다(리뷰 F1)."""
     _fnd = [{"name": f["name"], "verdict": f.get("verdict"), "why": f.get("why"), "evidence": f.get("evidence")}
             for f in analysis.get("findings", [])]
     _atype = analysis.get("attack_type") or req.category
@@ -460,7 +484,9 @@ async def _attach_rag_and_verdict(analysis: dict, req, status_code, resp_time):
         analysis["related_docs"] = [{"title": h.get("title", ""), "loc": h.get("loc", ""),
                                      "score": h.get("score"), "excerpt": (h.get("text", "") or "")[:220]}
                                     for h in hits]
-    if ai_verdict_enabled():
+    if ai_egress.is_strict():
+        analysis["ai_verdict"] = _local_verdict(analysis, hits)
+    elif ai_verdict_enabled():
         history = compact_verification_events(getattr(req, "context_events", []),
                      session_id=getattr(req, "session_id", ""), current_url=getattr(req, "url", ""))
         analysis["ai_verdict"] = await ai_verdict({

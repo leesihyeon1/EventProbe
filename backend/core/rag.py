@@ -21,6 +21,8 @@ from typing import Optional
 
 import numpy as np
 
+from core import ai_egress
+
 _RAG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "rag")
 
 _TOKEN_RE = re.compile(r"[a-z0-9_][a-z0-9_./:\-]*", re.I)
@@ -172,6 +174,10 @@ def _embed_batch(base, headers, model, batch, input_type):
     import httpx
     payload = {"input": [_sanitize_for_embed(t) for t in batch], "model": model,
                "input_type": input_type, "encoding_format": "float", "truncate": "END"}
+    try:                                    # 공통 반출 정책 백스톱(strict+외부 목적지면 전송 차단)
+        ai_egress.guard(payload, channel="embeddings", destination_url=base)
+    except ai_egress.EgressBlocked:
+        return None, True                   # 치명 처리 → 폴백 중단하고 상위에서 BM25 로
     try:
         with httpx.Client(timeout=60) as client:
             r = client.post(f"{base}/embeddings", headers=headers, json=payload)
@@ -192,6 +198,8 @@ def _embed(texts: list, input_type: str) -> Optional["np.ndarray"]:
     key, base, model = _embed_cfg()
     if not key or not texts:
         return None
+    if not ai_egress.embeddings_allowed(base):   # strict + 외부 임베딩 엔드포인트 → 전송 안 함
+        return None                              # → _semantic_search 가 None 받아 BM25 폴백
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     dim, rows = None, [None] * len(texts)
     for i in range(0, len(texts), 50):

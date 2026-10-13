@@ -23,6 +23,7 @@ import httpx
 
 from core import classify as _classify
 from core import prompts as _prompts
+from core import ai_egress
 from core.ai_privacy import sanitize_headers
 
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
@@ -52,7 +53,11 @@ _RETRY_STATUS = {404, 408, 409, 429, 500, 502, 503, 504}
 
 
 async def _post_chat(base_url: str, headers: dict, payload: dict, tries: int = 3):
-    """chat/completions POST(+_apply_model_opts) 를 일시 오류에 한해 재시도. 마지막 응답 반환."""
+    """chat/completions POST(+_apply_model_opts) 를 일시 오류에 한해 재시도. 마지막 응답 반환.
+
+    모든 chat 계열 호출(분석·판정·후보·분류·변형 + agent.choose_action)이 이 한 지점을
+    지나므로, 외부 전송 직전 공통 반출 정책을 적용한다(strict 면 금지 데이터 시 EgressBlocked)."""
+    ai_egress.guard(payload, channel="chat", destination_url=base_url)
     last = None
     async with httpx.AsyncClient(timeout=_timeout()) as client:
         for i in range(tries):
@@ -99,8 +104,11 @@ def is_enabled() -> bool:
 
 def response_analysis_enabled() -> bool:
     """AI '응답 분석' 사용 여부 — 응답 body 를 외부로 보내 유출 위험이 있으므로 기본 OFF.
-    켜려면 .env 에 AI_RESPONSE_ANALYSIS=true 를 명시해야 한다(키만으론 켜지지 않음)."""
+    켜려면 .env 에 AI_RESPONSE_ANALYSIS=true 를 명시해야 한다(키만으론 켜지지 않음).
+    strict 반출 모드에서는 응답 본문을 외부로 보내는 이 경로를 항상 끈다(리뷰 F1)."""
     if not _api_key():
+        return False
+    if ai_egress.is_strict():
         return False
     return os.getenv("AI_RESPONSE_ANALYSIS", "false").strip().lower() in ("1", "true", "yes", "on")
 
