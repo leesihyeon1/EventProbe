@@ -4460,6 +4460,8 @@ function switchView(view) {
   state.activeView = view;
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === view));
   document.querySelectorAll('.topbar-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  // 자율 검증 뷰로 전환하면 목록·반출 정책을 (재)로드한다(agent.js 에서 정의).
+  if (view === 'agent' && window.openAgentView) window.openAgentView();
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -4864,9 +4866,11 @@ function deleteCustomPayload(payloadId) {
 
 function switchSidebarTab(tab) {
   const panelId = { payloads: 'sidebarPayloads', aitest: 'sidebarAitest', history: 'sidebarHistory' }[tab] || 'sidebarPayloads';
-  document.querySelectorAll('.sidebar-tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.stab === tab)
-  );
+  document.querySelectorAll('.sidebar-tab').forEach(t => {
+    const on = t.dataset.stab === tab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
   document.querySelectorAll('.sidebar-panel').forEach(p =>
     p.classList.toggle('active', p.id === panelId)
   );

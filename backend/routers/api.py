@@ -617,6 +617,21 @@ async def analyze_enrich(req: EnrichRequest):
     return out
 
 
+@router.get("/egress/policy")
+def egress_policy():
+    """서버가 강제하는 반출 정책 + 최근 AI 전송 감사 로그.
+
+    UI 가 '현재 반출 모드'와 '실제로 무엇이 외부로 나갔는지'를 보여주기 위한 읽기 전용
+    엔드포인트(리뷰 UI '정책/설정'). 감사 레코드에는 원문 민감값이 없고 발견 종류와
+    축약 샘플만 있다. 모드는 서버 .env 로만 바뀌며 클라이언트가 완화할 수 없다."""
+    return {
+        "mode": ai_egress.export_mode(),
+        "strict": ai_egress.is_strict(),
+        "policy_version": ai_egress.POLICY_VERSION,
+        "audit": ai_egress.audit_log(limit=50),
+    }
+
+
 # ── ASP.NET WebForms VIEWSTATE 자동 갱신 ────────────────────────────────────
 # ASP.NET 폼(.aspx)은 요청마다 __VIEWSTATE/__EVENTVALIDATION 토큰이 유효해야 로그인
 # 로직이 처리된다. 오래되거나 없는 토큰으로 보내면 서버는 폼만 다시 렌더 → 인젝션이

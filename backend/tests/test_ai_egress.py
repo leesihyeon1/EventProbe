@@ -193,3 +193,19 @@ def test_strict_verdict_uses_local_template_not_external(monkeypatch):
     assert v["priority"] == "high" and v["outcome"] == "suspicious"
     # 응답 유래 근거(why/evidence)가 판정 객체로 새어 나가지 않는다
     assert "DB error leaked" not in str(v) and "secret_users" not in str(v)
+
+
+# ── /api/egress/policy 엔드포인트(UI 반출 정책 표시용) ──────────────────────────
+def test_egress_policy_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+    from main import app
+    client = TestClient(app)
+
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")
+    body = client.get("/api/egress/policy").json()
+    assert body["mode"] == "permissive" and body["strict"] is False
+    assert isinstance(body["audit"], list) and body["policy_version"]
+
+    monkeypatch.setenv("AI_EXPORT_MODE", "strict")
+    body = client.get("/api/egress/policy").json()
+    assert body["mode"] == "strict" and body["strict"] is True

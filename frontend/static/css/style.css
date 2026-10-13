@@ -128,8 +128,11 @@ body {
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
+  border: none;
   border-bottom: 2px solid transparent;
-  transition: all .15s;
+  background: transparent;
+  font-family: inherit;
+  transition: color .15s, background-color .15s, border-color .15s;
   user-select: none;
 }
 
@@ -1824,4 +1827,66 @@ mark.search-hit.current { background: #f0a500; color: #1a1a1a; }
   background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px;
   padding: 5px 7px; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto;
   color: var(--text-secondary);
+}
+
+/* ══════════════════════════════ 자율 검증 뷰 ══════════════════════════════ */
+.agent-page { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+.agent-left {
+  width: 340px; flex: 0 0 340px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; gap: 10px;
+}
+.agent-right { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 12px; min-width: 0; }
+
+.egress-banner {
+  font-size: 11px; line-height: 1.5; padding: 8px 10px; border-radius: var(--radius);
+  background: var(--bg-tertiary); border: 1px solid var(--border); border-left-width: 3px; color: var(--text-secondary);
+}
+.egress-banner.egress-strict { border-left-color: #16a34a; }
+.egress-banner.egress-permissive { border-left-color: #d97706; }
+
+.agent-list-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.agent-new { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-secondary); }
+.agent-new > summary { cursor: pointer; padding: 8px 10px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.agent-config { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.agent-config label { font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
+.agent-config textarea, .agent-config input[type=number] {
+  width: 100%; box-sizing: border-box; font-family: var(--font-mono); font-size: 12px;
+  background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 7px;
+}
+.agent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.agent-check { flex-direction: row !important; align-items: center; gap: 6px; font-size: 12px !important; color: var(--text-secondary) !important; }
+.agent-help { font-size: 10.5px; color: var(--text-muted); line-height: 1.5; margin: 2px 0; }
+
+.agent-list { display: flex; flex-direction: column; gap: 4px; }
+.agent-row {
+  display: flex; align-items: center; gap: 8px; text-align: left; width: 100%;
+  padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-family: inherit;
+  transition: background-color .12s, border-color .12s;
+}
+.agent-row:hover { background: var(--bg-hover); }
+.agent-row.active { border-color: var(--accent); background: var(--bg-hover); }
+.agent-row-state { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
+.agent-row-state.state-running { color: #16a34a; }
+.agent-row-state.state-paused, .agent-row-state.state-interrupted { color: #d97706; }
+.agent-row-state.state-limited { color: #dc2626; }
+.agent-row-goal { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.agent-status { font-size: 13px; font-weight: 600; color: var(--text-primary); padding: 2px 0 6px; }
+.agent-summary { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+.agent-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.agent-events { display: flex; flex-direction: column; gap: 6px; }
+.agent-event { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-secondary); }
+.agent-event > summary { cursor: pointer; padding: 7px 10px; font-size: 12px; color: var(--text-secondary); word-break: break-all; }
+.agent-event > pre {
+  margin: 0; padding: 8px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+  background: var(--bg-primary); border-top: 1px solid var(--border); white-space: pre-wrap; word-break: break-all;
+  max-height: 320px; overflow: auto;
+}
+
+@media (max-width: 760px) {
+  .agent-page { flex-direction: column; }
+  .agent-left { width: auto; flex: 0 0 auto; max-height: 45%; border-right: none; border-bottom: 1px solid var(--border); }
+  .agent-grid { grid-template-columns: 1fr 1fr; }
 }

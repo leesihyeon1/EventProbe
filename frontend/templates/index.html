@@ -17,11 +17,11 @@
   <div class="topbar-tabs">
     <button class="topbar-tab active" data-view="request" onclick="switchView('request')">요청 / 분석</button>
     <button class="topbar-tab" data-view="results" onclick="switchView('results')">일괄 테스트 결과</button>
+    <button class="topbar-tab" data-view="agent" onclick="switchView('agent')">자율 검증</button>
     <button class="topbar-tab" data-view="report" onclick="switchView('report')">검증 리포트</button>
   </div>
 
   <div class="topbar-actions">
-    <button class="btn btn-secondary" onclick="openAgent()">맥락 에이전트</button>
     <button class="btn btn-success" onclick="openBulkModal()">일괄 테스트</button>
     <button class="btn btn-secondary" onclick="generateReport()">📄 리포트 생성</button>
   </div>
@@ -34,10 +34,10 @@
   <div class="sidebar">
 
     <!-- 사이드바 탭 전환 -->
-    <div class="sidebar-tab-bar">
-      <div class="sidebar-tab active" data-stab="payloads" onclick="switchSidebarTab('payloads')">페이로드</div>
-      <div class="sidebar-tab" data-stab="aitest" onclick="switchSidebarTab('aitest')">AI 테스트</div>
-      <div class="sidebar-tab" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</div>
+    <div class="sidebar-tab-bar" role="tablist">
+      <button type="button" class="sidebar-tab active" role="tab" aria-selected="true" data-stab="payloads" onclick="switchSidebarTab('payloads')">페이로드</button>
+      <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-stab="aitest" onclick="switchSidebarTab('aitest')">AI 테스트</button>
+      <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</button>
       <button class="sidebar-edit-btn" onclick="event.stopPropagation();openCustomModal()" title="커스텀 페이로드 편집">✏️</button>
     </div>
 
@@ -145,7 +145,7 @@
         <option value="__custom__">직접 입력…</option>
       </select>
       <input id="httpVersionCustom" class="url-input" type="text" placeholder="예: HTTP/1.1 (변형)" style="display:none;max-width:150px;flex:0 0 auto" title="비정상/커스텀 버전 문자열 그대로 전송">
-      <input id="urlInput" class="url-input" type="text" placeholder="https://target.example.com/api/endpoint">
+      <input id="urlInput" class="url-input" type="text" aria-label="대상 요청 URL" placeholder="https://target.example.com/api/endpoint">
       <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기" style="white-space:nowrap">📋 붙여넣기</button>
       <label class="defhdr-toggle" title="켜면 빠진 헤더를 브라우저 기본값으로 보충(사용자 지정 헤더는 유지). 붙여넣기 시 자동으로 꺼집니다.">
         <input type="checkbox" id="useDefaultsChk" checked>
@@ -371,6 +371,61 @@
           </div>
         </div>
       </div><!-- /view:report -->
+
+      <!-- ═══ VIEW: 자율 검증 ═══ -->
+      <div class="view" data-view="agent">
+        <div class="agent-page">
+          <!-- 좌: 반출 정책 + 새 작업 + 작업 목록 -->
+          <aside class="agent-left">
+            <div id="egressPolicyBanner" class="egress-banner" role="status">반출 정책 확인 중…</div>
+            <div class="agent-list-head">
+              <strong>검증 작업</strong>
+              <button class="btn btn-secondary" id="agentRefresh" type="button" style="font-size:11px;padding:3px 9px">새로고침</button>
+            </div>
+            <details class="agent-new" id="agentNew">
+              <summary>➕ 새 작업 (현재 요청으로 시작)</summary>
+              <div class="agent-config">
+                <p class="agent-help">현재 요청 폼에서 시작합니다. 같은 출처의 링크·GET 폼을 발견하고, 계정별 세션으로 테스트합니다.</p>
+                <label for="agentGoal">테스트 목표</label>
+                <textarea id="agentGoal" rows="2">현재 요청에서 취약 신호를 확인하고 근거가 있는 후속 테스트를 진행해줘.</textarea>
+                <div class="agent-grid">
+                  <label>최대 단계<input id="agentSteps" type="number" min="1" max="50" value="8"></label>
+                  <label>최대 HTTP<input id="agentRequests" type="number" min="1" max="150" value="24"></label>
+                  <label>최대 AI 호출<input id="agentAiCalls" type="number" min="0" max="50" value="8"></label>
+                  <label>최대 시간(초)<input id="agentSeconds" type="number" min="10" max="1800" value="300"></label>
+                </div>
+                <label class="agent-check"><input id="agentWrite" type="checkbox"> POST·PUT·PATCH·DELETE 허용</label>
+                <label class="agent-check"><input id="agentShare" type="checkbox"> 응답 발췌를 AI 제공자에 전달</label>
+                <p class="agent-help" id="agentShareNote">기본 AI 입력은 경로·필드명·판정 라벨입니다. 발췌를 켜면 응답 데이터 일부도 전달됩니다. 요청·응답 증거는 이 PC에 저장됩니다.</p>
+                <details>
+                  <summary>계정과 객체 접근 정책</summary>
+                  <label for="agentActors">계정 목록(JSON)</label>
+                  <textarea id="agentActors" rows="4">[{"id":"current","label":"현재 계정","headers":{}}]</textarea>
+                  <p class="agent-help">첫 계정은 현재 요청의 인증을 이어받습니다. 다른 계정은 각각 Cookie 또는 Authorization 헤더를 지정합니다.</p>
+                  <label for="agentObjects">객체 정책(JSON)</label>
+                  <textarea id="agentObjects" rows="3">[]</textarea>
+                  <p class="agent-help">예: {"id":"orderB","url":"시작 URL과 같은 출처의 주문 URL","owner_actor":"userB","allowed_actors":[],"identity_pointer":"/id","identity_value":"42","description":"주문 소유자만 조회 가능"}</p>
+                </details>
+                <button class="btn btn-success" id="agentStart" type="button" style="margin-top:8px">현재 요청으로 시작</button>
+              </div>
+            </details>
+            <div id="agentList" class="agent-list">
+              <div class="empty-state" style="padding:16px"><div class="msg">저장된 작업이 없습니다.</div></div>
+            </div>
+          </aside>
+          <!-- 우: 선택한 작업 상세(타임라인) -->
+          <section class="agent-right">
+            <div id="agentStatus" class="agent-status" role="status">작업을 선택하거나 새로 시작하세요.</div>
+            <div id="agentSummary" class="agent-summary"></div>
+            <div class="agent-buttons">
+              <button class="btn btn-secondary" id="agentStop" type="button" disabled>중단</button>
+              <button class="btn btn-secondary" id="agentResume" type="button" disabled>재개</button>
+              <button class="btn btn-secondary" id="agentExport" type="button" disabled>기록 다운로드</button>
+            </div>
+            <div id="agentEvents" class="agent-events"></div>
+          </section>
+        </div>
+      </div><!-- /view:agent -->
 
     </div><!-- /view-area -->
   </div><!-- /main-content -->
