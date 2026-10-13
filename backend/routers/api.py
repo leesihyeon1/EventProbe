@@ -629,6 +629,11 @@ def egress_policy():
         "strict": ai_egress.is_strict(),
         "policy_version": ai_egress.POLICY_VERSION,
         "audit": ai_egress.audit_log(limit=50),
+        "oob": {                                   # AI 외 반출 경로(OOB 콜백) 상태(리뷰 F5)
+            "enabled": oob.enabled(),
+            "public_server": oob.is_public_server(),
+            "minting_allowed": oob.minting_allowed(),
+        },
     }
 
 
@@ -907,14 +912,23 @@ async def send_request(req: SingleRequest):
         oob_host, oob_warning = "", ""
         if oob.enabled() and oob.has_marker(_eff_url, req.body or "",
                                             " ".join(str(v) for v in sent_headers.values())):
-            oob_warning = oob.leak_warning(_eff_url)   # 내부 타깃 + 공개 서버면 유출 경고
-            oob_host = await oob.mint({"url": _eff_url, "payload": req.payload or "",
-                                       "method": req.method})
-            if oob_host:
-                _eff_url = oob.substitute(_eff_url, oob_host)
+            if not oob.minting_allowed():
+                # strict + 공개 OOB 서버: 콜백을 외부로 내보내지 않는다(리뷰 F5). 마커를 제거해
+                # {{oob}} 리터럴이 대상으로 나가지 않게 하고, 블라인드 검사는 미검증으로 안내한다.
+                oob_warning = oob.minting_block_reason()
+                _eff_url = oob.substitute(_eff_url, "")
                 if req.body:
-                    req.body = oob.substitute(req.body, oob_host)
-                sent_headers = {k: oob.substitute(str(v), oob_host) for k, v in sent_headers.items()}
+                    req.body = oob.substitute(req.body, "")
+                sent_headers = {k: oob.substitute(str(v), "") for k, v in sent_headers.items()}
+            else:
+                oob_warning = oob.leak_warning(_eff_url)   # 내부 타깃 + 공개 서버면 유출 경고
+                oob_host = await oob.mint({"url": _eff_url, "payload": req.payload or "",
+                                           "method": req.method})
+                if oob_host:
+                    _eff_url = oob.substitute(_eff_url, oob_host)
+                    if req.body:
+                        req.body = oob.substitute(req.body, oob_host)
+                    sent_headers = {k: oob.substitute(str(v), oob_host) for k, v in sent_headers.items()}
         async with httpx.AsyncClient(verify=False, follow_redirects=req.follow_redirects) as client:
             # 상태/CSRF 토큰 폼(body) 또는 CSRF 헤더(SPA)면 같은 클라이언트로 먼저 GET 해
             # 최신 토큰을 body·헤더에 갱신(세션 쿠키 공유, 프록시 세션 핸들링처럼).

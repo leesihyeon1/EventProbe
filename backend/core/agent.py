@@ -556,6 +556,8 @@ class AgentManager:
                     if not action.category or not action.payload:
                         raise ValueError('공격 유형과 테스트 입력이 필요합니다.')
                     if '{{oob}}' in action.payload:
+                        if not oob.minting_allowed():   # strict + 공개 OOB 서버 → 미검증(리뷰 F5)
+                            raise ValueError(oob.minting_block_reason())
                         with fail_after(max(.01, deadline - time.monotonic())):
                             marker = await oob.mint({'run_id': run_id, 'step_id': step_id, 'actor_id': action.actor_id})
                         if not marker:

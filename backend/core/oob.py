@@ -225,7 +225,7 @@ def _get() -> _Interactsh:
 
 
 async def mint(context: Optional[dict] = None) -> Optional[str]:
-    if not enabled():
+    if not enabled() or not minting_allowed():   # strict+공개 서버면 발급 안 함(리뷰 F5)
         return None
     return await _get().mint(context)
 
@@ -275,6 +275,21 @@ def leak_warning(url: str) -> str:
     if is_public_server() and target_is_internal(url):
         return ("내부/사내 대상인데 OOB 서버가 공개(제3자)입니다 — 콜백과 페이로드가 나르는 "
                 "내부 데이터가 외부로 유출됩니다. self-host(사내) interactsh 로 바꾸세요.")
+    return ""
+
+
+def minting_allowed() -> bool:
+    """콜백 발급 허용 여부. strict 반출 모드에서는 공개(제3자) OOB 수집기로의 발급을 금지한다
+    (리뷰 F5: 사내 수집기만 허용, 없으면 블라인드 검사를 미검증 처리). self-host(사내) 서버는 허용."""
+    from core import ai_egress
+    return not (ai_egress.is_strict() and is_public_server())
+
+
+def minting_block_reason() -> str:
+    """strict 로 OOB 발급이 막힌 이유(미검증 처리 안내). 허용되면 ''."""
+    if not minting_allowed():
+        return ("엄격 반출 모드: 공개(제3자) OOB 수집기로 콜백을 보내지 않습니다 — 이 블라인드 검사는 "
+                "미검증입니다. 사내 self-host interactsh(OOB_SERVER)로 바꾸면 수행됩니다.")
     return ""
 
 

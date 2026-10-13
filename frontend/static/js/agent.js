@@ -110,9 +110,13 @@ async function loadEgressPolicy() {
   const strict = !!agentPolicy.strict;
   if (banner) {
     banner.className = 'egress-banner ' + (strict ? 'egress-strict' : 'egress-permissive');
-    banner.textContent = strict
+    let text = strict
       ? '🔒 반출 모드: STRICT — 서버가 외부 AI 전송을 제한합니다(응답 유래 근거·외부 임베딩 차단, 비식별 요청 구조만 전송).'
       : '🌐 반출 모드: PERMISSIVE — 외부 AI 전송이 허용됩니다(요청 구조·판정 근거가 전송될 수 있음). 서버 .env 의 AI_EXPORT_MODE=strict 로 강화.';
+    const o = agentPolicy.oob;   // AI 외 반출 경로(OOB 콜백) 상태(리뷰 F5)
+    if (o && o.enabled && !o.minting_allowed) text += ' · OOB: 공개 수집기 차단(블라인드 검사 미검증).';
+    else if (o && o.enabled && o.public_server) text += ' · OOB: 공개 수집기 사용 중(콜백이 제3자로 나감).';
+    banner.textContent = text;
   }
   const share = agentEl('agentShare'), note = agentEl('agentShareNote');
   if (share) {
