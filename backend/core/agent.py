@@ -311,6 +311,22 @@ class AgentManager:
                 self.store.update(run_id, run['data'], 'paused')
         return self.snapshot(run_id)
 
+    async def delete(self, run_id):
+        """실행 중이면 중단한 뒤 run 과 증거를 영구 삭제하고 메모리 상태도 비운다(리뷰 F6).
+        KeyError 면 존재하지 않는 run."""
+        self.store.get(run_id)                 # 없으면 KeyError → 404
+        task = self.tasks.get(run_id)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self.store.delete(run_id)
+        for d in (self.tasks, self.specs, self.cookies, self.session_ids, self.form_tokens):
+            d.pop(run_id, None)
+        return {'deleted': True, 'id': run_id}
+
     async def shutdown(self):
         for run_id in list(self.tasks):
             await self.stop(run_id)

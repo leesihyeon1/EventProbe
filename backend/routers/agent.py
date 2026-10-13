@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -14,7 +16,11 @@ class ResumeRequest(BaseModel):
 
 @router.on_event('startup')
 async def recover_runs():
-    get_manager().store.recover()
+    store = get_manager().store
+    store.recover()
+    # 보존 정책(리뷰 F6): AGENT_RETENTION_DAYS 가 설정돼 있으면 기간 초과 run/증거를 정리.
+    # 기본 0(무제한 보관) — 기존 동작 유지. 자동 삭제는 명시적으로 켠다.
+    store.prune(os.getenv('AGENT_RETENTION_DAYS', '0'))
 
 
 @router.on_event('shutdown')
@@ -48,6 +54,15 @@ def get_run(run_id: str):
 async def stop_run(run_id: str):
     try:
         return await get_manager().stop(run_id)
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+
+
+@router.delete('/runs/{run_id}')
+async def delete_run(run_id: str):
+    """run 과 증거를 영구 삭제(보존/삭제 정책, 리뷰 F6)."""
+    try:
+        return await get_manager().delete(run_id)
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 

@@ -145,18 +145,23 @@ async function loadAgentList() {
     }
     list.replaceChildren();
     for (const run of data.runs) {
-      const row = document.createElement('button');
-      row.type = 'button';
+      const row = document.createElement('div');
       row.className = 'agent-row' + (run.id === agentRunId ? ' active' : '');
       row.dataset.run = run.id;
+      const main = document.createElement('button');
+      main.type = 'button'; main.className = 'agent-row-main';
       const st = document.createElement('span');
       st.className = 'agent-row-state state-' + run.state;
       st.textContent = AGENT_STATE_LABELS[run.state] || run.state;
       const goal = document.createElement('span');
       goal.className = 'agent-row-goal';
       goal.textContent = run.goal || '(목표 없음)';
-      row.append(st, goal);
-      row.onclick = () => selectRun(run.id);
+      main.append(st, goal);
+      main.onclick = () => selectRun(run.id);
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'agent-row-del'; del.textContent = '🗑'; del.title = '작업·증거 삭제';
+      del.onclick = (e) => { e.stopPropagation(); deleteRun(run.id); };
+      row.append(main, del);
       list.append(row);
     }
   } catch (e) { list.textContent = e.message; }
@@ -169,6 +174,22 @@ function selectRun(id) {
   const ev = agentEl('agentEvents');
   if (ev) { ev.replaceChildren(); ev.dataset.run = ''; }
   pollAgent();
+}
+
+async function deleteRun(id) {
+  if (!confirm('이 검증 작업과 저장된 증거를 영구 삭제할까요? 되돌릴 수 없습니다.')) return;
+  try {
+    await _asJson(await fetch('/api/agent/runs/' + id, { method: 'DELETE' }), '에이전트');
+    if (agentRunId === id) {   // 선택 중이던 작업이면 상세 패널 비우기
+      agentRunId = null; clearTimeout(agentTimer);
+      agentEl('agentEvents').replaceChildren();
+      agentEl('agentStatus').textContent = '작업을 선택하거나 새로 시작하세요.';
+      agentEl('agentSummary').textContent = ''; agentEl('agentResults').textContent = '';
+      agentEl('agentStop').disabled = agentEl('agentResume').disabled = agentEl('agentExport').disabled = true;
+      try { history.replaceState(null, '', '#agent'); } catch (e) {}
+    }
+    loadAgentList();
+  } catch (e) { agentEl('agentStatus').textContent = e.message; }
 }
 
 async function startAgent() {

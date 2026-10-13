@@ -73,6 +73,31 @@ class Store:
         return [{'id': r['id'], 'state': r['state'], 'created': r['created'],
                  'goal': json.loads(r['data'])['spec']['goal']} for r in rows]
 
+    def delete(self, run_id):
+        """run 과 그 증거(events)를 영구 삭제. 삭제됐으면 True(없으면 False)."""
+        with self.connect() as db:
+            db.execute('DELETE FROM events WHERE run_id=?', (run_id,))
+            cur = db.execute('DELETE FROM runs WHERE id=?', (run_id,))
+        return cur.rowcount > 0
+
+    def prune(self, max_age_days):
+        """보존 기간(일) 초과 run(+증거) 정리. max_age_days<=0 이면 아무것도 안 함. 삭제 수 반환.
+        로컬에 증거를 무한 보관하지 않게 하는 보존 정책(리뷰 F6)."""
+        try:
+            days = float(max_age_days or 0)
+        except (TypeError, ValueError):
+            return 0
+        if days <= 0:
+            return 0
+        cutoff = time.time() - days * 86400
+        with self.connect() as db:
+            ids = [r['id'] for r in db.execute('SELECT id FROM runs WHERE updated < ?', (cutoff,)).fetchall()]
+            if ids:
+                marks = ','.join('?' * len(ids))
+                db.execute(f'DELETE FROM events WHERE run_id IN ({marks})', ids)
+                db.execute(f'DELETE FROM runs WHERE id IN ({marks})', ids)
+        return len(ids)
+
     def event(self, run_id, kind, data, step_id='', event_id=None):
         event_id = event_id or uid()
         with self.connect() as db:
