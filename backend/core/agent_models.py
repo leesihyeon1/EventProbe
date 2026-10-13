@@ -52,6 +52,9 @@ class RunSpec(Contract):
     timeout: int = Field(default=15, ge=1, le=60)
     allow_write_methods: bool = False
     share_response_context: bool = False
+    # 'iterative'(기본): 매 단계 planner 호출(응답 되먹임). 'plan': 응답-블라인드 — 비식별 입력으로
+    # 계획을 1회 생성하고 실행 중 분기는 로컬에서 처리(리뷰 Stage 3).
+    mode: Literal['iterative', 'plan'] = 'iterative'
 
     @model_validator(mode='after')
     def check_scope(self):

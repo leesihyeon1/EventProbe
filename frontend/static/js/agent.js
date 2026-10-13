@@ -208,6 +208,7 @@ async function startAgent() {
       max_steps: Number(agentEl('agentSteps').value), max_requests: Number(agentEl('agentRequests').value),
       max_ai_calls: Number(agentEl('agentAiCalls').value), max_seconds: Number(agentEl('agentSeconds').value),
       allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
+      mode: agentEl('agentPlanMode').checked ? 'plan' : 'iterative',
     });
     agentEl('agentNew').open = false;
     await loadAgentList();

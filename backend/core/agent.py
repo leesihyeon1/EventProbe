@@ -402,6 +402,63 @@ class AgentManager:
         for run_id in list(self.tasks):
             await self.stop(run_id)
 
+    async def _exec_plan_step(self, run_id, spec, data, fetch, action, step_id):
+        """계획 한 단계를 실제로 실행하고 로컬 판정(StepResult)을 돌려준다(응답은 외부로 안 나감).
+        반복 루프와 같은 fetch/inject/probe_verdict 를 재사용한다. probe·observe·finish 지원."""
+        if action.kind == 'finish' or action.endpoint_id not in data['endpoints']:
+            return plan_mod.StepResult(verdict='inconclusive')
+        req = data['endpoints'][action.endpoint_id]
+        baseline = await fetch(req, action.actor_id)
+        for found in discover(req, baseline['response']):
+            eid = request_key(found)[:16]
+            if len(data['endpoints']) < 40 and request_key(found) != request_key(data['endpoints']['seed']):
+                data['endpoints'].setdefault(eid, found)
+        status0 = baseline['response']['status']
+        if action.kind == 'observe' or not action.category or not action.payload:
+            return plan_mod.StepResult(verdict='observed', status_code=status0)
+        attacked = inject(req, action)
+        observations = [baseline,
+                        await fetch(attacked, action.actor_id, action.payload, action.category, baseline),
+                        await fetch(attacked, action.actor_id, action.payload, action.category, baseline)]
+        verdict = probe_verdict(action.category, observations)
+        self.store.event(run_id, 'verification', verdict, step_id)
+        signals = [f.get('name') for f in ((observations[1].get('analysis') or {}).get('findings') or [])]
+        return plan_mod.StepResult(verdict=verdict.get('status', 'inconclusive'),
+                                   status_code=observations[1]['response']['status'],
+                                   signals=[s for s in signals if s])
+
+    async def _plan_loop(self, run_id, spec, data, fetch, budget):
+        """응답-블라인드 실행(리뷰 Stage 3): 계획을 1회 생성하고 로컬 분기로 순회한다.
+        다음 action 선택은 core.plan.select_next(로컬)만 쓴다 — 응답/판정을 모델로 되돌리지 않는다."""
+        plan = await generate_plan(spec)
+        self.store.event(run_id, 'plan', plan.model_dump())
+        steps, current, visited = plan.by_id(), plan.entry, set()
+        rank, best, best_rank, state = {'confirmed': 3, 'suspicious': 2}, 'inconclusive', 0, 'completed'
+        for _ in range(plan.max_hops):
+            budget()
+            if current == plan_mod.STOP:
+                break
+            if data['steps'] >= spec.max_steps:   # HTTP 요청 예산은 fetch 가 별도 강제
+                state, data['reason'] = 'limited', '단계 한도에 도달했습니다.'
+                break
+            data['steps'] += 1
+            step, step_id = steps[current], uid()
+            self.store.event(run_id, 'action', step.action.model_dump(), step_id)
+            result = await self._exec_plan_step(run_id, spec, data, fetch, step.action, step_id)
+            if rank.get(result.verdict, 0) > best_rank:
+                best_rank, best = rank[result.verdict], result.verdict
+            nxt = plan_mod.select_next(step, result)
+            self.store.event(run_id, 'plan_branch',
+                             {'action_id': current, 'verdict': result.verdict, 'next': nxt or '(stop)'}, step_id)
+            visited.add(current)
+            if nxt == plan_mod.STOP or nxt in visited:
+                break
+            current = nxt
+        if not data.get('reason'):
+            data['reason'] = f'계획 실행 완료 — 최종 판정: {best}'
+        self.store.event(run_id, 'plan_result', {'outcome': best}, '')
+        return state
+
     async def _run(self, run_id):
         spec = self.specs[run_id]
         data = self.store.get(run_id)['data']
@@ -537,7 +594,12 @@ class AgentManager:
                            ('host', 'content-length', 'transfer-encoding', 'connection', 'cookie', 'keep-alive', 'proxy-connection')}
                 clients[actor.id] = httpx.AsyncClient(verify=False, follow_redirects=False, headers=headers,
                     cookies=saved_cookies, transport=self.transport, timeout=spec.timeout)
-            while data['steps'] < spec.max_steps:
+            # 응답-블라인드 계획 모드(리뷰 Stage 3): 계획을 1회 생성하고 로컬 분기로 실행한다.
+            # 반복 루프와 같은 fetch/inject/probe_verdict 를 재사용하되 제어만 다르다.
+            plan_mode = getattr(spec, 'mode', 'iterative') == 'plan'
+            if plan_mode:
+                state = await self._plan_loop(run_id, spec, data, fetch, budget)
+            while not plan_mode and data['steps'] < spec.max_steps:
                 budget()
                 if data['requests'] >= spec.max_requests:
                     raise LimitReached('HTTP 요청 한도에 도달했습니다.')
@@ -657,7 +719,8 @@ class AgentManager:
                     verdict = probe_verdict(action.category, observations)
                 self.store.event(run_id, 'verification', verdict, step_id)
             else:
-                state, data['reason'] = 'limited', '단계 한도에 도달했습니다.'
+                if not plan_mode:
+                    state, data['reason'] = 'limited', '단계 한도에 도달했습니다.'
         except LimitReached as exc:
             state, data['reason'] = 'limited', str(exc)
         except asyncio.CancelledError:

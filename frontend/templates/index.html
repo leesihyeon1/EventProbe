@@ -397,6 +397,8 @@
                 <label class="agent-check"><input id="agentWrite" type="checkbox"> POST·PUT·PATCH·DELETE 허용</label>
                 <label class="agent-check"><input id="agentShare" type="checkbox"> 응답 발췌를 AI 제공자에 전달</label>
                 <p class="agent-help" id="agentShareNote">기본 AI 입력은 경로·필드명·판정 라벨입니다. 발췌를 켜면 응답 데이터 일부도 전달됩니다. 요청·응답 증거는 이 PC에 저장됩니다.</p>
+                <label class="agent-check"><input id="agentPlanMode" type="checkbox"> 응답-블라인드 계획 모드(실험적)</label>
+                <p class="agent-help">켜면 비식별 입력으로 계획을 1회 생성하고 실행 중 분기를 로컬에서 처리합니다(응답을 모델에 보내지 않음). 끄면 기존 반복 방식입니다.</p>
                 <details id="agentPolicyDetails">
                   <summary>계정과 객체 접근 정책</summary>
                   <div class="agent-subhead"><span>계정</span>
