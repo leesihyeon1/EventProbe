@@ -8,6 +8,69 @@ async function agentApi(path, data) {
   return _asJson(await fetch('/api/agent' + path, options), '에이전트');
 }
 
+/* ── 계정/객체 정책 폼 — 자유 JSON 입력 대신 구조화 입력(리뷰). DOM 은 createElement 로만
+   만들어 값이 항상 텍스트로 들어가게 한다(마크업 주입 방지). ── */
+function _mkInput(cls, ph, val) {
+  const i = document.createElement('input'); i.type = 'text'; i.className = cls; i.placeholder = ph; i.value = val || ''; return i;
+}
+function _hdrsToText(h) { return Object.entries(h || {}).map(([k, v]) => `${k}: ${v}`).join('\n'); }
+function _textToHdrs(t) {
+  const out = {};
+  for (const line of (t || '').split('\n')) {
+    const i = line.indexOf(':'); if (i < 0) continue;
+    const k = line.slice(0, i).trim(); if (k) out[k] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+function _delBtn(row) {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'agent-del'; b.textContent = '✕'; b.title = '삭제';
+  b.onclick = () => row.remove(); return b;
+}
+function addActorRow(a = {}) {
+  const row = document.createElement('div'); row.className = 'actor-row agent-row-form';
+  const top = document.createElement('div'); top.className = 'agent-row-grid';
+  top.append(_mkInput('actor-id', 'id (예: current)', a.id), _mkInput('actor-label', '라벨(선택)', a.label), _delBtn(row));
+  const hdr = document.createElement('textarea');
+  hdr.className = 'actor-headers'; hdr.rows = 2; hdr.placeholder = 'Cookie: sid=...\nAuthorization: Bearer ...'; hdr.value = _hdrsToText(a.headers);
+  row.append(top, hdr);
+  agentEl('agentActorsForm').append(row);
+}
+function addObjectRow(o = {}) {
+  const row = document.createElement('div'); row.className = 'object-row agent-row-form';
+  const g1 = document.createElement('div'); g1.className = 'agent-row-grid';
+  g1.append(_mkInput('obj-id', 'id', o.id), _mkInput('obj-url', '객체 URL(같은 출처)', o.url), _delBtn(row));
+  const g2 = document.createElement('div'); g2.className = 'agent-row-grid3';
+  g2.append(_mkInput('obj-owner', '소유 계정 id', o.owner_actor),
+            _mkInput('obj-allowed', '허용 계정(쉼표)', (o.allowed_actors || []).join(',')),
+            _mkInput('obj-ptr', '식별 포인터 /id', o.identity_pointer));
+  const g3 = document.createElement('div'); g3.className = 'agent-row-grid';
+  g3.append(_mkInput('obj-val', '식별 값(예: 42)', o.identity_value), _mkInput('obj-desc', '설명', o.description));
+  row.append(g1, g2, g3);
+  agentEl('agentObjectsForm').append(row);
+}
+function collectActors() {
+  const actors = [];
+  for (const r of document.querySelectorAll('#agentActorsForm .actor-row')) {
+    const id = r.querySelector('.actor-id').value.trim();
+    if (!id) continue;
+    actors.push({ id, label: r.querySelector('.actor-label').value.trim(), headers: _textToHdrs(r.querySelector('.actor-headers').value) });
+  }
+  return actors.length ? actors : [{ id: 'current', label: '현재 계정', headers: {} }];
+}
+function collectObjects() {
+  const objs = [];
+  for (const r of document.querySelectorAll('#agentObjectsForm .object-row')) {
+    const id = r.querySelector('.obj-id').value.trim();
+    const url = r.querySelector('.obj-url').value.trim();
+    if (!id || !url) continue;      // id·url 없는 부분 입력은 건너뜀
+    objs.push({ id, url, owner_actor: r.querySelector('.obj-owner').value.trim(),
+      allowed_actors: r.querySelector('.obj-allowed').value.split(',').map(s => s.trim()).filter(Boolean),
+      identity_pointer: r.querySelector('.obj-ptr').value.trim(),
+      identity_value: r.querySelector('.obj-val').value.trim(), description: r.querySelector('.obj-desc').value.trim() });
+  }
+  return objs;
+}
+
 function initAgentView() {
   if (agentInited) return;
   agentInited = true;
@@ -16,6 +79,9 @@ function initAgentView() {
   agentEl('agentResume').onclick = () => agentControl('resume');
   agentEl('agentRefresh').onclick = () => { loadEgressPolicy(); loadAgentList(); };
   agentEl('agentExport').onclick = exportAgent;
+  agentEl('agentAddActor').onclick = () => addActorRow();
+  agentEl('agentAddObject').onclick = () => addObjectRow();
+  addActorRow({ id: 'current', label: '현재 계정', headers: {} });   // 기본 계정 1행
 }
 
 // 자율 검증 탭으로 전환할 때(switchView 훅) 호출된다.
@@ -113,7 +179,7 @@ async function startAgent() {
     const run = await agentApi('/runs', {
       goal: agentEl('agentGoal').value,
       request: { method: form.method, url: form.url, params: form.params, body: form.body || '', headers },
-      actors: JSON.parse(agentEl('agentActors').value), objects: JSON.parse(agentEl('agentObjects').value),
+      actors: collectActors(), objects: collectObjects(),
       max_steps: Number(agentEl('agentSteps').value), max_requests: Number(agentEl('agentRequests').value),
       max_ai_calls: Number(agentEl('agentAiCalls').value), max_seconds: Number(agentEl('agentSeconds').value),
       allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
@@ -130,7 +196,7 @@ async function agentControl(action) {
   try {
     const data = action === 'resume' ? {
       request_headers: getHeadersObj(),
-      actor_headers: Object.fromEntries(JSON.parse(agentEl('agentActors').value).map(a => [a.id, a.headers || {}])),
+      actor_headers: Object.fromEntries(collectActors().map(a => [a.id, a.headers || {}])),
     } : {};
     await agentApi(`/runs/${agentRunId}/${action}`, data);
     await pollAgent();
@@ -145,6 +211,15 @@ function renderAgent(run) {
   agentEl('agentResume').disabled = !['paused', 'interrupted'].includes(run.state);
   agentEl('agentExport').disabled = false;
   agentEl('agentSummary').textContent = `단계 ${run.data.steps}/${run.data.spec.max_steps} · HTTP ${run.data.requests}/${run.data.spec.max_requests} · AI ${run.data.ai_calls}/${run.data.spec.max_ai_calls} · ${Math.round(run.data.elapsed)}초 · 발견 경로 ${Object.keys(run.data.endpoints).length}개`;
+  // 검증 결과 요약 — confirmed/suspicious/inconclusive 집계(리뷰 '검증 결과' 화면).
+  const vc = { confirmed: 0, suspicious: 0, inconclusive: 0 };
+  for (const e of run.events) if (e.kind === 'verification' && e.data.status in vc) vc[e.data.status]++;
+  const rb = agentEl('agentResults');
+  if (rb) {
+    const total = vc.confirmed + vc.suspicious + vc.inconclusive;
+    rb.textContent = total ? `검증 결과 — 확증 ${vc.confirmed} · 의심 ${vc.suspicious} · 미확정 ${vc.inconclusive}` : '';
+    rb.className = 'agent-results-sum' + (vc.confirmed ? ' has-confirmed' : vc.suspicious ? ' has-suspicious' : '');
+  }
   const container = agentEl('agentEvents');
   // 추가 전용 렌더 — 폴링 중 열어둔 응답이 접히지 않게 한다.
   if (container.dataset.run !== run.id) { container.replaceChildren(); container.dataset.run = run.id; }

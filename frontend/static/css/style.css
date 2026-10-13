@@ -1890,3 +1890,29 @@ mark.search-hit.current { background: #f0a500; color: #1a1a1a; }
   .agent-left { width: auto; flex: 0 0 auto; max-height: 45%; border-right: none; border-bottom: 1px solid var(--border); }
   .agent-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* 계정/객체 정책 폼 + 검증 결과 요약 */
+.agent-subhead { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.agent-add {
+  font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-tertiary); color: var(--text-secondary); cursor: pointer; font-family: inherit;
+}
+.agent-add:hover { background: var(--bg-hover); color: var(--text-primary); }
+.agent-rows { display: flex; flex-direction: column; gap: 6px; }
+.agent-row-form { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; background: var(--bg-primary); display: flex; flex-direction: column; gap: 5px; }
+.agent-row-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 5px; align-items: center; }
+.agent-row-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+.agent-row-form input, .agent-row-form textarea {
+  width: 100%; box-sizing: border-box; font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 6px;
+}
+.agent-del {
+  flex: 0 0 auto; width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-tertiary); color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.agent-del:hover { color: #dc2626; border-color: #dc2626; }
+.agent-results-sum { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.agent-results-sum:empty { display: none; }
+.agent-results-sum.has-confirmed { color: #dc2626; }
+.agent-results-sum.has-suspicious { color: #d97706; }
