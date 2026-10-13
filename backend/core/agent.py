@@ -202,6 +202,24 @@ def _purpose_code(goal: str) -> str:
     return 'general-verification'
 
 
+def _safe_verified(v: dict) -> dict:
+    """verified_results 에서 응답 유래 원문을 제거하고 안전 라벨만 남긴다(리뷰 F1).
+
+    확증 엔진의 rounds[].techniques[].evidence·observations 에는 명령 출력·파일 내용·Location
+    같은 실제 응답 값이 들어간다. 이들을 planner 로 되돌리지 않도록 status 와 확증 기법의
+    '이름(카테고리/범위 라벨)'만 남기고 evidence·rounds·observations·자유 설명은 버린다."""
+    out = {"status": v.get("status")}
+    confirmed = []
+    for c in (v.get("confirmed") or []):
+        if isinstance(c, dict):
+            label = {k: c.get(k) for k in ("kind", "scope", "repeat_count") if c.get(k) is not None}
+            if label:
+                confirmed.append(label)
+    if confirmed:
+        out["confirmed"] = confirmed
+    return out
+
+
 def _strict_context(ctx: dict) -> dict:
     """planner 입력에서 외부로 내보내면 안 되는 식별·원문 필드를 제거한다(원본은 사내 store 유지)."""
     ctx = dict(ctx)
@@ -219,6 +237,8 @@ def _strict_context(ctx: dict) -> dict:
         o['path'] = public_shape.template_path(o.get('path', ''))
         obs.append(o)
     ctx['observations'] = obs
+    # 확증/검증 결과의 응답 유래 원문(evidence 등) 제거 — 안전 라벨만(리뷰 F1)
+    ctx['verified_results'] = [_safe_verified(v) for v in ctx.get('verified_results', [])]
     return ctx
 
 

@@ -49,6 +49,20 @@ def test_purpose_code(goal, code):
     assert _purpose_code(goal) == code
 
 
+def test_strict_context_strips_verified_results_evidence():
+    # 확증 결과의 응답 유래 evidence(명령 출력 등)가 planner 입력으로 새지 않는다(리뷰 F1).
+    ctx = {'goal': 'x', 'verified_results': [
+        {'status': 'confirmed',
+         'rounds': [{'techniques': [{'name': 'cmd', 'evidence': '응답에 SECRET-OUT 등장'}]}],
+         'confirmed': [{'kind': 'cmdi', 'scope': '명령 주입', 'repeat_count': 2}]}]}
+    out = _strict_context(ctx)
+    blob = json.dumps(out, ensure_ascii=False)
+    assert 'SECRET-OUT' not in blob and 'rounds' not in blob
+    vr = out['verified_results'][0]
+    assert vr['status'] == 'confirmed'
+    assert vr['confirmed'][0]['scope'] == '명령 주입'   # 안전 라벨은 유지
+
+
 def test_strict_context_unit_drops_sensitive_fields():
     ctx = {
         'goal': 'SQL 인젝션으로 인증 우회',
