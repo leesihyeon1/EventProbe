@@ -52,10 +52,22 @@ def test_empty_body_shapeable():
     assert shape.body_kind == "none" and shape.shapeable is True
 
 
-def test_attack_tokens_extracted_but_business_values_not():
+def test_attack_signals_are_codes_not_raw_values():
     shape = ps.build(url="/s", params={"q": "' UNION SELECT 1,2--", "name": "Alice Kim"})
-    assert any("UNION SELECT" in t for t in shape.attack_tokens)   # 공격 신호는 유지
-    assert all("Alice Kim" not in t for t in shape.attack_tokens)  # 업무 값은 토큰 아님
+    assert "sql-keyword" in shape.attack_signals and "sqli-quote" in shape.attack_signals
+    # 공격 유형 코드만 — 원문 값(공격 payload·업무 값 모두)은 그대로 복사되지 않는다(리뷰 F2)
+    blob = " ".join(shape.attack_signals)
+    assert "UNION SELECT" not in blob and "Alice Kim" not in blob
+
+
+def test_nested_json_values_and_domains_not_exported():
+    import json as _json
+    shape = ps.build(method="POST", url="/p", body=_json.dumps(
+        {"profile": {"password": "REVIEW_PRIVATE_VALUE", "host": "payroll.corp.test"}}))
+    dumped = _json.dumps(shape.to_dict(), ensure_ascii=False)
+    assert "REVIEW_PRIVATE_VALUE" not in dumped and "payroll.corp.test" not in dumped
+    # 중첩 리프 이름은 구조로 남는다
+    assert any("profile.password" == f.name for f in shape.body_fields)
 
 
 def test_header_allowlist_and_content_type_normalization():
@@ -131,7 +143,8 @@ def test_classify_strict_keeps_attack_signal_drops_secrets(monkeypatch):
         "body": "", "headers": {"Cookie": "sess=TOPSECRET123", "User-Agent": "UA"}}))
     assert res.get("primary") == "sqli"
     sent = json.dumps(captured["payload"], ensure_ascii=False)
-    assert "UNION SELECT" in sent              # 공격 신호는 분류를 위해 유지
+    assert "sql-keyword" in sent               # 공격 유형 코드로 분류 신호 유지
+    assert "UNION SELECT" not in sent          # 원문 값은 반출되지 않음
     assert "TOPSECRET123" not in sent          # 쿠키 값은 반출되지 않음
 
 

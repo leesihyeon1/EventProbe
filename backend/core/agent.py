@@ -275,9 +275,21 @@ def _plan_context(spec) -> dict:
     }
 
 
+def _register_target_canaries(spec):
+    """실행 대상 식별자를 반출 금지 카나리로 등록한다(리뷰 F2 — 패턴 검사 외 백스톱).
+    비식별 구조가 이미 host·값을 제거하므로 정상 경로에선 걸리지 않고, 새어 나가면 차단된다."""
+    try:
+        host = urlsplit(spec.request.url).hostname or ""
+    except Exception:
+        host = ""
+    if host:
+        ai_egress.register_canary(host)
+
+
 async def generate_plan(spec, planner=None):
     """비식별 입력으로 조건부 계획을 1회 생성하고 스키마·범위를 검증한다(리뷰 Stage 3).
     planner(ctx)->dict 를 주입하면 외부 호출 없이 테스트할 수 있다. 검증 실패 시 ValueError."""
+    _register_target_canaries(spec)
     ctx = _plan_context(spec)
     raw = await (planner or _default_plan_planner)(ctx)
     try:
@@ -461,6 +473,7 @@ class AgentManager:
 
     async def _run(self, run_id):
         spec = self.specs[run_id]
+        _register_target_canaries(spec)   # 대상 호스트를 반출 금지 백스톱으로 등록(리뷰 F2)
         data = self.store.get(run_id)['data']
         started = time.monotonic()
         prior_elapsed = data['elapsed']

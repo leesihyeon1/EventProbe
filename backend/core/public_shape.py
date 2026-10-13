@@ -48,15 +48,27 @@ _INT = re.compile(r"^-?\d+$")
 _FLOAT = re.compile(r"^-?\d+\.\d+$")
 _EMAIL = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
-# 값에서 '공격 신호'를 식별하는 시그니처(이 토큰만 분류/후보 생성에 넘긴다).
-_ATTACK_SIG = re.compile(
-    r"""['"<>;|&$`()\\]|\bUNION\b|\bSELECT\b|\bINSERT\b|\bOR\b\s+\d|\bAND\b\s+\d|--|/\*|"""
-    r"""\balert\(|\bon\w+\s*=|<script|javascript:|%[0-9a-fA-F]{2}|\$\{|\{\{|\.\./|\.\.\\|"""
-    r"""/etc/|/proc/|\bexec\b|\bsleep\(|\bwaitfor\b|\bbenchmark\(|\|\||&&""", re.I)
+# 값에서 '공격 신호'를 열거 코드로만 뽑는다(리뷰 F2). 실제 값·도메인·중첩 비밀값을 통째로
+# 복사하지 않는다 — 코드만 외부로 나가고 원문은 사내에 남는다. 분류·후보 생성엔 유형 코드로 충분.
+_SIGNAL_RULES = (
+    ("sqli-quote",         re.compile(r"['\"`]")),
+    ("sql-keyword",        re.compile(r"(?i)\bunion\b\s+\bselect\b|\bselect\b.+\bfrom\b|"
+                                      r"\b(?:or|and)\b\s+['\d]|['\"]\s*(?:or|and)\s*['\"]?\d|"
+                                      r"\b(?:insert|update|delete|drop)\b\s+\w")),
+    ("sql-comment",        re.compile(r"--|/\*|#$")),
+    ("sql-timing",         re.compile(r"(?i)\b(?:sleep|benchmark|pg_sleep|waitfor\s+delay)\s*\(")),
+    ("xss-tag",            re.compile(r"(?i)<\s*script|javascript:|\bon\w+\s*=")),
+    ("angle-bracket",      re.compile(r"[<>]")),
+    ("template-injection", re.compile(r"\$\{|\{\{|<%|#\{")),
+    ("path-traversal",     re.compile(r"\.\./|\.\.\\|%2e%2e", re.I)),
+    ("sensitive-path",     re.compile(r"(?i)/etc/|/proc/|wp-config|\.git/|\.env\b")),
+    ("cmd-metachar",       re.compile(r"[;`]|\|\||&&|\$\(")),
+    ("url-encoded",        re.compile(r"%[0-9a-fA-F]{2}")),
+    ("nosql-operator",     re.compile(r"\$(?:ne|gt|lt|where|regex|in)\b")),
+)
 
 _MAX_FIELDS = 40
-_MAX_TOKENS = 20
-_TOKEN_LEN = 200
+_MAX_SIGNALS = 12
 
 
 @dataclass
@@ -77,7 +89,7 @@ class PublicRequestShape:
     body_fields: list = field(default_factory=list)     # [FieldShape]
     header_names: list = field(default_factory=list)     # 허용된 이름만
     content_type: str = ""                               # 정규화된 표준 MIME 또는 ""
-    attack_tokens: list = field(default_factory=list)    # 값 중 공격 신호 부분
+    attack_signals: list = field(default_factory=list)   # 공격 유형 코드만(원문 값 아님)
     dropped: list = field(default_factory=list)          # 제외/정규화된 항목(투명성)
     shapeable: bool = True                               # False → strict 에서 전송 거부
 
@@ -90,7 +102,7 @@ class PublicRequestShape:
             "body_fields": [f.as_tuple() for f in self.body_fields],
             "header_names": self.header_names,
             "content_type": self.content_type,
-            "attack_tokens": self.attack_tokens,
+            "attack_signals": self.attack_signals,
             "shapeable": self.shapeable,
         }
 
@@ -101,13 +113,13 @@ class PublicRequestShape:
         return {f.name: f.type for f in self.query_fields}
 
     def prompt_body(self) -> str:
-        """프롬프트용 바디 요약 — 구조(필드:타입) + 공격 신호 토큰(값은 제외)."""
+        """프롬프트용 바디 요약 — 구조(필드:타입) + 공격 유형 코드(원문 값 제외)."""
         parts = []
         if self.body_kind != "none":
             flds = ", ".join(f"{f.name}:{f.type}" for f in self.body_fields) or "(opaque)"
             parts.append(f"[{self.body_kind}] fields={{{flds}}}")
-        if self.attack_tokens:
-            parts.append("signals=" + json.dumps(self.attack_tokens, ensure_ascii=False)[:300])
+        if self.attack_signals:
+            parts.append("signals=" + json.dumps(self.attack_signals, ensure_ascii=False)[:200])
         return "; ".join(parts) or "(none)"
 
 
@@ -157,18 +169,41 @@ def template_path(path: str) -> str:
     return _path_template(path)
 
 
-def _collect_attack_tokens(values) -> list:
-    out, seen = [], set()
+def _attack_signals(values) -> list:
+    """값들에서 '공격 유형 코드'만 뽑는다(원문 미복사). 예: ["sqli-quote","sql-keyword"]."""
+    out: list = []
     for v in values:
         s = str(v)
-        if s and _ATTACK_SIG.search(s):
-            tok = s[:_TOKEN_LEN]
-            if tok not in seen:
-                seen.add(tok)
-                out.append(tok)
-        if len(out) >= _MAX_TOKENS:
+        if not s:
+            continue
+        for code, rx in _SIGNAL_RULES:
+            if code not in out and rx.search(s):
+                out.append(code)
+        if len(out) >= _MAX_SIGNALS:
             break
-    return out
+    return out[:_MAX_SIGNALS]
+
+
+def _flatten(obj, prefix: str = ""):
+    """중첩 dict/list 를 (리프 이름, 리프 값) 쌍으로 평탄화한다. 이름은 구조 경로(값 아님)."""
+    pairs = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            name = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, (dict, list)):
+                pairs += _flatten(v, name)
+            else:
+                pairs.append((name, v))
+    elif isinstance(obj, list):
+        name = f"{prefix}[]" if prefix else "[]"
+        for v in obj[:_MAX_FIELDS]:
+            if isinstance(v, (dict, list)):
+                pairs += _flatten(v, name)
+            else:
+                pairs.append((name, v))
+    else:
+        pairs.append((prefix or "value", obj))
+    return pairs
 
 
 def _shape_fields(pairs) -> list:
@@ -189,14 +224,12 @@ def _parse_body(body: str):
     raw = (body or "").strip()
     if not raw:
         return "none", [], True, []
-    # JSON
+    # JSON — 중첩 dict/list 를 리프까지 평탄화한다(값 통째 복사 방지, 리뷰 F2).
     try:
         data = json.loads(raw)
-        if isinstance(data, dict):
-            pairs = [(k, v) for k, v in data.items()]
+        if isinstance(data, (dict, list)):
+            pairs = _flatten(data)[:_MAX_FIELDS]
             return "json", pairs, True, [v for _, v in pairs]
-        if isinstance(data, list):
-            return "json", [("[]", "array")], True, [json.dumps(data)]
     except (ValueError, TypeError):
         pass
     # XML
@@ -255,7 +288,7 @@ def build(method: str = "GET", url: str = "", params=None, body: str = "",
     header_names, dropped = _shape_headers(headers)
     content_type = _norm_content_type(headers)
 
-    attack_tokens = _collect_attack_tokens(
+    attack_signals = _attack_signals(
         [v for _, v in query_pairs] + body_values + [str(path)])
 
     dropped_extra = []
@@ -274,7 +307,7 @@ def build(method: str = "GET", url: str = "", params=None, body: str = "",
         body_fields=body_fields,
         header_names=header_names,
         content_type=content_type,
-        attack_tokens=attack_tokens,
+        attack_signals=attack_signals,
         dropped=dropped + dropped_extra,
         shapeable=body_ok,
     )
