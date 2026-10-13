@@ -25,6 +25,8 @@ def test_empty_headers():
 
 @pytest.mark.parametrize("mode", ["classify", "analyze", "verdict"])
 def test_ai_transport_excludes_target_credentials(monkeypatch, mode):
+    # 전송 자격증명 제거(permissive 기준 동작)를 검증한다. strict 의 비식별 구조화는 test_public_shape 에서 별도 검증.
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")
     secrets = {name.swapcase(): f"private-value-{i}" for i, name in enumerate(sorted(SENSITIVE_HEADERS))}
     target_headers = {**secrets, "User-Agent": "probe-agent", "X-Test-Probe": "probe-marker"}
     original = copy.deepcopy(target_headers)

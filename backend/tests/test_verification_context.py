@@ -39,6 +39,7 @@ def test_untrusted_history_is_prompt_context_not_outcome(monkeypatch):
         seen.update(ctx)
         return {"outcome": ctx["outcome"]}
 
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")   # 외부 종합판정 프롬프트 경로(strict 는 로컬 템플릿)
     monkeypatch.setattr(api, "ai_verdict_enabled", lambda: True)
     monkeypatch.setattr(api, "ai_verdict", fake_verdict)
     monkeypatch.setattr(api, "_retrieve_related", _empty_retrieval)

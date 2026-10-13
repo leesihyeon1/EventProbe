@@ -9,6 +9,13 @@ import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
+# 반출 모드는 fail-closed(미설정·오타 → strict). 잘못된 AI_EXPORT_MODE 값은 시작 시 경고로
+# 드러낸다(리뷰 F3). 안전 측(strict)으로 적용되므로 서버를 중단시키지는 않는다.
+from core import ai_egress as _ai_egress
+_egress_cfg_error = _ai_egress.config_error()
+if _egress_cfg_error:
+    print("\n" + "=" * 70 + f"\n⚠️  반출 설정 경고: {_egress_cfg_error}\n" + "=" * 70 + "\n")
+
 app = FastAPI(title="SecAPITester", version="1.0.0")
 
 

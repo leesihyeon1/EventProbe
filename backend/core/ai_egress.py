@@ -31,10 +31,25 @@ log = logging.getLogger("eventprobe.egress")
 POLICY_VERSION = "1"
 
 # ── 모드 ──────────────────────────────────────────────────────────────────────
+# 명시적으로 permissive 로 볼 값(개발용). 그 외 — 미설정·오타·알 수 없는 값 — 은 모두 strict.
+_PERMISSIVE_VALUES = frozenset({"permissive", "0", "false", "no", "off"})
+_STRICT_VALUES = frozenset({"strict", "1", "true", "yes", "on"})
+
+
 def export_mode() -> str:
-    """현재 반출 모드. AI_EXPORT_MODE 가 strict/1/true/on 이면 'strict', 아니면 'permissive'."""
+    """현재 반출 모드. 기본은 fail-closed(strict): 미설정·오타·알 수 없는 값은 strict 로 본다(리뷰 F3).
+    외부 반출을 허용하려면 AI_EXPORT_MODE=permissive 를 '명시적으로' 설정해야 한다(개발용)."""
     raw = (os.getenv("AI_EXPORT_MODE", "") or "").strip().lower()
-    return "strict" if raw in ("strict", "1", "true", "yes", "on") else "permissive"
+    return "permissive" if raw in _PERMISSIVE_VALUES else "strict"
+
+
+def config_error() -> str:
+    """AI_EXPORT_MODE 가 설정됐지만 알 수 없는 값이면 사유 문자열(시작 시 거부용). 정상이면 ''."""
+    raw = (os.getenv("AI_EXPORT_MODE", "") or "").strip().lower()
+    if raw and raw not in _PERMISSIVE_VALUES and raw not in _STRICT_VALUES:
+        return (f"AI_EXPORT_MODE='{raw}' 는 알 수 없는 값입니다. "
+                f"strict(기본) 또는 permissive 로 설정하세요. (현재 fail-closed 로 strict 적용)")
+    return ""
 
 
 def is_strict() -> bool:

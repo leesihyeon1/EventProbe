@@ -32,10 +32,22 @@ INT = "http://localhost:11434/v1"
 
 
 # ── 모드 ──────────────────────────────────────────────────────────────────────
-def test_default_mode_is_permissive(monkeypatch):
+def test_default_mode_is_strict_fail_closed(monkeypatch):
     monkeypatch.delenv("AI_EXPORT_MODE", raising=False)
+    assert ai_egress.export_mode() == "strict"      # 미설정 → fail-closed(리뷰 F3)
+    assert ai_egress.is_strict()
+
+
+def test_explicit_permissive(monkeypatch):
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")
     assert ai_egress.export_mode() == "permissive"
     assert not ai_egress.is_strict()
+
+
+def test_unknown_value_fails_closed_and_reports(monkeypatch):
+    monkeypatch.setenv("AI_EXPORT_MODE", "stricct")   # 오타
+    assert ai_egress.is_strict()                      # fail-closed
+    assert "알 수 없는 값" in ai_egress.config_error()
 
 
 @pytest.mark.parametrize("val", ["strict", "1", "true", "on", "YES"])

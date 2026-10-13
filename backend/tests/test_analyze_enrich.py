@@ -20,6 +20,13 @@ from routers import api as api_mod
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _permissive_mode(monkeypatch):
+    # 이 모듈은 permissive 반출 모드의 AI·RAG enrich 동작을 검증한다
+    # (strict 에서는 종합판정이 로컬 템플릿으로 가고 응답분석이 꺼진다 — 리뷰 F1/F3).
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")
+
+
 def test_reclassification_preserves_context_before_enrichment(monkeypatch):
     events = []
     context = {}
