@@ -93,3 +93,68 @@ def test_plan_mode_does_not_use_iterative_planner(tmp_path, monkeypatch):
     run = asyncio.run(execute())
     assert calls['n'] == 0
     assert run['state'] == 'completed'
+
+
+# ── F4·F5·F6 영구 회귀 (계약 검사의 상설판) ──────────────────────────────────────
+def _single_step(tmp_path, kind):
+    """_exec_plan_step 한 번을 모의 fetch 로 실행하고 (호출기록, 결과) 반환."""
+    calls = []
+    spec = RunSpec(goal="review", request={"url": "https://app.test/?id=1"},
+                   actors=[{"id": "owner"}, {"id": "reader"}], objects=[{
+                       "id": "object1", "url": "https://app.test/objects/1",
+                       "owner_actor": "owner", "identity_pointer": "/id",
+                       "identity_value": "1", "description": "ownership"}], mode="plan")
+    manager = AgentManager(Store(tmp_path / "s.db"))
+    data = {"endpoints": {"seed": spec.request.model_dump()}}
+
+    async def fetch(req, actor, *args):
+        calls.append((req["url"], actor))
+        return {"id": str(len(calls)), "response": {"status": 200, "headers": {"content-type": "application/json"},
+                "body": '{"id":1}', "truncated": False}, "analysis": {"findings": []}}
+
+    action = Action(kind=kind, hypothesis="review", actor_id="reader",
+                    category="sqli" if kind == "confirm" else "",
+                    param="id", object_id="object1" if kind == "access" else "")
+    result = asyncio.run(manager._exec_plan_step("x", spec, data, fetch, action, "step"))
+    return calls, result
+
+
+def test_plan_confirm_runs_differential_probes(tmp_path):
+    calls, _ = _single_step(tmp_path, "confirm")
+    assert len(calls) > 1          # baseline 만이 아니라 차등 확증 프로브 실행(리뷰 F4)
+
+
+def test_plan_access_checks_owner_and_unauthorized(tmp_path):
+    calls, _ = _single_step(tmp_path, "access")
+    assert calls == [("https://app.test/objects/1", a) for a in ("owner", "reader", "reader")]
+
+
+def _observe_plan_run(tmp_path, monkeypatch, max_ai_calls):
+    generated = []
+
+    async def gen(spec):
+        generated.append(True)
+        return plan_mod.Plan(entry="observe", steps=[plan_mod.PlanStep(
+            action_id="observe", action=Action(kind="observe", hypothesis="r"))])
+    monkeypatch.setattr(agent_mod, "generate_plan", gen)
+
+    async def run():
+        m = AgentManager(Store(tmp_path / "r.db"),
+                         transport=httpx.MockTransport(lambda req: httpx.Response(200, text="ok")))
+        spec = RunSpec(goal="r", request={"url": "https://app.test/"}, mode="plan", max_ai_calls=max_ai_calls)
+        rid = m.create(spec)
+        await m.tasks[rid]
+        return m.snapshot(rid)
+    return asyncio.run(run()), generated
+
+
+def test_plan_zero_ai_budget_skips_generation(tmp_path, monkeypatch):
+    run, generated = _observe_plan_run(tmp_path, monkeypatch, 0)
+    assert not generated and run["data"]["ai_calls"] == 0      # 예산 0 → 계획 생성 안 함(리뷰 F5)
+
+
+def test_plan_observation_linked_to_action_step(tmp_path, monkeypatch):
+    run, _ = _observe_plan_run(tmp_path, monkeypatch, 1)
+    action_steps = {e["step_id"] for e in run["events"] if e["kind"] == "action"}
+    observations = [e for e in run["events"] if e["kind"] == "observation"]
+    assert observations and all(e["step_id"] in action_steps for e in observations)   # 증거 연결(리뷰 F6)

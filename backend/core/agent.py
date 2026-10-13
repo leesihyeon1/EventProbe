@@ -436,22 +436,75 @@ class AgentManager:
 
     async def _exec_plan_step(self, run_id, spec, data, fetch, action, step_id):
         """계획 한 단계를 실제로 실행하고 로컬 판정(StepResult)을 돌려준다(응답은 외부로 안 나감).
-        반복 루프와 같은 fetch/inject/probe_verdict 를 재사용한다. probe·observe·finish 지원."""
-        if action.kind == 'finish' or action.endpoint_id not in data['endpoints']:
+        반복 루프와 같은 fetch/inject/probe_verdict/confirm/access_verdict 를 재사용한다
+        — observe·probe·confirm·access·finish 를 모두 실제로 실행한다(리뷰 F4). 증거는 step_id 로 연결(F6)."""
+        if action.kind == 'finish':
+            return plan_mod.StepResult(verdict='inconclusive')
+
+        # access: 소유 계정 1회 + 비인가 계정 2회로 같은 객체를 조회해 접근 차이를 판정한다.
+        if action.kind == 'access':
+            policy = {o.id: o.model_dump() for o in spec.objects}.get(action.object_id)
+            if not policy or action.actor_id in [policy['owner_actor'], *policy['allowed_actors']]:
+                return plan_mod.StepResult(verdict='inconclusive')
+            req = {'url': policy['url'], 'method': 'GET', 'params': {}, 'headers': {}, 'body': ''}
+            observations = [await fetch(req, policy['owner_actor'], '', '', None, step_id),
+                            await fetch(req, action.actor_id, '', '', None, step_id),
+                            await fetch(req, action.actor_id, '', '', None, step_id)]
+            verdict = access_verdict(policy, action.actor_id, observations)
+            self.store.event(run_id, 'verification', verdict, step_id)
+            return plan_mod.StepResult(verdict=verdict.get('status', 'inconclusive'),
+                                       status_code=observations[-1]['response']['status'])
+
+        if action.endpoint_id not in data['endpoints']:
             return plan_mod.StepResult(verdict='inconclusive')
         req = data['endpoints'][action.endpoint_id]
-        baseline = await fetch(req, action.actor_id)
+        baseline = await fetch(req, action.actor_id, '', '', None, step_id)
         for found in discover(req, baseline['response']):
             eid = request_key(found)[:16]
             if len(data['endpoints']) < 40 and request_key(found) != request_key(data['endpoints']['seed']):
                 data['endpoints'].setdefault(eid, found)
         status0 = baseline['response']['status']
-        if action.kind == 'observe' or not action.category or not action.payload:
+        if action.kind == 'observe':
+            return plan_mod.StepResult(verdict='observed', status_code=status0)
+
+        # confirm: 차등 확증 프로브를 두 회차 돌려 재현된 기법만 확증한다(반복 모드와 동일).
+        if action.kind == 'confirm':
+            cplan = confirm.probe_plan(action.category, '')
+            if not cplan:
+                return plan_mod.StepResult(verdict='inconclusive', status_code=status0)
+            rounds, evidence = [], [baseline]
+            for _ in range(2):
+                observations, oracle = [], []
+                for probe in cplan:
+                    pa = action.model_copy(update={'payload': probe['value']})
+                    obs = await fetch(inject(req, pa), action.actor_id, pa.payload, action.category, baseline, step_id)
+                    observations.append(obs)
+                    r = obs['response']
+                    oracle.append({'role': probe['role'], 'status': r.get('status'), 'body': r.get('body', ''),
+                                   'headers': r.get('headers', {}), 'time_ms': r.get('time_ms', 0), 'value': pa.payload})
+                decision = confirm.decide(action.category, oracle)
+                if any(o['response']['truncated'] or o['response']['status'] in (401, 403, 429, 503)
+                       or (o['analysis'].get('validity') or {}).get('warnings') for o in observations):
+                    decision['techniques'] = []
+                rounds.append(decision)
+                evidence += observations
+            common = {t['name'] for t in rounds[0]['techniques']} & {t['name'] for t in rounds[1]['techniques']}
+            common = {name for name in common if 'DB 에러 유발' not in name}
+            verdict = {'status': 'confirmed' if common else 'inconclusive',
+                       'confirmed': [{'kind': action.category, 'scope': name, 'repeat_count': 2} for name in sorted(common)],
+                       'evidence_ids': [o['id'] for o in evidence], 'rounds': rounds,
+                       'limitations': ['확증한 입력·동작만 해당하며 접근 가능한 데이터·권한 범위는 미확인입니다.']}
+            self.store.event(run_id, 'verification', verdict, step_id)
+            return plan_mod.StepResult(verdict=verdict['status'],
+                                       status_code=observations[-1]['response']['status'])
+
+        # probe(기본): baseline + 동일 주입 2회 → 차등 판정.
+        if not action.category or not action.payload:
             return plan_mod.StepResult(verdict='observed', status_code=status0)
         attacked = inject(req, action)
         observations = [baseline,
-                        await fetch(attacked, action.actor_id, action.payload, action.category, baseline),
-                        await fetch(attacked, action.actor_id, action.payload, action.category, baseline)]
+                        await fetch(attacked, action.actor_id, action.payload, action.category, baseline, step_id),
+                        await fetch(attacked, action.actor_id, action.payload, action.category, baseline, step_id)]
         verdict = probe_verdict(action.category, observations)
         self.store.event(run_id, 'verification', verdict, step_id)
         signals = [f.get('name') for f in ((observations[1].get('analysis') or {}).get('findings') or [])]
@@ -459,10 +512,17 @@ class AgentManager:
                                    status_code=observations[1]['response']['status'],
                                    signals=[s for s in signals if s])
 
-    async def _plan_loop(self, run_id, spec, data, fetch, budget):
+    async def _plan_loop(self, run_id, spec, data, fetch, budget, deadline):
         """응답-블라인드 실행(리뷰 Stage 3): 계획을 1회 생성하고 로컬 분기로 순회한다.
         다음 action 선택은 core.plan.select_next(로컬)만 쓴다 — 응답/판정을 모델로 되돌리지 않는다."""
-        plan = await generate_plan(spec)
+        # 계획 생성도 AI 호출이다 — 예산을 호출 전에 예약·저장하고 남은 시간으로 제한한다(리뷰 F5).
+        if data['ai_calls'] >= spec.max_ai_calls:
+            data['reason'] = 'AI 호출 한도에 도달했습니다.'
+            return 'limited'
+        data['ai_calls'] += 1
+        self.store.update(run_id, data, 'running')
+        with fail_after(max(.01, deadline - time.monotonic())):
+            plan = await generate_plan(spec)
         self.store.event(run_id, 'plan', plan.model_dump())
         steps, current, visited = plan.by_id(), plan.entry, set()
         rank, best, best_rank, state = {'confirmed': 3, 'suspicious': 2}, 'inconclusive', 0, 'completed'
@@ -508,8 +568,10 @@ class AgentManager:
             if time.monotonic() >= deadline:
                 raise LimitReached('실행 시간 한도에 도달했습니다.')
 
-        async def fetch(req, actor, payload='', category='', baseline=None):
+        async def fetch(req, actor, payload='', category='', baseline=None, step=None):
             budget()
+            # step 이 주어지면(계획 모드) 그 단계 ID로 증거를 연결한다. 아니면 반복 루프의 step_id(리뷰 F6).
+            sid = step if step is not None else step_id
             if origin(req['url']) != origin(spec.request.url):
                 raise ValueError('허용 출처를 벗어난 요청입니다.')
             if req['method'] not in ('GET', 'HEAD') and not spec.allow_write_methods:
@@ -523,7 +585,7 @@ class AgentManager:
             save()  # Reserve before I/O, including failures/cancellation.
             request_id = self.store.event(run_id, 'request_started', {
                 'actor_id': actor, 'session_id': self.session_ids[run_id][actor],
-                'request': {**req, 'headers': sanitize_headers(req.get('headers'))}}, step_id)
+                'request': {**req, 'headers': sanitize_headers(req.get('headers'))}}, sid)
             tick = time.monotonic()
             status, headers, chunks, size, truncated = 0, {}, [], 0, False
             try:
@@ -562,13 +624,13 @@ class AgentManager:
                           'request': {**req, 'headers': sanitize_headers(req.get('headers'))},
                           'response': {'status': status, 'headers': sanitize_headers(headers), 'body': body,
                                        'time_ms': round(elapsed), 'truncated': truncated}, 'analysis': analysis}
-                self.store.event(run_id, 'observation', result, step_id, result['id'])
+                self.store.event(run_id, 'observation', result, sid, result['id'])
                 return result
             except asyncio.CancelledError:
-                self.store.event(run_id, 'request_error', {'request_id': request_id, 'reason': '중단됨; 서버 처리 여부 미확인'}, step_id)
+                self.store.event(run_id, 'request_error', {'request_id': request_id, 'reason': '중단됨; 서버 처리 여부 미확인'}, sid)
                 raise
             except Exception as exc:
-                self.store.event(run_id, 'request_error', {'request_id': request_id, 'reason': type(exc).__name__}, step_id)
+                self.store.event(run_id, 'request_error', {'request_id': request_id, 'reason': type(exc).__name__}, sid)
                 raise ValueError('요청 실패: ' + type(exc).__name__) from exc
 
         def context():
@@ -631,7 +693,7 @@ class AgentManager:
             # 반복 루프와 같은 fetch/inject/probe_verdict 를 재사용하되 제어만 다르다.
             plan_mode = getattr(spec, 'mode', 'iterative') == 'plan'
             if plan_mode:
-                state = await self._plan_loop(run_id, spec, data, fetch, budget)
+                state = await self._plan_loop(run_id, spec, data, fetch, budget, deadline)
             while not plan_mode and data['steps'] < spec.max_steps:
                 budget()
                 if data['requests'] >= spec.max_requests:
