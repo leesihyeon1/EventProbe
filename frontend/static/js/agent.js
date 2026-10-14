@@ -3,8 +3,9 @@
 let agentRunId = null, agentTimer = null, agentBusy = false, agentInited = false, agentPolicy = null;
 const agentEl = id => document.getElementById(id);
 
-async function agentApi(path, data) {
-  const options = data === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) };
+async function agentApi(path, data, method) {
+  const options = method ? { method, headers:{'Content-Type':'application/json'}, body: data === undefined ? undefined : JSON.stringify(data) }
+    : data === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) };
   return _asJson(await fetch('/api/agent' + path, options), '에이전트');
 }
 

@@ -1,0 +1,21 @@
+/* Findings view. Reuses the sitemap layout classes (sm-layout/sm-content/sm-detail/…). */
+.fd-toolbar .aw-link { margin-left:auto; }
+.fd-toolbar .aw-link[disabled] { opacity:.5; pointer-events:none; }
+.fd-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; width:100%; min-height:42px; padding:9px 8px; margin-bottom:2px; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--text-primary); text-align:left; cursor:pointer; }
+.fd-row:hover { background:var(--bg-secondary); }
+.fd-row[aria-pressed="true"] { border-color:var(--border-light); background:var(--bg-tertiary); }
+.fd-category { font-size:12px; font-weight:600; flex:0 0 auto; }
+.fd-verdict { font-size:11px; color:var(--text-secondary); }
+.fd-status { font-size:11px; color:var(--text-muted); margin-left:auto; }
+.sev-badge { display:inline-block; font-size:10px; font-weight:600; padding:1px 8px; border-radius:999px; background:var(--bg-tertiary); color:var(--text-secondary); white-space:nowrap; }
+.sev-badge[data-sev="critical"] { background:color-mix(in srgb, var(--danger) 18%, transparent); color:var(--danger); }
+.sev-badge[data-sev="high"] { background:color-mix(in srgb, var(--danger) 12%, transparent); color:var(--danger); }
+.sev-badge[data-sev="medium"] { background:color-mix(in srgb, var(--warning) 16%, transparent); color:var(--warning); }
+.sev-badge[data-sev="low"] { background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); }
+.sev-badge[data-sev="info"] { background:var(--bg-tertiary); color:var(--text-muted); }
+.fd-controls { display:flex; flex-wrap:wrap; gap:12px; margin:14px 0 4px; }
+.fd-field { display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--text-muted); }
+.fd-field select { min-height:34px; border:1px solid var(--border); border-radius:6px; padding:5px 8px; background:var(--bg-primary); color:var(--text-primary); font-size:12px; }
+.fd-note { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+.fd-note textarea { width:100%; min-height:62px; resize:vertical; border:1px solid var(--border); border-radius:6px; padding:8px; background:var(--bg-primary); color:var(--text-primary); font:inherit; font-size:12px; }
+.fd-history { margin:0; padding-left:16px; font-size:11px; color:var(--text-muted); display:flex; flex-direction:column; gap:4px; }

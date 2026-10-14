@@ -39,6 +39,7 @@ function showAgentList() {
 function showAgentDetail() {
   _awRun=null;
   resetSiteMap();
+  resetFindings();
   agentEl('agentListView').hidden=true; agentEl('agentDetailView').hidden=false;
   agentEl('agentRunTitle').textContent='작업 불러오는 중';
   agentEl('agentConclusion').hidden=true;
@@ -55,7 +56,7 @@ function openAgentNew() {
   agentEl('agentFormError').hidden=true; agentEl('agentNew').showModal();
 }
 let agentDetailMode='timeline', _awRun=null;
-const DETAIL_VIEWS={timeline:['agentEvents','awTabTimeline'],graph:['agentGraph','awTabGraph'],sitemap:['agentSiteMap','awTabSiteMap']};
+const DETAIL_VIEWS={timeline:['agentEvents','awTabTimeline'],graph:['agentGraph','awTabGraph'],sitemap:['agentSiteMap','awTabSiteMap'],findings:['agentFindings','awTabFindings']};
 function syncDetailMode() {
   for(const [mode,[panel,tab]] of Object.entries(DETAIL_VIEWS)) {
     const selected=agentDetailMode===mode;
@@ -65,6 +66,7 @@ function syncDetailMode() {
   }
   if(_awRun && agentDetailMode==='graph') renderAgentGraph(_awRun);
   if(_awRun && agentDetailMode==='sitemap') renderAgentSiteMap(_awRun);
+  if(_awRun && agentDetailMode==='findings') renderAgentFindings(_awRun);
 }
 function setDetailMode(mode) {
   agentDetailMode = Object.hasOwn(DETAIL_VIEWS,mode) ? mode : 'timeline';
@@ -90,6 +92,7 @@ function initAgentWorkspace() {
     };
   });
   initSiteMap();
+  initFindings();
   agentEl('awGraphZoomIn').onclick=()=>_zoomGraph(1.2);
   agentEl('awGraphZoomOut').onclick=()=>_zoomGraph(0.83);
   agentEl('awGraphFit').onclick=()=>_fitGraph();

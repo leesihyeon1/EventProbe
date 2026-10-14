@@ -1,9 +1,11 @@
 import os
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from core.agent import get_manager, generate_plan
+from core.agent_findings import build_report_html
 from core.agent_models import RunSpec
 
 router = APIRouter(prefix='/api/agent', tags=['context-agent'])
@@ -12,6 +14,12 @@ router = APIRouter(prefix='/api/agent', tags=['context-agent'])
 class ResumeRequest(BaseModel):
     request_headers: dict[str, str] | None = None
     actor_headers: dict[str, dict[str, str]] | None = None
+
+
+class FindingPatch(BaseModel):
+    status: str | None = None
+    severity: str | None = None
+    note: str | None = None
 
 
 @router.on_event('startup')
@@ -74,6 +82,26 @@ async def delete_run(run_id: str):
     """run 과 증거를 영구 삭제(보존/삭제 정책, 리뷰 F6)."""
     try:
         return await get_manager().delete(run_id)
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+
+
+@router.patch('/runs/{run_id}/findings/{finding_id}')
+def update_finding(run_id: str, finding_id: str, patch: FindingPatch):
+    """발견의 상태/심각도/메모를 append-only 로 기록한다(원본 verification 불변)."""
+    try:
+        return get_manager().update_finding(run_id, finding_id, patch.model_dump(exclude_none=True))
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get('/runs/{run_id}/report', response_class=HTMLResponse)
+def run_report(run_id: str):
+    """로컬 생성 HTML 보고서. 외부 AI/대상 요청 없이 저장된 증거만으로 렌더링한다."""
+    try:
+        return HTMLResponse(build_report_html(get_manager().snapshot(run_id)))
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 

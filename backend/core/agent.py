@@ -19,6 +19,7 @@ from core.analyzer import analyze_response
 from core.agent_models import Action, RunSpec, origin
 from core.agent_store import get_store, uid
 from core.agent_outcome import build_conclusion
+from core.agent_findings import build_findings, valid_patch
 
 BODY_LIMIT = 64000
 INJECT_HEADERS = {'x-forwarded-for', 'x-original-url', 'x-rewrite-url', 'referer', 'x-forwarded-host'}
@@ -410,8 +411,22 @@ class AgentManager:
         run = self.store.get(run_id)
         run['events'] = self.store.events(run_id)
         run['conclusion'] = build_conclusion(run['data'], run['events'], run['state'])
+        run['findings'] = build_findings(run_id, run['data'], run['events'])
         run['requires_session'] = run_id not in self.specs and run['data']['needs_credentials']
         return run
+
+    def update_finding(self, run_id, finding_id, patch):
+        """Append-only triage: record a finding_update event; never touch originals.
+        KeyError if the run is gone; ValueError if the id or patch is invalid."""
+        run = self.store.get(run_id)
+        patch = valid_patch(patch or {})
+        if not patch:
+            raise ValueError('변경할 상태/심각도/메모가 없습니다.')
+        findings = build_findings(run_id, run['data'], self.store.events(run_id))
+        if not any(f['id'] == finding_id for f in findings):
+            raise ValueError('해당 발견을 찾을 수 없습니다.')
+        self.store.event(run_id, 'finding_update', {'finding_id': finding_id, **patch})
+        return self.snapshot(run_id)
 
     def start(self, run_id, request_headers=None, actor_headers=None):
         if run_id in self.tasks and not self.tasks[run_id].done():

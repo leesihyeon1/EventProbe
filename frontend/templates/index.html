@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/css/workspace.css">
   <link rel="stylesheet" href="/static/css/agent.css">
   <link rel="stylesheet" href="/static/css/sitemap.css">
+  <link rel="stylesheet" href="/static/css/findings.css">
 </head>
 <body data-view="agent">
 <aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
@@ -412,6 +413,7 @@
                 <button id="awTabTimeline" role="tab" aria-selected="true" aria-controls="agentEvents">타임라인</button>
                 <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
                 <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
+                <button id="awTabFindings" role="tab" aria-selected="false" aria-controls="agentFindings" tabindex="-1">발견</button>
               </div>
               <span class="aw-muted" id="agentEventCount"></span>
             </div>
@@ -445,6 +447,25 @@
               <div class="sm-layout">
                 <nav id="smContent" class="sm-content" aria-label="기록된 URL 경로"></nav>
                 <aside id="smDetail" class="sm-detail" aria-label="경로 상세"></aside>
+              </div>
+            </section>
+            <section id="agentFindings" role="tabpanel" aria-labelledby="awTabFindings" hidden>
+              <div class="sm-toolbar fd-toolbar">
+                <label class="aw-search"><span data-icon="Search"></span><input id="fdSearch" type="search" placeholder="발견 검색" aria-label="발견 검색"></label>
+                <select id="fdStatus" aria-label="상태 필터">
+                  <option value="">모든 상태</option><option value="open">미처리</option><option value="triaged">분류됨</option>
+                  <option value="resolved">해결</option><option value="false_positive">오탐</option><option value="ignored">무시</option>
+                </select>
+                <select id="fdSeverity" aria-label="심각도 필터">
+                  <option value="">모든 심각도</option><option value="critical">심각</option><option value="high">높음</option>
+                  <option value="medium">보통</option><option value="low">낮음</option><option value="info">정보</option>
+                </select>
+                <button id="fdReport" class="aw-link" type="button"><span data-icon="FileChartColumn"></span>보고서 열기</button>
+              </div>
+              <p id="fdCount" class="aw-muted sm-count" role="status"></p>
+              <div class="sm-layout">
+                <nav id="fdContent" class="sm-content" aria-label="발견 목록"></nav>
+                <aside id="fdDetail" class="sm-detail" aria-label="발견 상세"></aside>
               </div>
             </section>
           </section>
@@ -925,6 +946,7 @@
 <script src="/static/js/agent.js"></script>
 <script src="/static/js/agent_graph.js"></script>
 <script src="/static/js/agent_sitemap.js"></script>
+<script src="/static/js/agent_findings.js"></script>
 <script src="/static/js/workspace.js"></script>
 </body>
 </html>
