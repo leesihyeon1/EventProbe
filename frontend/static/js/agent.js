@@ -11,7 +11,7 @@ async function agentApi(path, data) {
 /* ── 계정/객체 정책 폼 — 자유 JSON 입력 대신 구조화 입력(리뷰). DOM 은 createElement 로만
    만들어 값이 항상 텍스트로 들어가게 한다(마크업 주입 방지). ── */
 function _mkInput(cls, ph, val) {
-  const i = document.createElement('input'); i.type = 'text'; i.className = cls; i.placeholder = ph; i.value = val || ''; return i;
+  const i = document.createElement('input'); i.type = 'text'; i.className = cls; i.placeholder = ph; i.setAttribute('aria-label', ph); i.value = val || ''; return i;
 }
 function _hdrsToText(h) { return Object.entries(h || {}).map(([k, v]) => `${k}: ${v}`).join('\n'); }
 function _textToHdrs(t) {
@@ -23,7 +23,7 @@ function _textToHdrs(t) {
   return out;
 }
 function _delBtn(row) {
-  const b = document.createElement('button'); b.type = 'button'; b.className = 'agent-del'; b.textContent = '✕'; b.title = '삭제';
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'icon-button'; b.append(epIcon('X')); b.title = '행 삭제'; b.setAttribute('aria-label', '행 삭제');
   b.onclick = () => row.remove(); return b;
 }
 function addActorRow(a = {}) {
@@ -32,6 +32,7 @@ function addActorRow(a = {}) {
   top.append(_mkInput('actor-id', 'id (예: current)', a.id), _mkInput('actor-label', '라벨(선택)', a.label), _delBtn(row));
   const hdr = document.createElement('textarea');
   hdr.className = 'actor-headers'; hdr.rows = 2; hdr.placeholder = 'Cookie: sid=...\nAuthorization: Bearer ...'; hdr.value = _hdrsToText(a.headers);
+  hdr.setAttribute('aria-label', '계정 인증 헤더');
   row.append(top, hdr);
   agentEl('agentActorsForm').append(row);
 }
@@ -62,7 +63,8 @@ function collectObjects() {
   for (const r of document.querySelectorAll('#agentObjectsForm .object-row')) {
     const id = r.querySelector('.obj-id').value.trim();
     const url = r.querySelector('.obj-url').value.trim();
-    if (!id || !url) continue;      // id·url 없는 부분 입력은 건너뜀
+    if (!id && !url && ![...r.querySelectorAll('input')].some(i => i.value.trim())) continue;
+    if (!id || !url) throw new Error('객체 정책의 ID와 URL을 모두 입력하세요.');
     objs.push({ id, url, owner_actor: r.querySelector('.obj-owner').value.trim(),
       allowed_actors: r.querySelector('.obj-allowed').value.split(',').map(s => s.trim()).filter(Boolean),
       identity_pointer: r.querySelector('.obj-ptr').value.trim(),
@@ -81,6 +83,7 @@ function initAgentView() {
   agentEl('agentExport').onclick = exportAgent;
   agentEl('agentAddActor').onclick = () => addActorRow();
   agentEl('agentAddObject').onclick = () => addObjectRow();
+  initAgentWorkspace();
   addActorRow({ id: 'current', label: '현재 계정', headers: {} });   // 기본 계정 1행
 }
 
@@ -104,28 +107,33 @@ async function loadEgressPolicy() {
   try {
     agentPolicy = await _asJson(await fetch('/api/egress/policy'), '반출 정책');
   } catch (e) {
+    agentPolicy = null;
+    banner.dataset.mode = 'error';
+    agentEl('agentShare').checked = false;
+    agentEl('agentShare').disabled = true;
     if (banner) banner.textContent = '반출 정책을 불러오지 못했습니다: ' + e.message;
     return;
   }
   const strict = !!agentPolicy.strict;
   if (banner) {
-    banner.className = 'egress-banner ' + (strict ? 'egress-strict' : 'egress-permissive');
+    banner.dataset.mode = strict ? 'strict' : 'permissive';
     let text = strict
-      ? '🔒 반출 모드: STRICT — 서버가 외부 AI 전송을 제한합니다(응답 유래 근거·외부 임베딩 차단, 비식별 요청 구조만 전송).'
-      : '🌐 반출 모드: PERMISSIVE — 외부 AI 전송이 허용됩니다(요청 구조·판정 근거가 전송될 수 있음). 서버 .env 의 AI_EXPORT_MODE=strict 로 강화.';
+      ? 'STRICT · 외부 전송 제한 정책 적용 중'
+      : 'PERMISSIVE · 외부 AI 전송 허용 상태';
     const o = agentPolicy.oob;   // AI 외 반출 경로(OOB 콜백) 상태(리뷰 F5)
     if (o && o.enabled && !o.minting_allowed) text += ' · OOB: 공개 수집기 차단(블라인드 검사 미검증).';
     else if (o && o.enabled && o.public_server) text += ' · OOB: 공개 수집기 사용 중(콜백이 제3자로 나감).';
-    banner.textContent = text;
+    banner.replaceChildren(epIcon(strict ? 'LockKeyhole' : 'CircleAlert'), document.createTextNode(text));
+    banner.title = '현재 서버 설정입니다. STRICT 표시는 모든 내부 데이터의 비반출 보증을 의미하지 않습니다.';
   }
   const share = agentEl('agentShare'), note = agentEl('agentShareNote');
   if (share) {
     if (strict) {
       share.checked = false; share.disabled = true;
-      if (note) note.textContent = '서버 정책(STRICT): 응답 발췌 전송이 금지되어 이 옵션은 비활성화됩니다 — 클라이언트에서 완화할 수 없습니다.';
+      if (note) note.textContent = 'STRICT 정책으로 잠김';
     } else {
       share.disabled = false;
-      if (note) note.textContent = '기본 AI 입력은 경로·필드명·판정 라벨입니다. 발췌를 켜면 응답 데이터 일부도 전달됩니다. 요청·응답 증거는 이 PC에 저장됩니다.';
+      if (note) note.textContent = '활성화하면 내부 응답 일부가 외부 제공자에 전달됩니다.';
     }
   }
 }
@@ -139,38 +147,14 @@ async function loadAgentList() {
   if (!list) return;
   try {
     const data = await agentApi('/runs');
-    if (!data.runs.length) {
-      list.innerHTML = '<div class="empty-state" style="padding:16px"><div class="msg">저장된 작업이 없습니다.</div></div>';
-      return;
-    }
-    list.replaceChildren();
-    for (const run of data.runs) {
-      const row = document.createElement('div');
-      row.className = 'agent-row' + (run.id === agentRunId ? ' active' : '');
-      row.dataset.run = run.id;
-      const main = document.createElement('button');
-      main.type = 'button'; main.className = 'agent-row-main';
-      const st = document.createElement('span');
-      st.className = 'agent-row-state state-' + run.state;
-      st.textContent = AGENT_STATE_LABELS[run.state] || run.state;
-      const goal = document.createElement('span');
-      goal.className = 'agent-row-goal';
-      goal.textContent = run.goal || '(목표 없음)';
-      main.append(st, goal);
-      main.onclick = () => selectRun(run.id);
-      const del = document.createElement('button');
-      del.type = 'button'; del.className = 'agent-row-del'; del.textContent = '🗑'; del.title = '작업·증거 삭제';
-      del.onclick = (e) => { e.stopPropagation(); deleteRun(run.id); };
-      row.append(main, del);
-      list.append(row);
-    }
-  } catch (e) { list.textContent = e.message; }
+    renderAgentList(data.runs);
+  } catch (e) { renderAgentListError(e.message); }
 }
 
 function selectRun(id) {
   agentRunId = id;
+  showAgentDetail();
   try { history.replaceState(null, '', '#agent/' + id); } catch (e) {}
-  document.querySelectorAll('.agent-row').forEach(r => r.classList.toggle('active', r.dataset.run === id));
   const ev = agentEl('agentEvents');
   if (ev) { ev.replaceChildren(); ev.dataset.run = ''; }
   pollAgent();
@@ -187,6 +171,7 @@ async function deleteRun(id) {
       agentEl('agentSummary').textContent = ''; agentEl('agentResults').textContent = '';
       agentEl('agentStop').disabled = agentEl('agentResume').disabled = agentEl('agentExport').disabled = true;
       try { history.replaceState(null, '', '#agent'); } catch (e) {}
+      showAgentList();
     }
     loadAgentList();
   } catch (e) { agentEl('agentStatus').textContent = e.message; }
@@ -197,7 +182,10 @@ async function startAgent() {
   agentBusy = true;
   agentEl('agentStart').disabled = true;
   try {
+    const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.checkValidity());
+    if (invalid) { invalid.reportValidity(); return; }
     const form = _currentRequestForm();
+    if (!/^https?:\/\//i.test(form.url)) throw new Error('요청 편집에서 HTTP(S) 대상 URL을 입력하세요.');
     const headers = { ...(getUseDefaults() ? getDefaultHeaderProfile() : {}), ...getHeadersObj() };
     // strict 모드면 응답 공유를 요청하지 않는다(서버도 context 에서 발췌를 제거하지만 이중 방어).
     const share = agentEl('agentShare').checked && !(agentPolicy && agentPolicy.strict);
@@ -210,10 +198,10 @@ async function startAgent() {
       allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
       mode: agentEl('agentPlanMode').checked ? 'plan' : 'iterative',
     });
-    agentEl('agentNew').open = false;
+    agentEl('agentNew').close();
     await loadAgentList();
     selectRun(run.id);
-  } catch (e) { agentEl('agentStatus').textContent = e.message; }
+  } catch (e) { agentEl('agentFormError').hidden = false; agentEl('agentFormError').textContent = e.message; }
   finally { agentBusy = false; agentEl('agentStart').disabled = false; }
 }
 
@@ -230,41 +218,6 @@ async function agentControl(action) {
   } catch (e) { agentEl('agentStatus').textContent = e.message; }
 }
 
-function renderAgent(run) {
-  const labels = { running: '실행 중', paused: '일시정지', interrupted: '서버 재시작으로 중단됨', completed: '실행 종료', limited: '한도 도달' };
-  agentEl('agentStatus').textContent = `${labels[run.state] || run.state} — ${run.data.reason || run.data.spec.goal}`;
-  agentEl('agentStop').disabled = run.state !== 'running';
-  agentEl('agentResume').disabled = !['paused', 'interrupted'].includes(run.state);
-  agentEl('agentExport').disabled = false;
-  agentEl('agentSummary').textContent = `단계 ${run.data.steps}/${run.data.spec.max_steps} · HTTP ${run.data.requests}/${run.data.spec.max_requests} · AI ${run.data.ai_calls}/${run.data.spec.max_ai_calls} · ${Math.round(run.data.elapsed)}초 · 발견 경로 ${Object.keys(run.data.endpoints).length}개`;
-  // 검증 결과 요약 — confirmed/suspicious/inconclusive 집계(리뷰 '검증 결과' 화면).
-  const vc = { confirmed: 0, suspicious: 0, inconclusive: 0 };
-  for (const e of run.events) if (e.kind === 'verification' && e.data.status in vc) vc[e.data.status]++;
-  const rb = agentEl('agentResults');
-  if (rb) {
-    const total = vc.confirmed + vc.suspicious + vc.inconclusive;
-    rb.textContent = total ? `검증 결과 — 확증 ${vc.confirmed} · 의심 ${vc.suspicious} · 미확정 ${vc.inconclusive}` : '';
-    rb.className = 'agent-results-sum' + (vc.confirmed ? ' has-confirmed' : vc.suspicious ? ' has-suspicious' : '');
-  }
-  const container = agentEl('agentEvents');
-  // 추가 전용 렌더 — 폴링 중 열어둔 응답이 접히지 않게 한다.
-  if (container.dataset.run !== run.id) { container.replaceChildren(); container.dataset.run = run.id; }
-  const existing = new Set([...container.children].map(el => el.dataset.event));
-  for (const event of run.events) {
-    if (existing.has(event.id)) continue;
-    const card = document.createElement('details'); card.className = 'agent-event'; card.dataset.event = event.id;
-    const title = document.createElement('summary');
-    const d = event.data;
-    const text = event.kind === 'action' ? `${d.kind} — ${d.hypothesis}` :
-      event.kind === 'observation' ? `${d.actor_id} · HTTP ${d.response.status} · ${d.request.method} ${d.request.url}` :
-      event.kind === 'verification' ? `검증: ${d.status} · 증거 ${(d.evidence_ids || []).length}개` :
-      `${event.kind} — ${d.reason || d.message || d.protocol || ''}`;
-    title.textContent = text;
-    const pre = document.createElement('pre'); pre.textContent = JSON.stringify(d, null, 2);
-    card.append(title, pre); container.append(card);
-  }
-}
-
 function _agentViewActive() {
   const v = document.querySelector('.view[data-view="agent"]');
   return v && v.classList.contains('active');
@@ -277,7 +230,7 @@ async function pollAgent() {
   try {
     const run = await agentApi('/runs/' + id);
     if (id !== agentRunId) return;
-    renderAgent(run);
+    renderAgentWorkspace(run);
     if (run.state === 'running' || run.events.some(e => e.kind === 'oob_pending')) agentTimer = setTimeout(pollAgent, 2000);
     else loadAgentList();
   } catch (e) { agentEl('agentStatus').textContent = e.message; }
@@ -293,9 +246,3 @@ async function exportAgent() {
 }
 
 // URL 해시로 특정 작업에 바로 진입 가능(리뷰: UI 상태를 URL 로 접근).
-window.addEventListener('hashchange', () => {
-  if (/^#agent\/\w+/.test(location.hash) && !_agentViewActive()) switchView('agent');
-});
-window.addEventListener('DOMContentLoaded', () => {
-  if (/^#agent\/\w+/.test(location.hash)) switchView('agent');
-});

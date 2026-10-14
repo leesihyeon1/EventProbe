@@ -3,27 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SecAPITester — 보안 이벤트 검증 도구</title>
+  <title>EventProbe | 보안 검증 워크스페이스</title>
   <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/workspace.css">
+  <link rel="stylesheet" href="/static/css/agent.css">
 </head>
-<body>
+<body data-view="agent">
+<aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
+  <a class="workspace-brand" href="#agent"><span class="brand-mark" data-icon="ShieldCheck"></span><span>EventProbe</span></a>
+  <span class="nav-section-label">워크스페이스</span>
+  <nav class="workspace-links">
+    <button class="topbar-tab active" data-view="agent" onclick="switchView('agent')"><span data-icon="Crosshair"></span><span>자율 검증</span></button>
+    <button class="topbar-tab" data-view="request" onclick="switchView('request')"><span data-icon="SquareTerminal"></span><span>요청 / 분석</span></button>
+    <button class="topbar-tab" data-view="results" onclick="switchView('results')"><span data-icon="ListChecks"></span><span>일괄 테스트 결과</span></button>
+    <button class="topbar-tab" data-view="report" onclick="switchView('report')"><span data-icon="FileChartColumn"></span><span>검증 리포트</span></button>
+  </nav>
+  <div class="workspace-nav-footer"><span class="local-dot"></span><span>로컬 워크스페이스</span><span class="nav-version">v1.0</span></div>
+</aside>
 
 <!-- ══════════════════════════════════ TOPBAR ══════════════════════════════════ -->
 <div class="topbar">
-  <div class="topbar-logo">
-    <span>SecAPITester</span>
-  </div>
-
-  <div class="topbar-tabs">
-    <button class="topbar-tab active" data-view="request" onclick="switchView('request')">요청 / 분석</button>
-    <button class="topbar-tab" data-view="results" onclick="switchView('results')">일괄 테스트 결과</button>
-    <button class="topbar-tab" data-view="agent" onclick="switchView('agent')">자율 검증</button>
-    <button class="topbar-tab" data-view="report" onclick="switchView('report')">검증 리포트</button>
-  </div>
-
+  <button class="icon-button" id="navToggle" aria-label="주 메뉴 접기" aria-expanded="true" aria-controls="workspaceNav" title="주 메뉴 접기"><span data-icon="PanelLeft"></span></button>
+  <div class="workspace-breadcrumb"><span>워크스페이스</span><span data-icon="ChevronRight"></span><strong id="workspaceTitle">자율 검증</strong></div>
   <div class="topbar-actions">
-    <button class="btn btn-success" onclick="openBulkModal()">일괄 테스트</button>
-    <button class="btn btn-secondary" onclick="generateReport()">📄 리포트 생성</button>
+    <button class="btn btn-secondary request-action" onclick="openBulkModal()"><span data-icon="Layers"></span>일괄 테스트</button>
+    <button class="btn btn-secondary report-action" onclick="generateReport()"><span data-icon="FileChartColumn"></span>리포트 생성</button>
+    <button class="icon-button" id="themeToggle" aria-label="어두운 테마" title="어두운 테마"><span data-icon="Moon"></span></button>
   </div>
 </div>
 
@@ -37,14 +42,14 @@
     <div class="sidebar-tab-bar" role="tablist">
       <button type="button" class="sidebar-tab active" role="tab" aria-selected="true" data-stab="payloads" onclick="switchSidebarTab('payloads')">페이로드</button>
       <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-stab="aitest" onclick="switchSidebarTab('aitest')">AI 테스트</button>
-      <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-stab="history" onclick="switchSidebarTab('history')">🕓 히스토리</button>
-      <button class="sidebar-edit-btn" onclick="event.stopPropagation();openCustomModal()" title="커스텀 페이로드 편집">✏️</button>
+      <button type="button" class="sidebar-tab" role="tab" aria-selected="false" data-stab="history" onclick="switchSidebarTab('history')">히스토리</button>
+      <button class="sidebar-edit-btn icon-button" onclick="event.stopPropagation();openCustomModal()" aria-label="커스텀 페이로드 편집" title="커스텀 페이로드 편집"><span data-icon="Pencil"></span></button>
     </div>
 
     <!-- 페이로드 패널 -->
     <div class="sidebar-panel active" id="sidebarPayloads">
       <div class="sidebar-search">
-        <input id="sidebarSearchInput" type="text" placeholder="페이로드 검색...">
+        <input id="sidebarSearchInput" type="search" aria-label="페이로드 검색" placeholder="페이로드 검색">
       </div>
       <div class="sidebar-scroll" id="sidebarList">
         <div class="empty-state" style="padding:20px">
@@ -146,7 +151,7 @@
       </select>
       <input id="httpVersionCustom" class="url-input" type="text" placeholder="예: HTTP/1.1 (변형)" style="display:none;max-width:150px;flex:0 0 auto" title="비정상/커스텀 버전 문자열 그대로 전송">
       <input id="urlInput" class="url-input" type="text" aria-label="대상 요청 URL" placeholder="https://target.example.com/api/endpoint">
-      <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기" style="white-space:nowrap">📋 붙여넣기</button>
+      <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기"><span data-icon="Clipboard"></span>가져오기</button>
       <label class="defhdr-toggle" title="켜면 빠진 헤더를 브라우저 기본값으로 보충(사용자 지정 헤더는 유지). 붙여넣기 시 자동으로 꺼집니다.">
         <input type="checkbox" id="useDefaultsChk" checked>
         <span>기본헤더</span>
@@ -155,9 +160,9 @@
         <input type="checkbox" id="followRedirChk">
         <span>리다이렉트 추적</span>
       </label>
-      <button class="btn btn-secondary" onclick="openHeaderProfileModal()" title="기본 헤더 프로파일 편집" style="white-space:nowrap">⚙️</button>
-      <button class="btn btn-secondary" onclick="clearRequest()" title="요청·응답·분석을 모두 초기화" style="white-space:nowrap">초기화</button>
-      <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()">▶ 전송</button>
+      <button class="icon-button" onclick="openHeaderProfileModal()" aria-label="기본 헤더 프로파일 편집" title="기본 헤더 프로파일 편집"><span data-icon="Settings2"></span></button>
+      <button class="icon-button" onclick="clearRequest()" aria-label="요청·응답 초기화" title="요청·응답 초기화"><span data-icon="RotateCcw"></span></button>
+      <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()"><span data-icon="Send"></span>전송</button>
       <button id="abortBtn" class="btn btn-secondary" onclick="abortSend()" title="전송 중인 요청을 중단합니다(타임아웃·지연 시)" style="display:none;white-space:nowrap;border-color:rgba(248,81,73,.4);color:var(--danger)">⨯ 중단</button>
     </div>
 
@@ -197,7 +202,7 @@
     <div class="view-area">
 
       <!-- ═══ VIEW: 요청/분석 ═══ -->
-      <div class="view active" data-view="request">
+      <div class="view" data-view="request">
 
         <!-- 요청 탭 -->
         <div class="request-panel" id="requestPanel">
@@ -373,62 +378,69 @@
       </div><!-- /view:report -->
 
       <!-- ═══ VIEW: 자율 검증 ═══ -->
-      <div class="view" data-view="agent">
-        <div class="agent-page">
-          <!-- 좌: 반출 정책 + 새 작업 + 작업 목록 -->
-          <aside class="agent-left">
-            <div id="egressPolicyBanner" class="egress-banner" role="status">반출 정책 확인 중…</div>
-            <div class="agent-list-head">
-              <strong>검증 작업</strong>
-              <button class="btn btn-secondary" id="agentRefresh" type="button" style="font-size:11px;padding:3px 9px">새로고침</button>
+      <div class="view active" data-view="agent">
+        <div class="aw-workspace">
+          <div class="aw-heading">
+            <div><div class="aw-eyebrow">WORKSPACE</div><h1>자율 검증</h1></div>
+            <button class="btn btn-primary" id="agentNewButton"><span data-icon="Plus"></span>새 검증 작업</button>
+          </div>
+          <div id="egressPolicyBanner" class="aw-policy" role="status">반출 정책 확인 중</div>
+          <div id="agentListView">
+            <div class="aw-metrics" id="agentMetrics" aria-label="작업 현황"></div>
+            <div class="aw-toolbar">
+              <label class="aw-search"><span data-icon="Search"></span><input id="agentSearch" type="search" placeholder="작업 목표 또는 ID 검색" aria-label="검증 작업 검색"></label>
+              <select id="agentFilter" aria-label="작업 상태 필터"><option value="">모든 상태</option><option value="running">실행 중</option><option value="paused">일시정지</option><option value="interrupted">중단됨</option><option value="completed">종료</option><option value="limited">한도 도달</option></select>
+              <span id="agentCount" class="aw-muted" role="status"></span>
+              <button class="icon-button" id="agentRefresh" aria-label="작업 새로고침" title="작업 새로고침"><span data-icon="RefreshCw"></span></button>
             </div>
-            <details class="agent-new" id="agentNew">
-              <summary>➕ 새 작업 (현재 요청으로 시작)</summary>
-              <div class="agent-config">
-                <p class="agent-help">현재 요청 폼에서 시작합니다. 같은 출처의 링크·GET 폼을 발견하고, 계정별 세션으로 테스트합니다.</p>
+            <div class="aw-table-scroll">
+              <table class="aw-table"><caption class="sr-only">자율 검증 작업 목록</caption><thead><tr><th>작업</th><th>상태</th><th>생성 시각</th><th>작업 ID</th><th><span class="sr-only">작업 명령</span></th></tr></thead><tbody id="agentList"></tbody></table>
+            </div>
+            <div class="aw-pagination"><span id="agentPageInfo" class="aw-muted"></span><div><button class="icon-button" id="agentPrev" aria-label="이전 페이지" title="이전 페이지"><span data-icon="ChevronLeft"></span></button><button class="icon-button" id="agentNext" aria-label="다음 페이지" title="다음 페이지"><span data-icon="ChevronRight"></span></button></div></div>
+          </div>
+          <section id="agentDetailView" hidden aria-label="검증 작업 상세">
+            <button class="aw-back" id="agentBack"><span data-icon="ArrowLeft"></span>작업 목록</button>
+            <div class="aw-detail-heading"><div><span id="agentRunBadge" class="aw-badge"></span><h2 id="agentRunTitle"></h2><p id="agentStatus" role="status"></p></div>
+              <div class="aw-commands"><button class="btn btn-secondary" id="agentStop" disabled><span data-icon="Pause"></span>중단</button><button class="btn btn-secondary" id="agentResume" disabled><span data-icon="Play"></span>재개</button><button class="icon-button" id="agentExport" disabled aria-label="기록 다운로드" title="기록 다운로드"><span data-icon="Download"></span></button></div>
+            </div>
+            <div id="agentSummary" class="aw-run-stats"></div>
+            <div id="agentResults" class="aw-results" aria-label="검증 결과"></div>
+            <div class="aw-section-title"><h3>실행 기록</h3><span class="aw-muted" id="agentEventCount"></span></div>
+            <div id="agentEvents" class="aw-events"></div>
+          </section>
+          <dialog class="aw-dialog" id="agentNew" aria-labelledby="agentNewTitle">
+              <div class="aw-dialog-head"><div><span class="aw-eyebrow">NEW VERIFICATION</span><h2 id="agentNewTitle">새 검증 작업</h2></div><button class="icon-button" id="agentNewClose" aria-label="새 작업 닫기" title="닫기"><span data-icon="X"></span></button></div>
+              <div class="aw-form">
+                <div class="aw-section-title"><h3>대상 요청</h3><button class="aw-link" id="agentEditRequest" type="button"><span data-icon="Pencil"></span>요청 편집</button></div>
+                <div class="aw-request-preview"><span id="agentRequestMethod" class="aw-method"></span><code id="agentRequestUrl"></code></div>
+                <details class="aw-request-details"><summary>요청 데이터</summary><pre id="agentRequestPreview"></pre></details>
                 <label for="agentGoal">테스트 목표</label>
-                <textarea id="agentGoal" rows="2">현재 요청에서 취약 신호를 확인하고 근거가 있는 후속 테스트를 진행해줘.</textarea>
-                <div class="agent-grid">
+                <textarea id="agentGoal" rows="3" required>현재 요청에서 취약 신호를 확인하고 근거가 있는 후속 테스트를 진행해줘.</textarea>
+                <h3>실행 한도</h3>
+                <div class="aw-budget-grid">
                   <label>최대 단계<input id="agentSteps" type="number" min="1" max="50" value="8"></label>
                   <label>최대 HTTP<input id="agentRequests" type="number" min="1" max="150" value="24"></label>
                   <label>최대 AI 호출<input id="agentAiCalls" type="number" min="0" max="50" value="8"></label>
                   <label>최대 시간(초)<input id="agentSeconds" type="number" min="10" max="1800" value="300"></label>
                 </div>
-                <label class="agent-check"><input id="agentWrite" type="checkbox"> POST·PUT·PATCH·DELETE 허용</label>
-                <label class="agent-check"><input id="agentShare" type="checkbox"> 응답 발췌를 AI 제공자에 전달</label>
-                <p class="agent-help" id="agentShareNote">기본 AI 입력은 경로·필드명·판정 라벨입니다. 발췌를 켜면 응답 데이터 일부도 전달됩니다. 요청·응답 증거는 이 PC에 저장됩니다.</p>
-                <label class="agent-check"><input id="agentPlanMode" type="checkbox"> 응답-블라인드 계획 모드(실험적)</label>
-                <p class="agent-help">켜면 비식별 입력으로 계획을 1회 생성하고 실행 중 분기를 로컬에서 처리합니다(응답을 모델에 보내지 않음). 끄면 기존 반복 방식입니다.</p>
-                <details id="agentPolicyDetails">
+                <div class="aw-options">
+                  <label><span>쓰기 메서드 허용<small>POST · PUT · PATCH · DELETE</small></span><input class="aw-toggle" id="agentWrite" type="checkbox"></label>
+                  <label><span>응답-블라인드 계획 모드<small>실험적</small></span><input class="aw-toggle" id="agentPlanMode" type="checkbox"></label>
+                  <label><span>응답 발췌 외부 전송<small id="agentShareNote">반출 정책 확인 중</small></span><input class="aw-toggle" id="agentShare" type="checkbox"></label>
+                </div>
+                <details class="aw-policy-details" id="agentPolicyDetails">
                   <summary>계정과 객체 접근 정책</summary>
                   <div class="agent-subhead"><span>계정</span>
                     <button type="button" class="agent-add" id="agentAddActor">+ 계정 추가</button></div>
                   <div id="agentActorsForm" class="agent-rows"></div>
-                  <p class="agent-help">첫 계정은 현재 요청의 인증을 이어받습니다. 다른 계정은 Cookie 또는 Authorization 헤더를 지정하세요(한 줄에 <code>Key: Value</code>).</p>
                   <div class="agent-subhead"><span>객체 접근 정책 <span style="font-weight:400;color:var(--text-muted)">(IDOR 점검용 · 선택)</span></span>
                     <button type="button" class="agent-add" id="agentAddObject">+ 객체 추가</button></div>
                   <div id="agentObjectsForm" class="agent-rows"></div>
-                  <p class="agent-help">소유자 계정과 비인가 계정으로 같은 객체(시작 URL과 같은 출처)를 조회해 접근 차이를 확인합니다.</p>
                 </details>
-                <button class="btn btn-success" id="agentStart" type="button" style="margin-top:8px">현재 요청으로 시작</button>
+                <div id="agentFormError" class="aw-form-error" role="alert" hidden></div>
               </div>
-            </details>
-            <div id="agentList" class="agent-list">
-              <div class="empty-state" style="padding:16px"><div class="msg">저장된 작업이 없습니다.</div></div>
-            </div>
-          </aside>
-          <!-- 우: 선택한 작업 상세(타임라인) -->
-          <section class="agent-right">
-            <div id="agentStatus" class="agent-status" role="status">작업을 선택하거나 새로 시작하세요.</div>
-            <div id="agentSummary" class="agent-summary"></div>
-            <div id="agentResults" class="agent-results-sum"></div>
-            <div class="agent-buttons">
-              <button class="btn btn-secondary" id="agentStop" type="button" disabled>중단</button>
-              <button class="btn btn-secondary" id="agentResume" type="button" disabled>재개</button>
-              <button class="btn btn-secondary" id="agentExport" type="button" disabled>기록 다운로드</button>
-            </div>
-            <div id="agentEvents" class="agent-events"></div>
-          </section>
+              <div class="aw-dialog-footer"><button class="btn btn-secondary" id="agentNewCancel">취소</button><button class="btn btn-primary" id="agentStart" type="button"><span data-icon="Play"></span>검증 시작</button></div>
+          </dialog>
         </div>
       </div><!-- /view:agent -->
 
@@ -868,8 +880,9 @@
 <!-- Toast -->
 <div class="toast-container" id="toastContainer"></div>
 
+<script src="/static/js/icons.js"></script>
 <script src="/static/js/app.js"></script>
-<link rel="stylesheet" href="/static/css/agent.css">
 <script src="/static/js/agent.js"></script>
+<script src="/static/js/workspace.js"></script>
 </body>
 </html>

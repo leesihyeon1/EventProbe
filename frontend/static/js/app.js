@@ -4457,9 +4457,12 @@ function renderProgressBar(label, value, total, color) {
 
 /* ── View Switching ── */
 function switchView(view) {
+  if (!['request', 'results', 'agent', 'report'].includes(view)) return;
   state.activeView = view;
+  document.body.dataset.view = view;
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === view));
   document.querySelectorAll('.topbar-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  if (window.syncWorkspace) window.syncWorkspace(view);
   // 자율 검증 뷰로 전환하면 목록·반출 정책을 (재)로드한다(agent.js 에서 정의).
   if (view === 'agent' && window.openAgentView) window.openAgentView();
 }
