@@ -60,6 +60,15 @@ test('empty audit shows a clear message',()=>{
   assert(all(get('egressAuditRecords')).some(n=>n.textContent==='기록된 외부 전송이 없습니다.'));
 });
 
+test('model usage section renders latency and tokens when present',()=>{
+  const {ctx,get}=setup();
+  ctx.renderEgressAudit({summary:SAMPLE.summary, records:SAMPLE.records,
+    usage:[{channel:'chat',model:'m9',calls:3,errors:1,avg_latency_ms:210,max_latency_ms:400,tokens:120}]});
+  const cells=all(get('egressAuditRecords')).filter(n=>n.tagName==='td').map(n=>n.textContent);
+  assert(cells.includes('m9') && cells.includes('210ms') && cells.includes('120'));
+  assert(all(get('egressAuditRecords')).some(n=>n.textContent==='모델 사용'));
+});
+
 test('openEgressAudit fetches the audit endpoint and opens the dialog',async()=>{
   const {ctx,get,fetchCalls}=setup(SAMPLE);
   await ctx.openEgressAudit();

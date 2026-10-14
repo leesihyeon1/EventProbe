@@ -190,6 +190,24 @@ function renderEgressAudit(data) {
     sum.append(chip);
   }
   const box = agentEl('egressAuditRecords'); box.replaceChildren();
+  const usage = data.usage || [];
+  if (usage.length) {
+    box.append(uiNode('h4', 'ea-subhead', '모델 사용'));
+    const ut = uiNode('table', 'ea-table'), uh = uiNode('tr');
+    for (const label of ['채널', '모델', '호출', '오류', '평균 지연', '최대 지연', '토큰']) uh.append(uiNode('th', '', label));
+    const uthead = uiNode('thead'); uthead.append(uh);
+    const utbody = uiNode('tbody');
+    for (const u of usage) {
+      const tr = uiNode('tr'); if (u.errors) tr.dataset.blocked = 'true';
+      tr.append(uiNode('td', '', u.channel || ''), uiNode('td', '', u.model || '-'),
+        uiNode('td', '', String(u.calls ?? 0)), uiNode('td', '', String(u.errors ?? 0)),
+        uiNode('td', '', `${u.avg_latency_ms ?? 0}ms`), uiNode('td', '', `${u.max_latency_ms ?? 0}ms`),
+        uiNode('td', '', String(u.tokens ?? 0)));
+      utbody.append(tr);
+    }
+    ut.append(uthead, utbody); box.append(ut);
+    box.append(uiNode('h4', 'ea-subhead', '최근 전송'));
+  }
   if (!records.length) { box.append(uiNode('p', 'aw-muted', '기록된 외부 전송이 없습니다.')); return; }
   const table = uiNode('table', 'ea-table'), head = uiNode('tr');
   head.append(uiNode('th', '', '시각'));

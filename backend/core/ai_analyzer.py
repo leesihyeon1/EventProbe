@@ -59,17 +59,29 @@ async def _post_chat(base_url: str, headers: dict, payload: dict, tries: int = 3
     모든 chat 계열 호출(분석·판정·후보·분류·변형 + agent.choose_action)이 이 한 지점을
     지나므로, 외부 전송 직전 공통 반출 정책을 적용한다(strict 면 금지 데이터 시 EgressBlocked)."""
     ai_egress.guard(payload, channel="chat", destination_url=base_url)
-    last = None
-    async with httpx.AsyncClient(timeout=_timeout()) as client:
-        for i in range(tries):
-            r = await client.post(f"{base_url}/chat/completions", headers=headers,
-                                  json=_apply_model_opts(payload))
-            if r.status_code == 200 or r.status_code not in _RETRY_STATUS:
-                return r
-            last = r
-            if i < tries - 1:
-                await asyncio.sleep(0.6 * (i + 1))
-    return last
+    import time
+    start, last, ok = time.monotonic(), None, False
+    try:
+        async with httpx.AsyncClient(timeout=_timeout()) as client:
+            for i in range(tries):
+                r = await client.post(f"{base_url}/chat/completions", headers=headers,
+                                      json=_apply_model_opts(payload))
+                if r.status_code == 200 or r.status_code not in _RETRY_STATUS:
+                    last, ok = r, r.status_code == 200
+                    return r
+                last = r
+                if i < tries - 1:
+                    await asyncio.sleep(0.6 * (i + 1))
+        return last
+    finally:
+        # 모델 사용 집계(리뷰 P4): 지연/토큰/오류만 — 원문·키는 담지 않는다.
+        tokens = 0
+        try:
+            tokens = ((last.json() or {}).get("usage") or {}).get("total_tokens", 0) if last is not None else 0
+        except Exception:
+            tokens = 0
+        ai_egress.record_result("chat", (payload or {}).get("model", ""), ok=ok,
+                                latency_ms=(time.monotonic() - start) * 1000, tokens=tokens or 0)
 
 
 _BODY_LIMIT = 4000   # LLM 에 보낼 응답 본문 최대 길이(토큰/비용 관리)

@@ -255,6 +255,35 @@ def audit_summary(limit: int = 500) -> dict:
 
 def clear_audit() -> None:
     _audit_buf.clear()
+    _usage.clear()
+
+
+# ── 모델 사용 집계(리뷰 P4): 지연/토큰/오류. 키·원문은 담지 않는다. ───────────────
+_usage: dict = {}
+
+
+def record_result(channel: str, model: str, *, ok: bool, latency_ms: float = 0.0, tokens: int = 0) -> None:
+    """한 번의 외부 추론 호출 결과를 집계한다(채널·모델별). 전송 직후 chokepoint 에서 호출한다."""
+    u = _usage.setdefault((channel, model or ""),
+                          {"calls": 0, "errors": 0, "latency_total": 0.0, "latency_max": 0.0, "tokens": 0})
+    u["calls"] += 1
+    if not ok:
+        u["errors"] += 1
+    lat = max(0.0, latency_ms or 0.0)
+    u["latency_total"] += lat
+    u["latency_max"] = max(u["latency_max"], lat)
+    u["tokens"] += max(0, tokens or 0)
+
+
+def usage_metrics() -> list:
+    """채널·모델별 호출 수, 오류, 평균/최대 지연(ms), 토큰 합계. 원문/키 없음."""
+    out = []
+    for (channel, model), u in _usage.items():
+        calls = u["calls"] or 1
+        out.append({"channel": channel, "model": model, "calls": u["calls"], "errors": u["errors"],
+                    "avg_latency_ms": round(u["latency_total"] / calls),
+                    "max_latency_ms": round(u["latency_max"]), "tokens": u["tokens"]})
+    return sorted(out, key=lambda r: (r["channel"], r["model"]))
 
 
 # ── 예외 ──────────────────────────────────────────────────────────────────────

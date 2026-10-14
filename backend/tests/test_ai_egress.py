@@ -173,6 +173,48 @@ def test_audit_summary_empty_is_safe():
     assert s["count"] == 0 and s["channels"] == {} and s["first_ts"] == ""
 
 
+# ── 모델 사용 집계: 지연/토큰/오류(P4) ─────────────────────────────────────────
+def test_usage_metrics_aggregates_latency_tokens_errors():
+    ai_egress.clear_audit()
+    ai_egress.record_result("chat", "m1", ok=True, latency_ms=100, tokens=10)
+    ai_egress.record_result("chat", "m1", ok=False, latency_ms=300, tokens=0)
+    ai_egress.record_result("embeddings", "e1", ok=True, latency_ms=50, tokens=5)
+    by = {(r["channel"], r["model"]): r for r in ai_egress.usage_metrics()}
+    chat = by[("chat", "m1")]
+    assert chat["calls"] == 2 and chat["errors"] == 1
+    assert chat["avg_latency_ms"] == 200 and chat["max_latency_ms"] == 300
+    assert chat["tokens"] == 10
+    assert by[("embeddings", "e1")]["tokens"] == 5
+
+
+def test_clear_audit_also_clears_usage():
+    ai_egress.record_result("chat", "m", ok=True, tokens=1)
+    ai_egress.clear_audit()
+    assert ai_egress.usage_metrics() == []
+
+
+def test_post_chat_records_usage(monkeypatch):
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")
+    ai_egress.clear_audit()
+
+    class _R:
+        status_code = 200
+        def json(self):
+            return {"usage": {"total_tokens": 42}, "choices": [{"message": {"content": "{}"}}]}
+
+    class _C:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **k): return _R()
+
+    monkeypatch.setattr(ai.httpx, "AsyncClient", _C)
+    asyncio.run(ai._post_chat(EXT, {"Authorization": "Bearer k"},
+                              {"model": "m9", "messages": [{"role": "user", "content": "hi"}]}, tries=1))
+    chat = [r for r in ai_egress.usage_metrics() if r["model"] == "m9"]
+    assert chat and chat[0]["calls"] == 1 and chat[0]["tokens"] == 42 and chat[0]["errors"] == 0
+
+
 # ── 임베딩 허용 매트릭스(F3) ──────────────────────────────────────────────────
 def test_embeddings_allowed_matrix(monkeypatch):
     monkeypatch.setenv("AI_EXPORT_MODE", "permissive")

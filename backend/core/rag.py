@@ -178,11 +178,23 @@ def _embed_batch(base, headers, model, batch, input_type):
         ai_egress.guard(payload, channel="embeddings", destination_url=base)
     except ai_egress.EgressBlocked:
         return None, True                   # 치명 처리 → 폴백 중단하고 상위에서 BM25 로
+    import time
+    start = time.monotonic()
     try:
         with httpx.Client(timeout=60) as client:
             r = client.post(f"{base}/embeddings", headers=headers, json=payload)
     except Exception:
+        ai_egress.record_result("embeddings", model, ok=False,
+                                latency_ms=(time.monotonic() - start) * 1000)
         return None, False
+    latency_ms = (time.monotonic() - start) * 1000
+    tokens = 0
+    try:
+        tokens = (r.json().get("usage") or {}).get("total_tokens", 0)
+    except Exception:
+        tokens = 0
+    ai_egress.record_result("embeddings", model, ok=r.status_code == 200,
+                            latency_ms=latency_ms, tokens=tokens or 0)
     if r.status_code == 200:
         data = sorted(r.json()["data"], key=lambda d: d["index"])
         return np.asarray([d["embedding"] for d in data], dtype="float32"), False

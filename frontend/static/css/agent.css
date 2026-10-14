@@ -260,3 +260,5 @@
 .ea-table tr[data-blocked] td { color:var(--danger); }
 .ea-ts { white-space:nowrap; color:var(--text-muted); font-size:11px; }
 .ea-table tr[data-reason="retention"] td { color:var(--text-muted); }
+.ea-subhead { font-size:12px; color:var(--text-muted); margin:14px 0 6px; font-weight:600; }
+.ea-subhead:first-child { margin-top:0; }
