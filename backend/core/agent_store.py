@@ -26,6 +26,10 @@ class Store:
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created REAL NOT NULL,
                     kind TEXT NOT NULL, step_id TEXT NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS events_run ON events(run_id, created);
+                CREATE TABLE IF NOT EXISTS deletions (
+                    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, deleted REAL NOT NULL,
+                    reason TEXT NOT NULL, state TEXT NOT NULL, events INTEGER NOT NULL,
+                    goal TEXT NOT NULL, created REAL NOT NULL);
             ''')
 
     @contextmanager
@@ -73,12 +77,33 @@ class Store:
         return [{'id': r['id'], 'state': r['state'], 'created': r['created'],
                  'goal': json.loads(r['data'])['spec']['goal']} for r in rows]
 
-    def delete(self, run_id):
-        """run 과 그 증거(events)를 영구 삭제. 삭제됐으면 True(없으면 False)."""
+    def _audit_deletion(self, db, run_id, row, events, reason):
+        """삭제 감사 레코드를 남긴다(리뷰 P4: 증거 삭제/감사). deletions 테이블은 삭제·보존 정리의
+        대상이 아니므로 run/증거가 사라져도 '무엇을·언제·왜 지웠는지'는 남는다. 응답 원문·URL 은
+        저장하지 않고 목표 문구(사용자 입력)·상태·개수만 남긴다."""
+        try:
+            goal = (json.loads(row['data'])['spec'].get('goal') or '')[:500]
+        except (ValueError, KeyError, TypeError):
+            goal = ''
+        db.execute('INSERT INTO deletions VALUES (?,?,?,?,?,?,?,?)',
+                   (uid(), run_id, time.time(), reason, row['state'], events, goal, row['created']))
+
+    def delete(self, run_id, reason='manual'):
+        """run 과 그 증거(events)를 영구 삭제하고 삭제 감사를 남긴다. 삭제됐으면 True(없으면 False)."""
         with self.connect() as db:
+            row = db.execute('SELECT created,state,data FROM runs WHERE id=?', (run_id,)).fetchone()
+            if row is not None:
+                n = db.execute('SELECT COUNT(*) AS c FROM events WHERE run_id=?', (run_id,)).fetchone()['c']
+                self._audit_deletion(db, run_id, row, n, reason)
             db.execute('DELETE FROM events WHERE run_id=?', (run_id,))
             cur = db.execute('DELETE FROM runs WHERE id=?', (run_id,))
         return cur.rowcount > 0
+
+    def deletions(self, limit=100):
+        """최근 삭제 감사(최신순). 읽기 전용 운영 조회."""
+        with self.connect() as db:
+            rows = db.execute('SELECT * FROM deletions ORDER BY deleted DESC LIMIT ?', (limit,)).fetchall()
+        return [dict(r) for r in rows]
 
     def prune(self, max_age_days):
         """보존 기간(일) 초과 run(+증거) 정리. max_age_days<=0 이면 아무것도 안 함. 삭제 수 반환.
@@ -91,7 +116,11 @@ class Store:
             return 0
         cutoff = time.time() - days * 86400
         with self.connect() as db:
-            ids = [r['id'] for r in db.execute('SELECT id FROM runs WHERE updated < ?', (cutoff,)).fetchall()]
+            rows = db.execute('SELECT id,created,state,data FROM runs WHERE updated < ?', (cutoff,)).fetchall()
+            for r in rows:
+                n = db.execute('SELECT COUNT(*) AS c FROM events WHERE run_id=?', (r['id'],)).fetchone()['c']
+                self._audit_deletion(db, r['id'], r, n, 'retention')
+            ids = [r['id'] for r in rows]
             if ids:
                 marks = ','.join('?' * len(ids))
                 db.execute(f'DELETE FROM events WHERE run_id IN ({marks})', ids)

@@ -67,3 +67,43 @@ def test_delete_endpoint(tmp_path):
     rid = get_manager().store.create({'spec': {'goal': 't'}})
     assert client.delete('/api/agent/runs/' + rid).status_code == 200
     assert client.delete('/api/agent/runs/' + rid).status_code == 404   # 이미 삭제됨
+
+
+# ── 삭제 감사(P4): 삭제돼도 '무엇을·언제·왜'는 남는다 ──────────────────────────
+def test_delete_records_audit_that_survives(tmp_path):
+    s = Store(tmp_path / 'a.db')
+    rid = s.create({'spec': {'goal': '민감 작업'}})
+    s.event(rid, 'observation', {'x': 1}); s.event(rid, 'verification', {'status': 'confirmed'})
+    s.delete(rid)
+    audit = s.deletions()
+    assert len(audit) == 1
+    rec = audit[0]
+    assert rec['run_id'] == rid and rec['reason'] == 'manual'
+    assert rec['events'] == 2 and rec['goal'] == '민감 작업'
+    s.delete(rid)                                  # 없는 run 재삭제 → 감사 추가 없음
+    assert len(s.deletions()) == 1
+
+
+def test_prune_records_retention_audit(tmp_path):
+    s = Store(tmp_path / 'a.db')
+    old = s.create({'spec': {'goal': 'old'}})
+    s.event(old, 'observation', {'x': 1})
+    with s.connect() as db:
+        db.execute('UPDATE runs SET updated=? WHERE id=?', (time.time() - 10 * 86400, old))
+    assert s.prune(7) == 1
+    audit = s.deletions()
+    assert len(audit) == 1 and audit[0]['reason'] == 'retention' and audit[0]['events'] == 1
+    assert s.prune(7) == 0 and len(s.deletions()) == 1   # 감사는 보존 정리의 대상이 아니다
+
+
+def test_deletions_newest_first_and_endpoint(tmp_path):
+    from fastapi.testclient import TestClient
+    from main import app
+    from core.agent import get_manager
+    store = get_manager().store
+    a = store.create({'spec': {'goal': 'A'}}); store.delete(a)
+    b = store.create({'spec': {'goal': 'B'}}); store.delete(b)
+    client = TestClient(app)
+    data = client.get('/api/agent/deletions').json()['deletions']
+    ids = [r['run_id'] for r in data]
+    assert ids.index(b) < ids.index(a)             # 최신 삭제가 먼저

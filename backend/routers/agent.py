@@ -42,6 +42,12 @@ def list_runs():
     return {'runs': get_manager().store.list()}
 
 
+@router.get('/deletions')
+def list_deletions(limit: int = 100):
+    """증거 삭제 감사(수동/보존). 삭제된 run 자체는 사라져도 기록은 남는다(리뷰 P4)."""
+    return {'deletions': get_manager().store.deletions(limit)}
+
+
 @router.post('/plan')
 async def preview_plan(spec: RunSpec):
     """비식별 입력으로 조건부 검증 계획을 1회 생성·검증해 돌려준다(실행하지 않음, 리뷰 Stage 3).

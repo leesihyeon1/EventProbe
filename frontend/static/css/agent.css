@@ -257,3 +257,4 @@
 .ea-table td { padding:6px 8px; border-top:1px solid var(--border); overflow-wrap:anywhere; }
 .ea-table tr[data-blocked] td { color:var(--danger); }
 .ea-ts { white-space:nowrap; color:var(--text-muted); font-size:11px; }
+.ea-table tr[data-reason="retention"] td { color:var(--text-muted); }

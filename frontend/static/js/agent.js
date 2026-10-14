@@ -89,6 +89,8 @@ function initAgentView() {
   agentEl('agentPlanPreviewBtn').onclick = previewPlan;
   agentEl('egressAuditBtn').onclick = openEgressAudit;
   agentEl('egressAuditClose').onclick = () => agentEl('egressAuditDialog').close();
+  agentEl('agentDeletionsBtn').onclick = openDeletions;
+  agentEl('deletionsClose').onclick = () => agentEl('deletionsDialog').close();
   initAgentWorkspace();
   addActorRow({ id: 'current', label: '현재 계정', headers: {} });   // 기본 계정 1행
 }
@@ -186,6 +188,38 @@ function renderEgressAudit(data) {
     tr.append(uiNode('td', '', String(r.chars ?? 0)));
     tr.append(uiNode('td', '', (r.findings || []).map(f => `${f.kind}:${f.severity}`).join(', ') || '-'));
     tr.append(uiNode('td', '', r.blocked ? '차단' : '전송'));
+    tbody.append(tr);
+  }
+  table.append(thead, tbody); box.append(table);
+}
+
+// 증거 삭제 기록(리뷰 P4). 삭제/보존 정리된 작업의 감사. 읽기 전용, 텍스트만.
+const DELETION_REASON = { manual: '수동 삭제', retention: '보존 정리' };
+async function openDeletions() {
+  const dialog = agentEl('deletionsDialog');
+  agentEl('deletionsRecords').replaceChildren(uiNode('p', 'aw-muted', '불러오는 중…'));
+  dialog.showModal();
+  try {
+    renderDeletions((await agentApi('/deletions')).deletions || []);
+  } catch (e) {
+    agentEl('deletionsRecords').replaceChildren(uiNode('p', 'aw-form-error', e.message));
+  }
+}
+function renderDeletions(records) {
+  const box = agentEl('deletionsRecords'); box.replaceChildren();
+  if (!records.length) { box.append(uiNode('p', 'aw-muted', '삭제 기록이 없습니다.')); return; }
+  const table = uiNode('table', 'ea-table'), head = uiNode('tr');
+  for (const label of ['삭제 시각', '사유', '목표', '상태', '증거 수', '작업 ID']) head.append(uiNode('th', '', label));
+  const thead = uiNode('thead'); thead.append(head);
+  const tbody = uiNode('tbody');
+  for (const r of records) {
+    const tr = uiNode('tr'); if (r.reason === 'retention') tr.dataset.reason = 'retention';
+    tr.append(uiNode('td', 'ea-ts', r.deleted ? new Date(r.deleted * 1000).toLocaleString('ko-KR') : ''));
+    tr.append(uiNode('td', '', DELETION_REASON[r.reason] || r.reason || ''));
+    tr.append(uiNode('td', '', r.goal || '(목표 미기재)'));
+    tr.append(uiNode('td', '', r.state || ''));
+    tr.append(uiNode('td', '', String(r.events ?? 0)));
+    tr.append(uiNode('td', 'ea-ts', r.run_id || ''));
     tbody.append(tr);
   }
   table.append(thead, tbody); box.append(table);

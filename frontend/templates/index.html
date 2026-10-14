@@ -397,6 +397,7 @@
               <label class="aw-search"><span data-icon="Search"></span><input id="agentSearch" type="search" placeholder="작업 목표 또는 ID 검색" aria-label="검증 작업 검색"></label>
               <select id="agentFilter" aria-label="작업 상태 필터"><option value="">모든 상태</option><option value="running">실행 중</option><option value="paused">일시정지</option><option value="interrupted">중단됨</option><option value="completed">종료</option><option value="limited">한도 도달</option></select>
               <span id="agentCount" class="aw-muted" role="status"></span>
+              <button class="icon-button" id="agentDeletionsBtn" aria-label="삭제 기록" title="삭제 기록"><span data-icon="Trash2"></span></button>
               <button class="icon-button" id="agentRefresh" aria-label="작업 새로고침" title="작업 새로고침"><span data-icon="RefreshCw"></span></button>
             </div>
             <div class="aw-table-scroll">
@@ -526,6 +527,12 @@
             <p class="aw-muted">서버가 기록한 외부 전송 감사입니다. 원문 값과 API 키는 포함되지 않습니다.</p>
             <div id="egressAuditSummary" class="ea-summary"></div>
             <div id="egressAuditRecords" class="ea-records" role="status"></div>
+          </dialog>
+          <dialog class="aw-dialog" id="deletionsDialog" aria-labelledby="deletionsTitle">
+            <div class="aw-dialog-head"><div><span class="aw-eyebrow">DELETION AUDIT</span><h2 id="deletionsTitle">증거 삭제 기록</h2></div>
+              <button class="icon-button" id="deletionsClose" aria-label="닫기" title="닫기"><span data-icon="X"></span></button></div>
+            <p class="aw-muted">삭제·보존 정리된 작업의 기록입니다. 원문 증거는 삭제되며 목표·상태·개수만 남습니다.</p>
+            <div id="deletionsRecords" class="ea-records" role="status"></div>
           </dialog>
         </div>
       </div><!-- /view:agent -->
