@@ -101,7 +101,7 @@ test('conclusion evidence button opens the linked verification event',()=>{
 
 test('detail tabs have one selected panel and support arrow navigation',()=>{
   const {context,get}=setup();
-  let initialized=0;context.initSiteMap=()=>initialized++;context.initFindings=()=>{};
+  let initialized=0;context.initSiteMap=()=>initialized++;context.initFindings=()=>{};context.resetCoverage=()=>{};
   context.initAgentWorkspace();
   assert.equal(initialized,1);
   context.setDetailMode('sitemap');
@@ -121,7 +121,7 @@ test('detail tabs have one selected panel and support arrow navigation',()=>{
 test('sitemap receives only the existing run snapshot, and switching tasks clears it',()=>{
   const {context,get}=setup();
   let snapshot=null,resets=0;
-  context.renderAgentSiteMap=run=>snapshot=run;context.resetSiteMap=()=>resets++;context.resetFindings=()=>{};
+  context.renderAgentSiteMap=run=>snapshot=run;context.resetSiteMap=()=>resets++;context.resetFindings=()=>{};context.resetCoverage=()=>{};
   const run={id:'synthetic',state:'completed',data:{spec:{goal:'synthetic'},endpoints:{},steps:0,requests:0,ai_calls:0,elapsed:0},events:[]};
   context.setDetailMode('sitemap');context.renderAgentWorkspace(run);
   assert.equal(snapshot,run);

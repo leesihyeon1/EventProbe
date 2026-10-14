@@ -1,0 +1,24 @@
+/* Coverage grid. Reuses the sitemap layout classes (sm-layout/sm-content/sm-detail/…). */
+.cv-grid { overflow:auto; }
+.cv-table { border-collapse:separate; border-spacing:0; font-size:12px; }
+.cv-table th { font-weight:600; color:var(--text-muted); text-align:left; padding:6px 8px; white-space:nowrap; position:sticky; top:0; background:var(--bg-primary); z-index:1; }
+.cv-table th.cv-corner { left:0; z-index:2; }
+.cv-table td { padding:3px 4px; }
+.cv-row-label { position:sticky; left:0; background:var(--bg-primary); display:flex; align-items:center; gap:6px; max-width:240px; }
+.cv-path { overflow-wrap:anywhere; font-size:12px; }
+.cv-btn { display:flex; align-items:center; gap:3px; width:100%; min-width:64px; min-height:30px; padding:4px; border:1px solid transparent; border-radius:4px; background:transparent; cursor:pointer; }
+.cv-btn:hover { background:var(--bg-secondary); }
+.cv-btn[aria-pressed="true"] { border-color:var(--border-light); background:var(--bg-tertiary); }
+.cv-mark { color:var(--warning); font-weight:700; }
+.cv-cell { display:inline-block; font-size:10px; line-height:1.6; padding:1px 7px; border-radius:999px; background:var(--bg-tertiary); color:var(--text-secondary); white-space:nowrap; }
+.cv-cell[data-state="confirmed"] { background:color-mix(in srgb, var(--danger) 16%, transparent); color:var(--danger); }
+.cv-cell[data-state="suspicious"] { background:color-mix(in srgb, var(--warning) 16%, transparent); color:var(--warning); }
+.cv-cell[data-state="inconclusive"] { background:color-mix(in srgb, var(--accent) 12%, transparent); color:var(--accent); }
+.cv-cell[data-state="observed"] { background:var(--bg-tertiary); color:var(--text-secondary); }
+.cv-cell[data-state="requested"],.cv-cell[data-state="planned"] { background:var(--bg-tertiary); color:var(--text-muted); }
+.cv-cell[data-state="none"] { background:transparent; color:var(--text-muted); opacity:.55; }
+.cv-table tr[data-outside] .cv-row-label { color:var(--text-muted); }
+@media(max-width:800px) {
+  .cv-layout { grid-template-columns:minmax(0,1fr); }
+  .cv-row-label { max-width:150px; }
+}

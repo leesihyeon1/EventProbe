@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/css/agent.css">
   <link rel="stylesheet" href="/static/css/sitemap.css">
   <link rel="stylesheet" href="/static/css/findings.css">
+  <link rel="stylesheet" href="/static/css/coverage.css">
 </head>
 <body data-view="agent">
 <aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
@@ -414,6 +415,7 @@
                 <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
                 <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
                 <button id="awTabFindings" role="tab" aria-selected="false" aria-controls="agentFindings" tabindex="-1">발견</button>
+                <button id="awTabCoverage" role="tab" aria-selected="false" aria-controls="agentCoverage" tabindex="-1">커버리지</button>
               </div>
               <span class="aw-muted" id="agentEventCount"></span>
             </div>
@@ -466,6 +468,13 @@
               <div class="sm-layout">
                 <nav id="fdContent" class="sm-content" aria-label="발견 목록"></nav>
                 <aside id="fdDetail" class="sm-detail" aria-label="발견 상세"></aside>
+              </div>
+            </section>
+            <section id="agentCoverage" role="tabpanel" aria-labelledby="awTabCoverage" hidden>
+              <p id="cvSummary" class="aw-muted sm-count" role="status"></p>
+              <div class="sm-layout cv-layout">
+                <div id="cvGrid" class="sm-content cv-grid" aria-label="검사 커버리지 표"></div>
+                <aside id="cvDetail" class="sm-detail" aria-label="커버리지 셀 상세"></aside>
               </div>
             </section>
           </section>
@@ -947,6 +956,7 @@
 <script src="/static/js/agent_graph.js"></script>
 <script src="/static/js/agent_sitemap.js"></script>
 <script src="/static/js/agent_findings.js"></script>
+<script src="/static/js/agent_coverage.js"></script>
 <script src="/static/js/workspace.js"></script>
 </body>
 </html>
