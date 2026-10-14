@@ -194,7 +194,7 @@ function renderAgentWorkspace(run) {
   const data=run.data,spec=data.spec;
   agentEl('agentRunTitle').textContent=spec.goal;
   const badge=agentEl('agentRunBadge');badge.textContent=AGENT_STATE_LABELS[run.state]||run.state;badge.dataset.state=run.state;
-  agentEl('agentStatus').textContent=data.reason||'실행 기록 수집 중';
+  agentEl('agentStatus').textContent=(data.retest_of?'발견 재검증 실행 · ':'')+(data.reason||'실행 기록 수집 중');
   agentEl('agentStop').disabled=run.state!=='running';agentEl('agentResume').disabled=!['paused','interrupted'].includes(run.state);agentEl('agentExport').disabled=false;
   const stats=agentEl('agentSummary');stats.replaceChildren();
   for(const [label,value] of [['단계',`${data.steps} / ${spec.max_steps}`],['HTTP 요청',`${data.requests} / ${spec.max_requests}`],['AI 호출',`${data.ai_calls} / ${spec.max_ai_calls}`],['경과 시간',`${Math.round(data.elapsed)}초`],['발견 경로',Object.keys(data.endpoints).length]]) {const s=uiNode('div','aw-run-stat');s.append(uiNode('span','',label),uiNode('strong','',String(value)));stats.append(s);}

@@ -3,6 +3,7 @@
 const FD_STATUS={open:'미처리',triaged:'분류됨',resolved:'해결',false_positive:'오탐',ignored:'무시'};
 const FD_SEVERITY={info:'정보',low:'낮음',medium:'보통',high:'높음',critical:'심각'};
 const FD_VERDICT={confirmed:'확증',suspicious:'의심',inconclusive:'미확정'};
+const FD_VULN=new Set(['sqli','xss','ssti','lfi','ssrf','cmdi','redirect','nosql']);
 let findingsState={runId:null,model:[],signature:'',selected:null};
 function resetFindings() {
   findingsState={runId:null,model:[],signature:'',selected:null};
@@ -60,6 +61,15 @@ function drawFindings() {
   if(focusKey) [...content.querySelectorAll('[data-key]')].find(el=>el.dataset.key===focusKey)?.focus({preventScroll:true});
   renderFindingDetail(rows.find(f=>f.id===findingsState.selected));
 }
+async function retestFinding(f) {
+  // 실제 대상에 요청을 보내는 외부 동작이므로 먼저 확인한다(리뷰 P2).
+  if(typeof confirm==='function' && !confirm('이 발견을 새 실행으로 재검증합니다. 대상에 실제 요청을 보냅니다. 계속할까요?')) return;
+  try {
+    const headers=(typeof getHeadersObj==='function')?getHeadersObj():{};
+    const run=await agentApi(`/runs/${encodeURIComponent(findingsState.runId)}/findings/${encodeURIComponent(f.id)}/retest`,{request_headers:headers});
+    if(typeof selectRun==='function' && run && run.id) selectRun(run.id);   // 새 재검증 실행으로 이동
+  } catch(e) { /* _asJson surfaces the error to the user */ }
+}
 async function patchFinding(id,patch) {
   try {
     const updated=await agentApi(`/runs/${encodeURIComponent(findingsState.runId)}/findings/${encodeURIComponent(id)}`,patch,'PATCH');
@@ -91,6 +101,11 @@ function renderFindingDetail(f) {
     fdSelect('상태',f.status,Object.entries(FD_STATUS),v=>patchFinding(f.id,{status:v})),
     fdSelect('심각도',f.severity,Object.entries(FD_SEVERITY),v=>patchFinding(f.id,{severity:v})));
   panel.append(controls);
+  if(FD_VULN.has(f.category)) {
+    const retest=uiNode('button','aw-link fd-retest','새 실행으로 재검증');retest.type='button';
+    retest.onclick=()=>retestFinding(f);
+    panel.append(retest);
+  }
   const noteWrap=uiNode('div','fd-note');
   const area=uiNode('textarea');area.value=f.note||'';area.placeholder='메모 (로컬 저장)';area.setAttribute('aria-label','발견 메모');
   const save=uiNode('button','aw-link','메모 저장');save.type='button';save.onclick=()=>patchFinding(f.id,{note:area.value});

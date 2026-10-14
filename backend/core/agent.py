@@ -416,10 +416,12 @@ class AgentManager:
         self.session_ids = {}
         self.form_tokens = {}
 
-    def create(self, spec):
+    def create(self, spec, retest_of=None):
         data = {'spec': safe_spec(spec), 'requests': 0, 'ai_calls': 0, 'steps': 0, 'elapsed': 0,
                 'seen': [], 'endpoints': {'seed': {**spec.request.model_dump(), 'headers': {}}},
                 'reason': '', 'needs_credentials': any(a.headers for a in spec.actors) or bool(spec.request.headers)}
+        if retest_of:                      # 발견 재검증으로 생성된 새 실행임을 표시(리뷰 P2)
+            data['retest_of'] = retest_of
         run_id = self.store.create(data)
         self.specs[run_id] = spec
         self.start(run_id)
@@ -445,6 +447,41 @@ class AgentManager:
             raise ValueError('해당 발견을 찾을 수 없습니다.')
         self.store.event(run_id, 'finding_update', {'finding_id': finding_id, **patch})
         return self.snapshot(run_id)
+
+    def retest_finding(self, run_id, finding_id, request_headers=None, actor_headers=None):
+        """발견을 '새 실행'으로 재검증한다(리뷰 P2). 원본 run/증거는 수정하지 않고, 발견의
+        엔드포인트·공격 유형·행위자에 대해 고정 confirm 계획 한 단계를 실행하는 새 run 을 만든다.
+        자격증명은 resume 과 같은 방식으로 재주입한다. 재개(resume)와 달리 별도 실행이다.
+        KeyError 면 원본 run 없음; 재검증 불가 발견이면 ValueError."""
+        run = self.store.get(run_id)
+        data, events = run['data'], self.store.events(run_id)
+        finding = next((f for f in build_findings(run_id, data, events) if f['id'] == finding_id), None)
+        if finding is None:
+            raise ValueError('해당 발견을 찾을 수 없습니다.')
+        actions = {e['step_id']: e['data'] for e in events if e['kind'] == 'action' and e['step_id']}
+        origin = next((actions[s] for s in finding['step_ids'] if s in actions), {})
+        category = origin.get('category') or ''
+        if category not in _ALLOWED_PLAN_CATEGORIES:
+            raise ValueError('이 발견은 재검증 가능한 공격 유형이 아닙니다(접근 제어·관측 등은 아직 지원하지 않습니다).')
+        endpoint = data['endpoints'].get(finding['endpoint_id'])
+        if not endpoint or not endpoint.get('url'):
+            raise ValueError('발견의 대상 엔드포인트를 찾을 수 없습니다.')
+        actor_id = finding['actor_id'] or 'current'
+        method = (endpoint.get('method') or 'GET').upper()
+        plan = {'entry': 'retest', 'steps': [{'action_id': 'retest', 'action': {
+            'kind': 'confirm', 'hypothesis': f'발견 재검증({category})', 'category': category,
+            'location': origin.get('location', 'param'), 'param': origin.get('param', ''),
+            'actor_id': actor_id, 'endpoint_id': 'seed'}, 'branches': [], 'default_next': ''}]}
+        cost = 1 + 2 * len(confirm.probe_plan(category, ''))
+        spec = RunSpec.model_validate({
+            'goal': f'발견 재검증: {category} @ {urlsplit(endpoint["url"]).path or "/"}',
+            'request': {'method': method, 'url': endpoint['url'], 'params': endpoint.get('params', {}),
+                        'body': endpoint.get('body', ''), 'headers': request_headers or {}},
+            'actors': [{'id': actor_id, 'headers': (actor_headers or {}).get(actor_id, {})}],
+            'max_steps': 2, 'max_requests': min(150, cost + 2), 'max_ai_calls': 0, 'max_seconds': 120,
+            'allow_write_methods': method not in ('GET', 'HEAD'), 'approved_plan': plan})
+        new_id = self.create(spec, retest_of={'finding_id': finding_id, 'run_id': run_id, 'category': category})
+        return self.snapshot(new_id)
 
     def start(self, run_id, request_headers=None, actor_headers=None):
         if run_id in self.tasks and not self.tasks[run_id].done():

@@ -106,6 +106,20 @@ def update_finding(run_id: str, finding_id: str, patch: FindingPatch):
         raise HTTPException(400, str(exc))
 
 
+@router.post('/runs/{run_id}/findings/{finding_id}/retest')
+async def retest_finding(run_id: str, finding_id: str, req: ResumeRequest):
+    """발견을 새 실행으로 재검증한다(리뷰 P2). 원본 증거 불변, 자격증명은 재주입."""
+    manager = get_manager()
+    if sum(not task.done() for task in manager.tasks.values()) >= 2:
+        raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
+    try:
+        return manager.retest_finding(run_id, finding_id, req.request_headers, req.actor_headers)
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.get('/runs/{run_id}/report', response_class=HTMLResponse)
 def run_report(run_id: str):
     """로컬 생성 HTML 보고서. 외부 AI/대상 요청 없이 저장된 증거만으로 렌더링한다."""

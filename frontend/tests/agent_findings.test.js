@@ -41,7 +41,8 @@ function setup() {
     uiCommand:(icon,label,action,cls='icon-button')=>{const b=new Element('button');b.append(new Element('icon-'+icon));b.title=label;b.onclick=action;return b;},
     setDetailMode:()=>{},
     agentApi:async(path,data,method)=>{calls.push({path,data,method});return context._updated;},
-    _awRun:null, _updated:null, console, Date, Set, Map,
+    getHeadersObj:()=>({Cookie:'s=1'}), selectRun:(id)=>{context._selected=id;}, confirm:()=>context._confirm!==false,
+    _awRun:null, _updated:null, _selected:null, _confirm:true, console, Date, Set, Map,
   });
   vm.runInContext(source,context);
   return {context,get,calls,opens};
@@ -93,6 +94,27 @@ test('triage PATCHes the local endpoint and adopts the returned snapshot',async(
   assert.equal(calls[0].path,'/runs/run1/findings/f1');
   assert.deepEqual({...calls[0].data},{status:'resolved'});
   assert.equal(context._awRun.findings[0].status,'resolved'); // server truth adopted
+});
+
+test('vuln findings offer retest; it confirms, posts to the retest endpoint, and navigates',async()=>{
+  const {context,get,calls}=setup();
+  context.renderAgentFindings(run([finding({id:'f1',category:'sqli'})]));
+  const retestBtn=allNodes(get('fdDetail')).find(n=>n.tagName==='button'&&n.textContent==='새 실행으로 재검증');
+  assert(retestBtn,'retest button present for a vuln finding');
+  context._updated={id:'retest-run'};
+  await retestBtn.onclick();
+  const call=calls.find(c=>c.path==='/runs/run1/findings/f1/retest');
+  assert(call && call.data.request_headers.Cookie==='s=1');   // reuses current session headers
+  assert.equal(context._selected,'retest-run');               // navigates to the new run
+});
+
+test('a non-vuln finding offers no retest, and declining the confirm sends nothing',async()=>{
+  const {context,get,calls}=setup();
+  context.renderAgentFindings(run([finding({id:'f1',category:'access',verdict:'confirmed'})]));
+  assert(!allNodes(get('fdDetail')).some(n=>n.textContent==='새 실행으로 재검증')); // access is not retestable here
+  context._confirm=false;
+  await context.retestFinding({id:'f1',category:'sqli'});
+  assert(!calls.some(c=>c.path==='/runs/run1/findings/f1/retest'));  // declined → no request
 });
 
 test('report button opens the local report endpoint for the current run only',()=>{
