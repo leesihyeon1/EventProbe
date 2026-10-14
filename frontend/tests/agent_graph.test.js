@@ -160,6 +160,32 @@ test('9. evidence detail renders response body as text, never HTML (XSS-safe)', 
   assert.ok(flat.every(n => n.innerHTML === undefined), 'innerHTML 미사용');
 });
 
+test('14. loop/self plan branch draws NO actual_flow (planned-only); target keeps run contains', () => {
+  const plan = { entry: 'A', steps: [
+    { action_id: 'A', action: { kind: 'observe' }, branches: [{ predicate: { kind: 'always' }, next: 'B' }], default_next: '' },
+    { action_id: 'B', action: { kind: 'probe' }, branches: [{ predicate: { kind: 'always' }, next: 'A' }], default_next: '' }] };
+  const m = build([
+    ev('pl', 'plan', '', plan),
+    ev('aA', 'action', 'SA', { kind: 'observe', basis: [] }),
+    ev('pbA', 'plan_branch', 'SA', { action_id: 'A', verdict: 'x', next: 'B' }),   // 정방향
+    ev('aB', 'action', 'SB', { kind: 'probe', basis: [] }),
+    ev('pbB', 'plan_branch', 'SB', { action_id: 'B', verdict: 'y', next: 'A' }),   // 되돌이 — A 재실행 안 됨
+  ]);
+  const af = [...m.edges.filter(e => e.type === 'actual_flow').map(e => e.source + '->' + e.target)];
+  assert.deepEqual(af, ['aA->aB']);                                  // 되돌이 B->A 는 미표시
+  assert.ok(m.edges.some(e => e.type === 'contains' && e.target === 'aA'));  // 거짓 유입 없어 contains 유지
+});
+
+test('15. plan lane layers horizontally (entry→steps across columns)', () => {
+  const plan = { entry: 'p1', steps: [
+    { action_id: 'p1', action: { kind: 'probe' }, branches: [{ predicate: { kind: 'always' }, next: 'p2' }], default_next: '' },
+    { action_id: 'p2', action: { kind: 'confirm' }, branches: [], default_next: '' }] };
+  const m = ctx.layoutGraph(build([ev('pl', 'plan', '', plan)]));
+  const root = m.nodes.get('plan:pl'), s1 = m.nodes.get('plan:pl:p1'), s2 = m.nodes.get('plan:pl:p2');
+  assert.ok(root.layer < s1.layer && s1.layer < s2.layer, '예정 경로가 가로로 레이어링');
+  assert.ok(root.x < s1.x && s1.x < s2.x, 'x 가 경로를 따라 증가');
+});
+
 test('11. static guard: no egress / innerHTML in agent_graph.js and agent.css', () => {
   const src = fs.readFileSync(SRC, 'utf8');
   assert.ok(!/\bfetch\s*\(/.test(src), 'no fetch');

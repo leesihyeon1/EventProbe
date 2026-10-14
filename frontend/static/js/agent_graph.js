@@ -166,8 +166,8 @@ function buildGraphModel(events, run) {
   const bySeg = {};
   for (const pb of planBranches) (bySeg[pb.segment] = bySeg[pb.segment] || []).push(pb);
   for (const seg of Object.keys(bySeg)) {
-    const execByDsl = {};   // DSL action_id → 실행된 step_id (이 세그먼트)
-    for (const pb of bySeg[seg]) if (pb.step_id) execByDsl[pb.action_id] = pb.step_id;
+    const execInfo = {};   // DSL action_id → {step_id, order} 실제 실행 정보(이 세그먼트)
+    for (const pb of bySeg[seg]) if (pb.step_id && !(pb.action_id in execInfo)) execInfo[pb.action_id] = { step: pb.step_id, order: pb.order };
     for (const pb of bySeg[seg]) {
       const srcAction = actionByStep[pb.step_id];
       const planStepId = 'plan:' + seg + ':' + pb.action_id;
@@ -176,9 +176,12 @@ function buildGraphModel(events, run) {
         nodes.get(planStepId).realized = true;
       }
       if (srcAction && pb.next && pb.next !== '(stop)') {
-        const tgtAction = actionByStep[execByDsl[pb.next]];
-        if (tgtAction) edge(srcAction, tgtAction, 'actual_flow', 'plan_branch.next');
-        else warnings.push('actual_flow 미해결 next=' + pb.next);
+        const tgt = execInfo[pb.next];
+        // 다음 분기가 '이 분기보다 나중에' 실제 실행됐을 때만 실행 경로 간선을 그린다.
+        // 되돌이/자기 분기(계획이 고른 뒤 visited 로 재실행 안 됨)는 예정(dashed) 간선으로만 두고
+        // 실행 경로(actual_flow)로는 그리지 않는다 — 예정≠실행 불변식 유지(리뷰 F1).
+        if (tgt && tgt.order > pb.order) edge(srcAction, actionByStep[tgt.step], 'actual_flow', 'plan_branch.next');
+        else if (!tgt) warnings.push('actual_flow 미해결 next=' + pb.next);
       }
     }
   }
@@ -225,14 +228,15 @@ function buildGraphModel(events, run) {
 /* ── 2. 레이아웃(순수) — 최장경로 레이어링(위상정렬), 레인별 밴드 ──────────────── */
 function layoutGraph(model) {
   const COL_W = 210, ROW_H = 72, PAD = 28, NODE_W = 176, NODE_H = 48;
-  const FWD = new Set(['contains', 'action_request', 'request_observation', 'cited', 'basis', 'actual_flow', 'step_marker']);
+  const EXEC_FWD = new Set(['contains', 'action_request', 'request_observation', 'cited', 'basis', 'actual_flow', 'step_marker']);
+  const PLAN_FWD = new Set(['plan_entry', 'planned']);   // 계획 레인은 예정 경로 간선으로 가로 레이어링
   model.NODE_W = NODE_W; model.NODE_H = NODE_H;
 
-  function layerBand(ids, yBase) {
+  function layerBand(ids, yBase, fwd) {
     const set = new Set(ids);
     const adj = {}, indeg = {};
     ids.forEach(id => { adj[id] = []; indeg[id] = 0; });
-    for (const e of model.edges) if (FWD.has(e.type) && set.has(e.source) && set.has(e.target)) adj[e.source].push(e.target);
+    for (const e of model.edges) if (fwd.has(e.type) && set.has(e.source) && set.has(e.target)) adj[e.source].push(e.target);
     for (const s of ids) for (const t of adj[s]) indeg[t]++;
     const layer = {}, q = [], work = Object.assign({}, indeg);
     ids.forEach(id => { if (!indeg[id]) { layer[id] = 0; q.push(id); } });
@@ -260,9 +264,9 @@ function layoutGraph(model) {
 
   // 계획 레인(예정)을 위 밴드에, 실행 레인을 아래 밴드에, meta 는 그 아래 한 줄.
   let y = PAD;
-  if (model.lanes.plan.length) y = layerBand(model.lanes.plan, PAD) + 24;
+  if (model.lanes.plan.length) y = layerBand(model.lanes.plan, PAD, PLAN_FWD) + 24;
   const execTop = y;
-  const execBottom = layerBand(model.lanes.exec, execTop);
+  const execBottom = layerBand(model.lanes.exec, execTop, EXEC_FWD);
   let metaY = execBottom + 16;
   model.lanes.meta.forEach((id, i) => { const n = model.nodes.get(id); n.x = PAD + i * COL_W; n.y = metaY; });
 
@@ -294,10 +298,17 @@ function renderAgentGraph(run) {
   const model = layoutGraph(buildGraphModel(run.events || [], run));
   _graphModel = model;
   const sameRun = graphView.runId === run.id;
-  const nodeChanged = model.nodes.size !== graphView.nodeCount;
+  const evCount = (run.events || []).length;
+  // 변경 없음(같은 실행·노드수·이벤트수)이고 이미 그려졌으면 DOM 재구성을 건너뛴다.
+  // 2초 폴링마다 전체 teardown 하면 키보드 포커스·상세 스크롤이 사라지므로, 실제 변화가
+  // 있을 때만 다시 그린다(pan/zoom/선택 보존).
+  if (sameRun && model.nodes.size === graphView.nodeCount && evCount === graphView.eventCount
+      && svg.querySelector('#gViewport')) {
+    return;
+  }
   graphView.runId = run.id;
   graphView.nodeCount = model.nodes.size;
-  graphView.eventCount = (run.events || []).length;
+  graphView.eventCount = evCount;
 
   svg.setAttribute('viewBox', '0 0 ' + Math.max(1, model.width) + ' ' + Math.max(1, model.height));
   svg.replaceChildren();
@@ -332,7 +343,12 @@ function renderAgentGraph(run) {
 
   _applyGraphTransform();
   _bindGraphInteractions(svg);
-  if (!sameRun) { graphView.selectedId = null; _fitGraph(); }
+  if (!sameRun) {   // 실행 전환 시 이전 실행의 노드 상세가 남지 않게 초기화
+    graphView.selectedId = null;
+    const panel = agentEl('agentGraphDetail');
+    if (panel) { panel.hidden = true; panel.replaceChildren(); }
+    _fitGraph();
+  }
   if (graphView.selectedId && model.nodes.has(graphView.selectedId)) selectGraphNode(graphView.selectedId, true);
   const warn = agentEl('agentGraphWarn');
   if (warn) { warn.hidden = !model.warnings.length; warn.textContent = model.warnings.length ? ('미해결 링크 ' + model.warnings.length + '개는 생략됨') : ''; }
