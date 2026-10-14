@@ -84,6 +84,8 @@ from routers.api import router as api_router
 app.include_router(api_router)
 from routers.agent import router as agent_router
 app.include_router(agent_router)
+from routers.agent_history import router as agent_history_router
+app.include_router(agent_history_router)
 
 # 정적 파일
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "static")

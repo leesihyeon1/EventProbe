@@ -101,7 +101,7 @@ test('conclusion evidence button opens the linked verification event',()=>{
 
 test('detail tabs have one selected panel and support arrow navigation',()=>{
   const {context,get}=setup();
-  let initialized=0;context.initSiteMap=()=>initialized++;context.initFindings=()=>{};context.resetCoverage=()=>{};
+  let initialized=0;context.initSiteMap=()=>initialized++;context.initFindings=()=>{};context.initHistory=()=>{};context.loadHistoryPage=()=>{};context.resetCoverage=()=>{};
   context.initAgentWorkspace();
   assert.equal(initialized,1);
   context.setDetailMode('sitemap');

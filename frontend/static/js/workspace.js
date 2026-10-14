@@ -57,7 +57,7 @@ function openAgentNew() {
   agentEl('agentFormError').hidden=true; resetPlanPreview(); agentEl('agentNew').showModal();
 }
 let agentDetailMode='timeline', _awRun=null;
-const DETAIL_VIEWS={timeline:['agentEvents','awTabTimeline'],graph:['agentGraph','awTabGraph'],sitemap:['agentSiteMap','awTabSiteMap'],findings:['agentFindings','awTabFindings'],coverage:['agentCoverage','awTabCoverage']};
+const DETAIL_VIEWS={timeline:['agentEvents','awTabTimeline'],history:['agentHistory','awTabHistory'],graph:['agentGraph','awTabGraph'],sitemap:['agentSiteMap','awTabSiteMap'],findings:['agentFindings','awTabFindings'],coverage:['agentCoverage','awTabCoverage']};
 function syncDetailMode() {
   for(const [mode,[panel,tab]] of Object.entries(DETAIL_VIEWS)) {
     const selected=agentDetailMode===mode;
@@ -69,6 +69,7 @@ function syncDetailMode() {
   if(_awRun && agentDetailMode==='sitemap') renderAgentSiteMap(_awRun);
   if(_awRun && agentDetailMode==='findings') renderAgentFindings(_awRun);
   if(_awRun && agentDetailMode==='coverage') renderAgentCoverage(_awRun);
+  if(_awRun && agentDetailMode==='history') loadHistoryPage();
 }
 function setDetailMode(mode) {
   agentDetailMode = Object.hasOwn(DETAIL_VIEWS,mode) ? mode : 'timeline';
@@ -95,6 +96,7 @@ function initAgentWorkspace() {
   });
   initSiteMap();
   initFindings();
+  initHistory();
   agentEl('awGraphZoomIn').onclick=()=>_zoomGraph(1.2);
   agentEl('awGraphZoomOut').onclick=()=>_zoomGraph(0.83);
   agentEl('awGraphFit').onclick=()=>_fitGraph();

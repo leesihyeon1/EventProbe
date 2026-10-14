@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/css/sitemap.css">
   <link rel="stylesheet" href="/static/css/findings.css">
   <link rel="stylesheet" href="/static/css/coverage.css">
+  <link rel="stylesheet" href="/static/css/agent_history.css">
 </head>
 <body data-view="agent">
 <aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
@@ -420,6 +421,7 @@
             <div class="aw-section-title aw-detail-tabs"><h3>실행 기록</h3>
               <div class="aw-view-toggle" role="tablist" aria-label="상세 보기 방식">
                 <button id="awTabTimeline" role="tab" aria-selected="true" aria-controls="agentEvents">타임라인</button>
+                <button id="awTabHistory" role="tab" aria-selected="false" aria-controls="agentHistory" tabindex="-1">기록 탐색</button>
                 <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
                 <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
                 <button id="awTabFindings" role="tab" aria-selected="false" aria-controls="agentFindings" tabindex="-1">발견</button>
@@ -428,6 +430,14 @@
               <span class="aw-muted" id="agentEventCount"></span>
             </div>
             <div id="agentEvents" class="aw-events" role="tabpanel" aria-labelledby="awTabTimeline"></div>
+            <section id="agentHistory" class="ah-history" role="tabpanel" aria-labelledby="awTabHistory" hidden>
+              <div class="ah-toolbar">
+                <span id="ahCount" class="aw-muted" role="status"></span>
+                <button id="ahRefresh" class="icon-button" type="button" title="새 이벤트 조회" aria-label="새 이벤트 조회"><span data-icon="RefreshCw"></span></button>
+              </div>
+              <div id="ahEvents" class="aw-events"></div>
+              <button id="ahMore" class="aw-link" type="button" hidden><span data-icon="ChevronDown"></span>다음 이벤트</button>
+            </section>
             <div id="agentGraph" class="aw-graph" role="tabpanel" aria-labelledby="awTabGraph" hidden>
               <div class="aw-graph-toolbar" role="group" aria-label="그래프 보기 제어">
                 <span class="aw-muted aw-graph-legend">Run→Action→Request→Observation→Verification · 로컬 렌더(외부 통신 없음)</span>
@@ -987,6 +997,7 @@
 <script src="/static/js/app.js"></script>
 <script src="/static/js/agent.js"></script>
 <script src="/static/js/agent_graph.js"></script>
+<script src="/static/js/agent_history.js"></script>
 <script src="/static/js/agent_sitemap.js"></script>
 <script src="/static/js/agent_findings.js"></script>
 <script src="/static/js/agent_coverage.js"></script>
