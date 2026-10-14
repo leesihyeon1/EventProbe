@@ -466,6 +466,25 @@ class AgentManager:
         for run_id in list(self.tasks):
             await self.stop(run_id)
 
+    def _record_discovery(self, run_id, data, request, observation, step_id):
+        """Keep local provenance; discovery never sends requests or planner feedback."""
+        skipped = 0
+        for found in discover(request, observation['response']):
+            key = request_key(found)
+            eid = key[:16]
+            if key == request_key(data['endpoints']['seed']) or eid in data['endpoints']:
+                continue
+            if len(data['endpoints']) >= 40:
+                skipped += 1
+                continue
+            data['endpoints'][eid] = found
+            self.store.event(run_id, 'discovery', {
+                'endpoint_id': eid, 'source_observation_id': observation['id'],
+                'source': 'response',
+            }, step_id)
+        if skipped:
+            self.store.event(run_id, 'discovery_limit', {'limit': 40, 'skipped': skipped}, step_id)
+
     async def _next_action(self, run_id, spec, data, context, save, budget, deadline):
         """Repair planner-only failures within the original budget; never replay HTTP here."""
         feedback = None
@@ -546,10 +565,7 @@ class AgentManager:
             return plan_mod.StepResult(verdict='inconclusive')
         req = data['endpoints'][action.endpoint_id]
         baseline = await fetch(req, action.actor_id, '', '', None, step_id)
-        for found in discover(req, baseline['response']):
-            eid = request_key(found)[:16]
-            if len(data['endpoints']) < 40 and request_key(found) != request_key(data['endpoints']['seed']):
-                data['endpoints'].setdefault(eid, found)
+        self._record_discovery(run_id, data, req, baseline, step_id)
         status0 = baseline['response']['status']
         if action.kind == 'observe':
             return plan_mod.StepResult(verdict='observed', status_code=status0)
@@ -853,10 +869,7 @@ class AgentManager:
                         raise ValueError('관측되지 않은 엔드포인트입니다.')
                     req = data['endpoints'][action.endpoint_id]
                     baseline = await fetch(req, action.actor_id)
-                    for found in discover(req, baseline['response']):
-                        eid = request_key(found)[:16]
-                        if len(data['endpoints']) < 40 and request_key(found) != request_key(data['endpoints']['seed']):
-                            data['endpoints'].setdefault(eid, found)
+                    self._record_discovery(run_id, data, req, baseline, step_id)
                     if action.kind == 'observe':
                         continue
                     if action.kind == 'confirm':

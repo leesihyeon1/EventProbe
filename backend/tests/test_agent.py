@@ -56,6 +56,34 @@ def test_redirect_is_recorded_but_not_followed(tmp_path):
     assert len(run['data']['endpoints']) == 1
 
 
+def test_discovery_provenance_is_persisted_without_fetching_links(tmp_path):
+    requested = []
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(200, text='<a href="/next">next</a><a href="https://outside.test/">outside</a>',
+                              headers={'content-type': 'text/html'})
+    manager, run = run_agent(tmp_path, handler)
+    assert len(requested) == 1
+    discoveries = [e for e in run['events'] if e['kind'] == 'discovery']
+    assert len(discoveries) == 1
+    item = discoveries[0]
+    observation = next(e for e in run['events'] if e['id'] == item['data']['source_observation_id'])
+    assert observation['kind'] == 'observation'
+    assert observation['step_id'] == item['step_id']
+    assert run['data']['endpoints'][item['data']['endpoint_id']]['url'] == 'https://app.test/next'
+    assert Store(manager.store.path).events(run['id']) == run['events']
+
+
+def test_discovery_cap_is_reported_and_does_not_expand_request_budget(tmp_path):
+    html = ''.join(f'<a href="/item/{i}">item</a>' for i in range(50))
+    _, run = run_agent(tmp_path, lambda request: httpx.Response(200, text=html, headers={'content-type': 'text/html'}))
+    assert len(run['data']['endpoints']) == 40
+    assert run['data']['requests'] == 1
+    assert len([e for e in run['events'] if e['kind'] == 'discovery']) == 39
+    limit = next(e for e in run['events'] if e['kind'] == 'discovery_limit')
+    assert limit['data'] == {'limit': 40, 'skipped': 11}
+
+
 def test_request_budget_rejects_incomplete_test_before_http(tmp_path):
     _, run = run_agent(tmp_path, lambda r: httpx.Response(200, text='OK'),
         [{'kind': 'probe', 'hypothesis': '입력 확인', 'category': 'sqli', 'param': 'id', 'payload': "'"}] * 3,

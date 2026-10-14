@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="/static/css/workspace.css">
   <link rel="stylesheet" href="/static/css/agent.css">
+  <link rel="stylesheet" href="/static/css/sitemap.css">
 </head>
 <body data-view="agent">
 <aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
@@ -406,15 +407,16 @@
             <div id="agentSummary" class="aw-run-stats"></div>
             <div id="agentResults" class="aw-results" aria-label="검증 결과"></div>
             <section id="agentConclusion" class="aw-conclusion" aria-label="검증 결론" aria-live="polite" hidden></section>
-            <div class="aw-section-title"><h3>실행 기록</h3>
+            <div class="aw-section-title aw-detail-tabs"><h3>실행 기록</h3>
               <div class="aw-view-toggle" role="tablist" aria-label="상세 보기 방식">
                 <button id="awTabTimeline" role="tab" aria-selected="true" aria-controls="agentEvents">타임라인</button>
-                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph">그래프</button>
+                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
+                <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
               </div>
               <span class="aw-muted" id="agentEventCount"></span>
             </div>
-            <div id="agentEvents" class="aw-events"></div>
-            <div id="agentGraph" class="aw-graph" hidden>
+            <div id="agentEvents" class="aw-events" role="tabpanel" aria-labelledby="awTabTimeline"></div>
+            <div id="agentGraph" class="aw-graph" role="tabpanel" aria-labelledby="awTabGraph" hidden>
               <div class="aw-graph-toolbar" role="group" aria-label="그래프 보기 제어">
                 <span class="aw-muted aw-graph-legend">Run→Action→Request→Observation→Verification · 로컬 렌더(외부 통신 없음)</span>
                 <span class="aw-muted" id="agentGraphWarn" hidden></span>
@@ -425,6 +427,26 @@
               <div class="aw-graph-stage"><svg id="agentGraphSvg" role="img" aria-label="탐색 그래프"></svg></div>
               <aside id="agentGraphDetail" class="aw-graph-detail" hidden aria-live="polite" aria-label="노드 상세"></aside>
             </div>
+            <section id="agentSiteMap" role="tabpanel" aria-labelledby="awTabSiteMap" hidden>
+              <div class="sm-toolbar">
+                <label class="aw-search"><span data-icon="Search"></span><input id="smSearch" type="search" placeholder="경로 검색" aria-label="사이트맵 검색"></label>
+                <select id="smMethod" aria-label="메서드 필터"><option value="">모든 메서드</option></select>
+                <select id="smState" aria-label="검사 상태 필터">
+                  <option value="">모든 상태</option><option value="discovered">발견 · 미요청</option><option value="requested">요청 · 응답 없음</option>
+                  <option value="observed">관측 · 미판정</option><option value="judged">판정 있음</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option>
+                  <option value="failed">요청 오류</option><option value="outside">범위 밖</option>
+                </select>
+                <div class="sm-modes" role="group" aria-label="사이트맵 보기">
+                  <button id="smTree" class="icon-button" title="트리 보기" aria-label="트리 보기" aria-pressed="true"><span data-icon="Layers"></span></button>
+                  <button id="smList" class="icon-button" title="목록 보기" aria-label="목록 보기" aria-pressed="false"><span data-icon="ListChecks"></span></button>
+                </div>
+              </div>
+              <p id="smCount" class="aw-muted sm-count" role="status"></p>
+              <div class="sm-layout">
+                <nav id="smContent" class="sm-content" aria-label="기록된 URL 경로"></nav>
+                <aside id="smDetail" class="sm-detail" aria-label="경로 상세"></aside>
+              </div>
+            </section>
           </section>
           <dialog class="aw-dialog" id="agentNew" aria-labelledby="agentNewTitle">
               <div class="aw-dialog-head"><div><span class="aw-eyebrow">NEW VERIFICATION</span><h2 id="agentNewTitle">새 검증 작업</h2></div><button class="icon-button" id="agentNewClose" aria-label="새 작업 닫기" title="닫기"><span data-icon="X"></span></button></div>
@@ -902,6 +924,7 @@
 <script src="/static/js/app.js"></script>
 <script src="/static/js/agent.js"></script>
 <script src="/static/js/agent_graph.js"></script>
+<script src="/static/js/agent_sitemap.js"></script>
 <script src="/static/js/workspace.js"></script>
 </body>
 </html>

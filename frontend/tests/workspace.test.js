@@ -98,3 +98,35 @@ test('conclusion evidence button opens the linked verification event',()=>{
   assert.equal(event.querySelector('summary').focused,true);
   assert.equal(get('agentEvents').hidden,false);
 });
+
+test('three detail tabs have one selected panel and support arrow navigation',()=>{
+  const {context,get}=setup();
+  let initialized=0;context.initSiteMap=()=>initialized++;
+  context.initAgentWorkspace();
+  assert.equal(initialized,1);
+  context.setDetailMode('sitemap');
+  assert.equal(get('agentSiteMap').hidden,false);
+  assert.equal(get('agentEvents').hidden,true);
+  assert.equal(get('agentGraph').hidden,true);
+  assert.equal(get('awTabSiteMap').tabIndex,0);
+  assert.equal(get('awTabTimeline').tabIndex,-1);
+  let prevented=false;
+  get('awTabSiteMap').onkeydown({key:'ArrowLeft',preventDefault(){prevented=true;}});
+  assert(prevented);
+  assert.equal(get('agentGraph').hidden,false);
+  assert.equal(get('agentSiteMap').hidden,true);
+  assert.equal(get('awTabGraph').focused,true);
+});
+
+test('sitemap receives only the existing run snapshot, and switching tasks clears it',()=>{
+  const {context,get}=setup();
+  let snapshot=null,resets=0;
+  context.renderAgentSiteMap=run=>snapshot=run;context.resetSiteMap=()=>resets++;
+  const run={id:'synthetic',state:'completed',data:{spec:{goal:'synthetic'},endpoints:{},steps:0,requests:0,ai_calls:0,elapsed:0},events:[]};
+  context.setDetailMode('sitemap');context.renderAgentWorkspace(run);
+  assert.equal(snapshot,run);
+  context.showAgentDetail();
+  assert.equal(resets,1);
+  assert.equal(vm.runInContext('_awRun',context),null);
+  assert.equal(get('agentRunTitle').textContent,'작업 불러오는 중');
+});

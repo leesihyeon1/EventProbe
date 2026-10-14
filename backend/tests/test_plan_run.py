@@ -95,6 +95,26 @@ def test_plan_mode_does_not_use_iterative_planner(tmp_path, monkeypatch):
     assert run['state'] == 'completed'
 
 
+def test_plan_discovery_records_source_without_crawling(tmp_path, monkeypatch):
+    async def generate(spec):
+        return plan_mod.Plan(entry='observe', steps=[plan_mod.PlanStep(
+            action_id='observe', action=Action(kind='observe', hypothesis='synthetic'), default_next='')])
+    monkeypatch.setattr(agent_mod, 'generate_plan', generate)
+
+    async def execute():
+        manager = AgentManager(Store(tmp_path / 'discovery.db'), transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, text='<a href="/next">next</a>', headers={'content-type': 'text/html'})))
+        rid = manager.create(RunSpec(goal='synthetic', request={'url': 'https://app.test/'}, mode='plan'))
+        await manager.tasks[rid]
+        return manager.snapshot(rid)
+    run = asyncio.run(execute())
+    assert run['state'] == 'completed'
+    assert run['data']['requests'] == 1
+    discovery = next(e for e in run['events'] if e['kind'] == 'discovery')
+    assert any(e['id'] == discovery['data']['source_observation_id'] and e['kind'] == 'observation' for e in run['events'])
+    assert run['data']['endpoints'][discovery['data']['endpoint_id']]['url'] == 'https://app.test/next'
+
+
 # ── F4·F5·F6 영구 회귀 (계약 검사의 상설판) ──────────────────────────────────────
 def _single_step(tmp_path, kind):
     """_exec_plan_step 한 번을 모의 fetch 로 실행하고 (호출기록, 결과) 반환."""
