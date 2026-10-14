@@ -30,6 +30,9 @@ class Store:
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, deleted REAL NOT NULL,
                     reason TEXT NOT NULL, state TEXT NOT NULL, events INTEGER NOT NULL,
                     goal TEXT NOT NULL, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS templates (
+                    id TEXT PRIMARY KEY, created REAL NOT NULL, name TEXT NOT NULL,
+                    category TEXT NOT NULL, spec TEXT NOT NULL);
             ''')
 
     @contextmanager
@@ -108,6 +111,32 @@ class Store:
         with self.connect() as db:
             rows = db.execute('SELECT * FROM deletions ORDER BY deleted DESC LIMIT ?', (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    def save_template(self, name, category, spec):
+        """재사용 검증 템플릿 저장(리뷰 N1). spec 에는 자격증명을 담지 않는다(호출부에서 제거)."""
+        tid = uid()
+        with self.connect() as db:
+            db.execute('INSERT INTO templates VALUES (?,?,?,?,?)',
+                       (tid, time.time(), name, category, json.dumps(spec, ensure_ascii=False)))
+        return tid
+
+    def templates(self):
+        with self.connect() as db:
+            rows = db.execute('SELECT id,created,name,category,spec FROM templates ORDER BY created DESC LIMIT 100').fetchall()
+        return [{'id': r['id'], 'created': r['created'], 'name': r['name'], 'category': r['category'],
+                 'goal': json.loads(r['spec']).get('goal', '')} for r in rows]
+
+    def template(self, tid):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM templates WHERE id=?', (tid,)).fetchone()
+        if row is None:
+            raise KeyError(tid)
+        return {'id': row['id'], 'name': row['name'], 'category': row['category'], 'spec': json.loads(row['spec'])}
+
+    def delete_template(self, tid):
+        with self.connect() as db:
+            cur = db.execute('DELETE FROM templates WHERE id=?', (tid,))
+        return cur.rowcount > 0
 
     def prune(self, max_age_days):
         """보존 기간(일) 초과 run(+증거) 정리. max_age_days<=0 이면 아무것도 안 함. 삭제 수 반환.

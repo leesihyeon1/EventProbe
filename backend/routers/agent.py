@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from core.agent import get_manager, generate_plan, owner_scope_enabled, owns
+from core.agent import get_manager, generate_plan, owner_scope_enabled, owns, template_spec
 from core.agent_findings import build_report_html
 from core.agent_models import RunSpec
 from core.plan import plan_fingerprint
@@ -22,6 +22,12 @@ class FindingPatch(BaseModel):
     status: str | None = None
     severity: str | None = None
     note: str | None = None
+
+
+class TemplateSave(BaseModel):
+    name: str
+    category: str = ''
+    spec: RunSpec
 
 
 def _principal(request: Request) -> str:
@@ -67,6 +73,42 @@ def list_runs(request: Request):
 def list_deletions(limit: int = 100):
     """증거 삭제 감사(수동/보존). 삭제된 run 자체는 사라져도 기록은 남는다(리뷰 P4)."""
     return {'deletions': get_manager().store.deletions(limit)}
+
+
+@router.get('/templates')
+def list_templates():
+    """재사용 검증 템플릿 목록(리뷰 N1). 자격증명은 저장하지 않는다."""
+    return {'templates': get_manager().store.templates()}
+
+
+@router.post('/templates', status_code=201)
+def save_template(body: TemplateSave):
+    """현재 검증 설정을 템플릿으로 저장한다. 비밀값(헤더)은 제거해 저장한다(리뷰 N1)."""
+    tid = get_manager().store.save_template(
+        (body.name or '').strip()[:100] or '무제 템플릿', (body.category or '').strip()[:40],
+        template_spec(body.spec))
+    return {'id': tid}
+
+
+@router.delete('/templates/{template_id}')
+def delete_template(template_id: str):
+    if not get_manager().store.delete_template(template_id):
+        raise HTTPException(404, '템플릿을 찾을 수 없습니다.')
+    return {'deleted': True, 'id': template_id}
+
+
+@router.post('/templates/{template_id}/run', status_code=201)
+async def run_template(template_id: str, req: ResumeRequest, request: Request):
+    """템플릿을 새 실행으로 복제한다(리뷰 N1). 자격증명은 실행 시 재주입한다."""
+    manager = get_manager()
+    if sum(not task.done() for task in manager.tasks.values()) >= 2:
+        raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
+    try:
+        return manager.run_template(template_id, req.request_headers, req.actor_headers, owner=_principal(request))
+    except KeyError:
+        raise HTTPException(404, '템플릿을 찾을 수 없습니다.')
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post('/plan')

@@ -91,6 +91,9 @@ function initAgentView() {
   agentEl('egressAuditClose').onclick = () => agentEl('egressAuditDialog').close();
   agentEl('agentDeletionsBtn').onclick = openDeletions;
   agentEl('deletionsClose').onclick = () => agentEl('deletionsDialog').close();
+  agentEl('agentTemplatesBtn').onclick = openTemplates;
+  agentEl('templatesClose').onclick = () => agentEl('templatesDialog').close();
+  agentEl('agentSaveTemplate').onclick = saveTemplate;
   const user = agentEl('agentUser');
   try { user.value = localStorage.getItem('ep-user') || ''; } catch (e) {}
   setWorkspaceUser(user.value);     // 쿠키 동기화(보고서 new tab 포함 모든 요청에 실린다)
@@ -226,6 +229,61 @@ function renderEgressAudit(data) {
     tbody.append(tr);
   }
   table.append(thead, tbody); box.append(table);
+}
+
+// 검증 템플릿(리뷰 N1). 설정을 저장/복제. 자격증명은 저장하지 않고 실행 시 재주입.
+async function saveTemplate() {
+  let spec;
+  try { spec = _collectSpec(); } catch (e) { agentEl('agentFormError').hidden = false; agentEl('agentFormError').textContent = e.message; return; }
+  const name = (typeof prompt === 'function') ? prompt('템플릿 이름', spec.goal.slice(0, 40)) : spec.goal.slice(0, 40);
+  if (name === null) return;   // 취소
+  const category = (typeof prompt === 'function') ? (prompt('분류(선택)', '') || '') : '';
+  try {
+    await agentApi('/templates', { name: name, category: category, spec });
+    agentEl('agentFormError').hidden = true;
+  } catch (e) { agentEl('agentFormError').hidden = false; agentEl('agentFormError').textContent = e.message; }
+}
+async function openTemplates() {
+  agentEl('templatesList').replaceChildren(uiNode('p', 'aw-muted', '불러오는 중…'));
+  agentEl('templatesDialog').showModal();
+  try {
+    renderTemplates((await agentApi('/templates')).templates || []);
+  } catch (e) { agentEl('templatesList').replaceChildren(uiNode('p', 'aw-form-error', e.message)); }
+}
+function renderTemplates(list) {
+  const box = agentEl('templatesList'); box.replaceChildren();
+  if (!list.length) { box.append(uiNode('p', 'aw-muted', '저장된 템플릿이 없습니다. 새 작업에서 "템플릿으로 저장"을 사용하세요.')); return; }
+  for (const t of list) {
+    const row = uiNode('div', 'tpl-row');
+    const info = uiNode('div', 'tpl-info');
+    const head = uiNode('div', 'tpl-head');
+    head.append(uiNode('strong', '', t.name || '무제 템플릿'));
+    if (t.category) head.append(uiNode('span', 'aw-plan-chip', t.category));
+    info.append(head, uiNode('div', 'tpl-goal', t.goal || ''));
+    const actions = uiNode('div', 'tpl-actions');
+    const run = uiNode('button', 'aw-link', '실행'); run.type = 'button'; run.onclick = () => runTemplate(t.id);
+    const del = uiCommand('Trash2', '템플릿 삭제', () => deleteTemplate(t.id), 'icon-button');
+    actions.append(run, del);
+    row.append(info, actions); box.append(row);
+  }
+}
+async function runTemplate(id) {
+  // 템플릿 실행은 실제 대상에 요청을 보내므로 먼저 확인하고, 현재 세션 헤더를 재주입한다(리뷰 N1).
+  if (typeof confirm === 'function' && !confirm('이 템플릿으로 새 검증을 시작합니다. 대상에 실제 요청을 보냅니다. 계속할까요?')) return;
+  try {
+    const headers = (typeof getHeadersObj === 'function') ? getHeadersObj() : {};
+    const run = await agentApi(`/templates/${encodeURIComponent(id)}/run`, { request_headers: headers });
+    agentEl('templatesDialog').close();
+    await loadAgentList();
+    if (run && run.id) selectRun(run.id);
+  } catch (e) { agentEl('templatesList').replaceChildren(uiNode('p', 'aw-form-error', e.message)); }
+}
+async function deleteTemplate(id) {
+  if (typeof confirm === 'function' && !confirm('이 템플릿을 삭제할까요?')) return;
+  try {
+    await agentApi(`/templates/${encodeURIComponent(id)}`, undefined, 'DELETE');
+    renderTemplates((await agentApi('/templates')).templates || []);
+  } catch (e) { agentEl('templatesList').replaceChildren(uiNode('p', 'aw-form-error', e.message)); }
 }
 
 // 증거 삭제 기록(리뷰 P4). 삭제/보존 정리된 작업의 감사. 읽기 전용, 텍스트만.

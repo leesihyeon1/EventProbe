@@ -87,6 +87,16 @@ def ambiguous_writes(events):
     return pending
 
 
+def template_spec(spec):
+    """재사용 템플릿용 spec(dict) — 자격증명(헤더)은 제거한다(리뷰 N1: 비밀값 미저장).
+    목표·요청 구조·예산·범위·모드·승인 계획·객체 정책은 유지한다."""
+    data = spec.model_dump()
+    data['request']['headers'] = {}
+    for actor in data.get('actors', []):
+        actor['headers'] = {}
+    return data
+
+
 def owner_scope_enabled():
     """작업 소유권 범위 적용 여부(리뷰 P4). 기본 off — 끄면 기존 단일 작업공간과 동일하다.
     켜면 작업은 생성한 주체(principal)만 조회·조작할 수 있고, 소유자 미기록(레거시) 작업은
@@ -469,6 +479,16 @@ class AgentManager:
         self.specs[run_id] = spec
         self.start(run_id)
         return run_id
+
+    def run_template(self, template_id, request_headers=None, actor_headers=None, owner=''):
+        """템플릿을 새 실행으로 복제한다(리뷰 N1). 템플릿엔 자격증명이 없으므로 실행 시 재주입한다.
+        KeyError 면 템플릿 없음; spec 재구성 실패 시 ValueError."""
+        data = self.store.template(template_id)['spec']   # KeyError → 404
+        data['request'] = {**data.get('request', {}), 'headers': request_headers or {}}
+        for actor in data.get('actors', []):
+            actor['headers'] = (actor_headers or {}).get(actor['id'], {})
+        spec = RunSpec.model_validate(data)
+        return self.snapshot(self.create(spec, owner=owner or ''))
 
     def check_access(self, run_id, principal):
         """소유권 범위가 켜졌을 때 principal 이 이 작업에 접근 가능한지 확인. 불가면 PermissionError.
