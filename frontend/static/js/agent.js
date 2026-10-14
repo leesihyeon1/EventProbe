@@ -91,6 +91,10 @@ function initAgentView() {
   agentEl('egressAuditClose').onclick = () => agentEl('egressAuditDialog').close();
   agentEl('agentDeletionsBtn').onclick = openDeletions;
   agentEl('deletionsClose').onclick = () => agentEl('deletionsDialog').close();
+  const user = agentEl('agentUser');
+  try { user.value = localStorage.getItem('ep-user') || ''; } catch (e) {}
+  setWorkspaceUser(user.value);     // 쿠키 동기화(보고서 new tab 포함 모든 요청에 실린다)
+  user.oninput = () => setWorkspaceUser(user.value);
   initAgentWorkspace();
   addActorRow({ id: 'current', label: '현재 계정', headers: {} });   // 기본 계정 1행
 }
@@ -144,6 +148,19 @@ async function loadEgressPolicy() {
       if (note) note.textContent = '활성화하면 내부 응답 일부가 외부 제공자에 전달됩니다.';
     }
   }
+}
+
+// 작업공간 이름(리뷰 P4 소유권). 쿠키 ep_user 로 심어 모든 요청·보고서 new tab 에 실린다.
+// 서버에서 AGENT_SCOPE_OWNER 가 켜졌을 때만 의미가 있다(협업 작업공간 구분용, 인증 경계 아님).
+function setWorkspaceUser(value) {
+  // 쿠키 값과 서버가 읽는 principal 이 일치하도록 쿠키-안전 문자만 남긴다(인코딩하지 않음).
+  const v = (value || '').trim().slice(0, 64).replace(/[^\w.\-]/g, '');
+  try { localStorage.setItem('ep-user', v); } catch (e) {}
+  try {
+    document.cookie = v
+      ? `ep_user=${v}; path=/; samesite=lax; max-age=31536000`
+      : 'ep_user=; path=/; samesite=lax; max-age=0';
+  } catch (e) {}
 }
 
 // 반출·AI 사용 감사(리뷰 P4). 서버의 읽기 전용 감사 요약/레코드를 로컬에 텍스트로만 렌더.

@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import time
 from urllib.parse import urljoin, urlsplit, parse_qsl, urlencode
 
@@ -59,6 +60,22 @@ class PlannerServiceError(ValueError):
     def __init__(self, status):
         super().__init__(f'AI HTTP {status}; 기록을 유지하고 일시정지했습니다.')
         self.retryable = status in (408, 429, 500, 502, 503, 504)
+
+
+def owner_scope_enabled():
+    """작업 소유권 범위 적용 여부(리뷰 P4). 기본 off — 끄면 기존 단일 작업공간과 동일하다.
+    켜면 작업은 생성한 주체(principal)만 조회·조작할 수 있고, 소유자 미기록(레거시) 작업은
+    모두에게 보인다. 접근 토큰(EVENTPROBE_TOKEN)이 보안 경계이며, 이 범위는 협업 작업공간
+    구분용이다(자가 선언 principal 은 인증 경계가 아님)."""
+    return os.getenv('AGENT_SCOPE_OWNER', '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def owns(data, principal):
+    """principal 이 이 작업을 볼/다룰 수 있는가. 범위 off 면 항상 True. 소유자 미기록도 True."""
+    if not owner_scope_enabled():
+        return True
+    owner = (data or {}).get('owner', '')
+    return not owner or owner == (principal or '')
 
 
 def action_request_cost(action):
@@ -416,9 +433,10 @@ class AgentManager:
         self.session_ids = {}
         self.form_tokens = {}
 
-    def create(self, spec, retest_of=None):
+    def create(self, spec, retest_of=None, owner=''):
         data = {'spec': safe_spec(spec), 'requests': 0, 'ai_calls': 0, 'steps': 0, 'elapsed': 0,
                 'seen': [], 'endpoints': {'seed': {**spec.request.model_dump(), 'headers': {}}},
+                'owner': owner or '',      # 작업 소유권(리뷰 P4). 빈 값이면 소유자 미지정
                 'reason': '', 'needs_credentials': any(a.headers for a in spec.actors) or bool(spec.request.headers)}
         if retest_of:                      # 발견 재검증으로 생성된 새 실행임을 표시(리뷰 P2)
             data['retest_of'] = retest_of
@@ -426,6 +444,12 @@ class AgentManager:
         self.specs[run_id] = spec
         self.start(run_id)
         return run_id
+
+    def check_access(self, run_id, principal):
+        """소유권 범위가 켜졌을 때 principal 이 이 작업에 접근 가능한지 확인. 불가면 PermissionError.
+        범위 off 면 아무것도 하지 않는다(KeyError 는 호출부에서 404 로 변환)."""
+        if owner_scope_enabled() and not owns(self.store.get(run_id)['data'], principal):
+            raise PermissionError('다른 사용자가 소유한 작업입니다.')
 
     def snapshot(self, run_id):
         run = self.store.get(run_id)
@@ -448,7 +472,7 @@ class AgentManager:
         self.store.event(run_id, 'finding_update', {'finding_id': finding_id, **patch})
         return self.snapshot(run_id)
 
-    def retest_finding(self, run_id, finding_id, request_headers=None, actor_headers=None):
+    def retest_finding(self, run_id, finding_id, request_headers=None, actor_headers=None, owner=''):
         """발견을 '새 실행'으로 재검증한다(리뷰 P2). 원본 run/증거는 수정하지 않고, 발견의
         엔드포인트·공격 유형·행위자에 대해 고정 confirm 계획 한 단계를 실행하는 새 run 을 만든다.
         자격증명은 resume 과 같은 방식으로 재주입한다. 재개(resume)와 달리 별도 실행이다.
@@ -480,7 +504,8 @@ class AgentManager:
             'actors': [{'id': actor_id, 'headers': (actor_headers or {}).get(actor_id, {})}],
             'max_steps': 2, 'max_requests': min(150, cost + 2), 'max_ai_calls': 0, 'max_seconds': 120,
             'allow_write_methods': method not in ('GET', 'HEAD'), 'approved_plan': plan})
-        new_id = self.create(spec, retest_of={'finding_id': finding_id, 'run_id': run_id, 'category': category})
+        new_id = self.create(spec, retest_of={'finding_id': finding_id, 'run_id': run_id, 'category': category},
+                             owner=owner or '')
         return self.snapshot(new_id)
 
     def start(self, run_id, request_headers=None, actor_headers=None):

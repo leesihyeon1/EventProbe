@@ -1,10 +1,10 @@
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from core.agent import get_manager, generate_plan
+from core.agent import get_manager, generate_plan, owner_scope_enabled, owns
 from core.agent_findings import build_report_html
 from core.agent_models import RunSpec
 from core.plan import plan_fingerprint
@@ -23,6 +23,22 @@ class FindingPatch(BaseModel):
     note: str | None = None
 
 
+def _principal(request: Request) -> str:
+    """작업 소유권 principal(리뷰 P4). 접근 토큰(EVENTPROBE_TOKEN)이 보안 경계이고, 이 값은
+    토큰을 공유하는 사용자들 사이의 작업공간 구분용 자가 선언 식별자다(인증 경계 아님)."""
+    return (request.headers.get('x-eventprobe-user') or request.cookies.get('ep_user') or '').strip()[:64]
+
+
+def _guard(manager, run_id, request):
+    """소유권 범위가 켜졌을 때 접근 권한을 확인한다. KeyError→404, PermissionError→403."""
+    try:
+        manager.check_access(run_id, _principal(request))
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
+
+
 @router.on_event('startup')
 async def recover_runs():
     store = get_manager().store
@@ -38,8 +54,12 @@ async def stop_runs():
 
 
 @router.get('/runs')
-def list_runs():
-    return {'runs': get_manager().store.list()}
+def list_runs(request: Request):
+    runs = get_manager().store.list()
+    if owner_scope_enabled():        # 소유자 범위: 내 작업 + 소유자 미기록(레거시)만 노출(리뷰 P4)
+        principal = _principal(request)
+        runs = [r for r in runs if owns({'owner': r.get('owner', '')}, principal)]
+    return {'runs': runs}
 
 
 @router.get('/deletions')
@@ -62,44 +82,52 @@ async def preview_plan(spec: RunSpec):
 
 
 @router.post('/runs', status_code=201)
-async def create_run(spec: RunSpec):
+async def create_run(spec: RunSpec, request: Request):
     manager = get_manager()
     if sum(not task.done() for task in manager.tasks.values()) >= 2:
         raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
-    run_id = manager.create(spec)
+    run_id = manager.create(spec, owner=_principal(request))
     return manager.snapshot(run_id)
 
 
 @router.get('/runs/{run_id}')
-def get_run(run_id: str):
+def get_run(run_id: str, request: Request):
+    manager = get_manager()
+    _guard(manager, run_id, request)
     try:
-        return get_manager().snapshot(run_id)
+        return manager.snapshot(run_id)
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 
 
 @router.post('/runs/{run_id}/stop')
-async def stop_run(run_id: str):
+async def stop_run(run_id: str, request: Request):
+    manager = get_manager()
+    _guard(manager, run_id, request)
     try:
-        return await get_manager().stop(run_id)
+        return await manager.stop(run_id)
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 
 
 @router.delete('/runs/{run_id}')
-async def delete_run(run_id: str):
+async def delete_run(run_id: str, request: Request):
     """run 과 증거를 영구 삭제(보존/삭제 정책, 리뷰 F6)."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
     try:
-        return await get_manager().delete(run_id)
+        return await manager.delete(run_id)
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 
 
 @router.patch('/runs/{run_id}/findings/{finding_id}')
-def update_finding(run_id: str, finding_id: str, patch: FindingPatch):
+def update_finding(run_id: str, finding_id: str, patch: FindingPatch, request: Request):
     """발견의 상태/심각도/메모를 append-only 로 기록한다(원본 verification 불변)."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
     try:
-        return get_manager().update_finding(run_id, finding_id, patch.model_dump(exclude_none=True))
+        return manager.update_finding(run_id, finding_id, patch.model_dump(exclude_none=True))
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
     except ValueError as exc:
@@ -107,13 +135,15 @@ def update_finding(run_id: str, finding_id: str, patch: FindingPatch):
 
 
 @router.post('/runs/{run_id}/findings/{finding_id}/retest')
-async def retest_finding(run_id: str, finding_id: str, req: ResumeRequest):
+async def retest_finding(run_id: str, finding_id: str, req: ResumeRequest, request: Request):
     """발견을 새 실행으로 재검증한다(리뷰 P2). 원본 증거 불변, 자격증명은 재주입."""
     manager = get_manager()
+    _guard(manager, run_id, request)
     if sum(not task.done() for task in manager.tasks.values()) >= 2:
         raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
     try:
-        return manager.retest_finding(run_id, finding_id, req.request_headers, req.actor_headers)
+        return manager.retest_finding(run_id, finding_id, req.request_headers, req.actor_headers,
+                                      owner=_principal(request))
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
     except ValueError as exc:
@@ -121,18 +151,21 @@ async def retest_finding(run_id: str, finding_id: str, req: ResumeRequest):
 
 
 @router.get('/runs/{run_id}/report', response_class=HTMLResponse)
-def run_report(run_id: str):
+def run_report(run_id: str, request: Request):
     """로컬 생성 HTML 보고서. 외부 AI/대상 요청 없이 저장된 증거만으로 렌더링한다."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
     try:
-        return HTMLResponse(build_report_html(get_manager().snapshot(run_id)))
+        return HTMLResponse(build_report_html(manager.snapshot(run_id)))
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 
 
 @router.post('/runs/{run_id}/resume')
-async def resume_run(run_id: str, req: ResumeRequest):
+async def resume_run(run_id: str, req: ResumeRequest, request: Request):
+    manager = get_manager()
+    _guard(manager, run_id, request)
     try:
-        manager = get_manager()
         if sum(not task.done() for task in manager.tasks.values()) >= 2:
             raise ValueError('동시에 최대 두 개 실행할 수 있습니다.')
         manager.start(run_id, req.request_headers, req.actor_headers)

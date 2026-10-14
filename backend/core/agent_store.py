@@ -74,8 +74,12 @@ class Store:
     def list(self):
         with self.connect() as db:
             rows = db.execute('SELECT id,created,updated,state,data FROM runs ORDER BY created DESC LIMIT 50').fetchall()
-        return [{'id': r['id'], 'state': r['state'], 'created': r['created'],
-                 'goal': json.loads(r['data'])['spec']['goal']} for r in rows]
+        out = []
+        for r in rows:
+            data = json.loads(r['data'])
+            out.append({'id': r['id'], 'state': r['state'], 'created': r['created'],
+                        'goal': data['spec']['goal'], 'owner': data.get('owner', '')})
+        return out
 
     def _audit_deletion(self, db, run_id, row, events, reason):
         """삭제 감사 레코드를 남긴다(리뷰 P4: 증거 삭제/감사). deletions 테이블은 삭제·보존 정리의

@@ -246,6 +246,8 @@
 /* 반출·AI 사용 감사(리뷰 P4) */
 .aw-policy-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
 .aw-policy-row .aw-policy { flex:1 1 auto; }
+.aw-workspace-id { display:inline-flex; align-items:center; gap:5px; color:var(--text-muted); font-size:12px; }
+.aw-workspace-id input { width:150px; max-width:40vw; min-height:30px; border:1px solid var(--border); border-radius:6px; padding:4px 8px; background:var(--bg-primary); color:var(--text-primary); font-size:12px; }
 .ea-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 16px; }
 .ea-chip { display:flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--border); border-radius:999px; font-size:12px; background:var(--bg-secondary); }
 .ea-chip-k { color:var(--text-muted); }
