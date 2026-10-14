@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
 
@@ -90,6 +92,13 @@ class Plan(_Contract):
 
     def by_id(self) -> dict:
         return {s.action_id: s for s in self.steps}
+
+
+def plan_fingerprint(plan: Plan) -> str:
+    """승인된 계획을 실행에 '고정'하기 위한 안정적 지문. 미리보기와 실제 실행이 같은 계획인지
+    로컬에서 대조하는 감사 용도이며, 외부로 나가지 않는다(리뷰 P3: 승인본 버전/해시 고정)."""
+    canonical = json.dumps(plan.model_dump(), sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
 @dataclass

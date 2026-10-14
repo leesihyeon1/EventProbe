@@ -343,11 +343,29 @@ async def generate_plan(spec, planner=None):
         plan = plan_mod.Plan.model_validate(raw)
     except Exception as e:
         raise ValueError(f'계획 스키마 오류: {type(e).__name__}')
+    _validate_plan_scope(spec, plan)
+    return plan
+
+
+def _validate_plan_scope(spec, plan):
+    """계획을 실행 범위(허용 카테고리·계정·엔드포인트)에 비춰 검증한다. 위반 시 ValueError."""
     errors = plan_mod.validate_plan(
         plan, allowed_categories=_ALLOWED_PLAN_CATEGORIES,
         known_actor_ids={a.id for a in spec.actors}, known_endpoint_ids={'seed'})
     if errors:
         raise ValueError('허용되지 않은 계획: ' + '; '.join(errors[:5]))
+
+
+def pinned_plan(spec):
+    """사용자가 승인한 계획(spec.approved_plan)을 파싱·범위 검증해 돌려준다(리뷰 P3).
+    재생성하지 않으므로 실행 계획이 승인본과 동일함이 보장된다. 실패 시 ValueError."""
+    try:
+        plan = plan_mod.Plan.model_validate(spec.approved_plan)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f'승인된 계획 스키마 오류: {type(e).__name__}')
+    _validate_plan_scope(spec, plan)
     return plan
 
 
@@ -633,15 +651,29 @@ class AgentManager:
     async def _plan_loop(self, run_id, spec, data, fetch, budget, deadline):
         """응답-블라인드 실행(리뷰 Stage 3): 계획을 1회 생성하고 로컬 분기로 순회한다.
         다음 action 선택은 core.plan.select_next(로컬)만 쓴다 — 응답/판정을 모델로 되돌리지 않는다."""
-        # 계획 생성도 AI 호출이다 — 예산을 호출 전에 예약·저장하고 남은 시간으로 제한한다(리뷰 F5).
-        if data['ai_calls'] >= spec.max_ai_calls:
-            data['reason'] = 'AI 호출 한도에 도달했습니다.'
-            return 'limited'
-        data['ai_calls'] += 1
-        self.store.update(run_id, data, 'running')
-        with fail_after(max(.01, deadline - time.monotonic())):
-            plan = await generate_plan(spec)
-        self.store.event(run_id, 'plan', plan.model_dump())
+        if getattr(spec, 'approved_plan', None) is not None:
+            # 승인된 계획을 고정 실행한다(리뷰 P3): 재생성·AI 호출 없음. 범위를 벗어나면 안전 정지.
+            try:
+                plan = pinned_plan(spec)
+            except ValueError as exc:
+                data['stop_code'], data['reason'] = 'plan_rejected', f'승인된 계획을 거부했습니다: {exc}'
+                self.store.event(run_id, 'plan_rejected', {'reason': str(exc)})
+                return 'paused'
+            data['plan_fingerprint'] = plan_mod.plan_fingerprint(plan)
+            self.store.event(run_id, 'plan', {**plan.model_dump(),
+                                              'fingerprint': data['plan_fingerprint'], 'pinned': True})
+        else:
+            # 계획 생성도 AI 호출이다 — 예산을 호출 전에 예약·저장하고 남은 시간으로 제한한다(리뷰 F5).
+            if data['ai_calls'] >= spec.max_ai_calls:
+                data['reason'] = 'AI 호출 한도에 도달했습니다.'
+                return 'limited'
+            data['ai_calls'] += 1
+            self.store.update(run_id, data, 'running')
+            with fail_after(max(.01, deadline - time.monotonic())):
+                plan = await generate_plan(spec)
+            data['plan_fingerprint'] = plan_mod.plan_fingerprint(plan)
+            self.store.event(run_id, 'plan', {**plan.model_dump(),
+                                              'fingerprint': data['plan_fingerprint'], 'pinned': False})
         steps, current, visited = plan.by_id(), plan.entry, set()
         rank, best, best_rank, state = {'confirmed': 3, 'suspicious': 2}, 'inconclusive', 0, 'completed'
         for _ in range(plan.max_hops):

@@ -1,6 +1,7 @@
 /* 자율 검증 작업 UI — 목록 + 상세(전용 페이지 뷰). 모든 대상/AI 문자열은 텍스트로 렌더.
    이전엔 모달이었으나(리뷰 agent.js:7) 장시간 작업에 맞게 작업 목록 + 상세 타임라인 뷰로 분리. */
 let agentRunId = null, agentTimer = null, agentBusy = false, agentInited = false, agentPolicy = null;
+let _approvedPlan = null;   // 미리보기에서 승인한 계획(있으면 실행에 고정, 리뷰 P3)
 const agentEl = id => document.getElementById(id);
 
 async function agentApi(path, data, method) {
@@ -84,6 +85,8 @@ function initAgentView() {
   agentEl('agentExport').onclick = exportAgent;
   agentEl('agentAddActor').onclick = () => addActorRow();
   agentEl('agentAddObject').onclick = () => addObjectRow();
+  agentEl('agentPlanMode').onchange = syncPlanPreview;
+  agentEl('agentPlanPreviewBtn').onclick = previewPlan;
   initAgentWorkspace();
   addActorRow({ id: 'current', label: '현재 계정', headers: {} });   // 기본 계정 1행
 }
@@ -178,6 +181,78 @@ async function deleteRun(id) {
   } catch (e) { agentEl('agentStatus').textContent = e.message; }
 }
 
+function _collectSpec() {
+  const form = _currentRequestForm();
+  if (!/^https?:\/\//i.test(form.url)) throw new Error('요청 편집에서 HTTP(S) 대상 URL을 입력하세요.');
+  const headers = { ...(getUseDefaults() ? getDefaultHeaderProfile() : {}), ...getHeadersObj() };
+  // strict 모드면 응답 공유를 요청하지 않는다(서버도 context 에서 발췌를 제거하지만 이중 방어).
+  const share = agentEl('agentShare').checked && !(agentPolicy && agentPolicy.strict);
+  return {
+    goal: agentEl('agentGoal').value,
+    request: { method: form.method, url: form.url, params: form.params, body: form.body || '', headers },
+    actors: collectActors(), objects: collectObjects(),
+    max_steps: Number(agentEl('agentSteps').value), max_requests: Number(agentEl('agentRequests').value),
+    max_ai_calls: Number(agentEl('agentAiCalls').value), max_seconds: Number(agentEl('agentSeconds').value),
+    allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
+    mode: agentEl('agentPlanMode').checked ? 'plan' : 'iterative',
+  };
+}
+
+// 새 작업 대화상자를 열 때 승인 상태를 초기화한다(리뷰 P3).
+function resetPlanPreview() { _approvedPlan = null; agentEl('agentPlanSteps').replaceChildren(); syncPlanPreview(); }
+
+// 계획 모드일 때만 미리보기 영역을 노출하고, 숨길 때 승인 상태를 비운다(리뷰 P3).
+function syncPlanPreview() {
+  const on = agentEl('agentPlanMode').checked;
+  agentEl('agentPlanPreviewWrap').hidden = !on;
+  if (!on) { _approvedPlan = null; agentEl('agentPlanSteps').replaceChildren(); }
+}
+
+async function previewPlan() {
+  const btn = agentEl('agentPlanPreviewBtn'); btn.disabled = true;
+  agentEl('agentFormError').hidden = true;
+  try {
+    const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.checkValidity());
+    if (invalid) { invalid.reportValidity(); return; }
+    const { plan, fingerprint } = await agentApi('/plan', _collectSpec());
+    _approvedPlan = plan;   // 이 계획을 실행에 고정한다
+    renderPlanPreview(plan, fingerprint);
+  } catch (e) { _approvedPlan = null; agentEl('agentFormError').hidden = false; agentEl('agentFormError').textContent = e.message; agentEl('agentPlanSteps').replaceChildren(); }
+  finally { btn.disabled = false; }
+}
+
+// 미리보기 계획을 텍스트로만 렌더(마크업 주입 없음). 값은 구조 설명에 한정한다.
+function renderPlanPreview(plan, fingerprint) {
+  const box = agentEl('agentPlanSteps'); box.replaceChildren();
+  const head = document.createElement('p'); head.className = 'aw-muted';
+  head.textContent = `진입 ${plan.entry} · 단계 ${plan.steps.length}개 · 지문 ${fingerprint} (이 계획이 재생성 없이 고정 실행됩니다)`;
+  box.append(head);
+  const list = document.createElement('ol'); list.className = 'aw-plan-list';
+  for (const step of plan.steps) {
+    const li = document.createElement('li');
+    const title = document.createElement('div'); title.className = 'aw-plan-step-title';
+    title.append(_planChip(step.action.kind), document.createTextNode(` ${step.action_id}`));
+    if (step.action.category) title.append(_planChip(step.action.category, 'cat'));
+    li.append(title);
+    const hyp = document.createElement('div'); hyp.className = 'aw-plan-step-hyp'; hyp.textContent = step.action.hypothesis || '';
+    li.append(hyp);
+    const flow = (step.branches || []).map(b => `${_predicateText(b.predicate)} → ${b.next || '종료'}`);
+    flow.push(`기타 → ${step.default_next || '종료'}`);
+    const branch = document.createElement('div'); branch.className = 'aw-plan-step-branch'; branch.textContent = flow.join('  ·  ');
+    li.append(branch); list.append(li);
+  }
+  box.append(list);
+}
+function _planChip(text, kind) { const s = document.createElement('span'); s.className = 'aw-plan-chip'; if (kind) s.dataset.kind = kind; s.textContent = text; return s; }
+function _predicateText(p) {
+  if (!p) return '항상';
+  if (p.kind === 'always') return '항상';
+  if (p.kind === 'verdict_in') return '판정 ∈ ' + (p.verdicts || []).join('/');
+  if (p.kind === 'status_in') return '상태 ∈ ' + (p.statuses || []).join('/');
+  if (p.kind === 'signal_present') return '신호 ' + p.signal;
+  return p.kind;
+}
+
 async function startAgent() {
   if (agentBusy) return;
   agentBusy = true;
@@ -185,20 +260,10 @@ async function startAgent() {
   try {
     const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.checkValidity());
     if (invalid) { invalid.reportValidity(); return; }
-    const form = _currentRequestForm();
-    if (!/^https?:\/\//i.test(form.url)) throw new Error('요청 편집에서 HTTP(S) 대상 URL을 입력하세요.');
-    const headers = { ...(getUseDefaults() ? getDefaultHeaderProfile() : {}), ...getHeadersObj() };
-    // strict 모드면 응답 공유를 요청하지 않는다(서버도 context 에서 발췌를 제거하지만 이중 방어).
-    const share = agentEl('agentShare').checked && !(agentPolicy && agentPolicy.strict);
-    const run = await agentApi('/runs', {
-      goal: agentEl('agentGoal').value,
-      request: { method: form.method, url: form.url, params: form.params, body: form.body || '', headers },
-      actors: collectActors(), objects: collectObjects(),
-      max_steps: Number(agentEl('agentSteps').value), max_requests: Number(agentEl('agentRequests').value),
-      max_ai_calls: Number(agentEl('agentAiCalls').value), max_seconds: Number(agentEl('agentSeconds').value),
-      allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
-      mode: agentEl('agentPlanMode').checked ? 'plan' : 'iterative',
-    });
+    const spec = _collectSpec();
+    // 계획 모드에서 승인한 미리보기가 있으면 그 계획을 고정해 실행한다(재생성 없음, 리뷰 P3).
+    if (spec.mode === 'plan' && _approvedPlan) spec.approved_plan = _approvedPlan;
+    const run = await agentApi('/runs', spec);
     agentEl('agentNew').close();
     await loadAgentList();
     selectRun(run.id);

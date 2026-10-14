@@ -507,6 +507,12 @@
                     <button type="button" class="agent-add" id="agentAddObject">+ 객체 추가</button></div>
                   <div id="agentObjectsForm" class="agent-rows"></div>
                 </details>
+                <div id="agentPlanPreviewWrap" class="aw-plan-preview" hidden>
+                  <div class="aw-section-title"><h3>계획 미리보기</h3>
+                    <button class="aw-link" id="agentPlanPreviewBtn" type="button"><span data-icon="FileChartColumn"></span>계획 생성·미리보기</button></div>
+                  <p class="aw-muted" id="agentPlanHint">계획을 미리 생성해 확인한 뒤 그대로 고정해 실행할 수 있습니다. 미리보기 없이 시작하면 실행 시 1회 생성됩니다.</p>
+                  <div id="agentPlanSteps" class="aw-plan-steps" role="status" aria-live="polite"></div>
+                </div>
                 <div id="agentFormError" class="aw-form-error" role="alert" hidden></div>
               </div>
               <div class="aw-dialog-footer"><button class="btn btn-secondary" id="agentNewCancel">취소</button><button class="btn btn-primary" id="agentStart" type="button"><span data-icon="Play"></span>검증 시작</button></div>

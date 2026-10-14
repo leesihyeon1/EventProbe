@@ -55,9 +55,14 @@ class RunSpec(Contract):
     # 'iterative'(기본): 매 단계 planner 호출(응답 되먹임). 'plan': 응답-블라인드 — 비식별 입력으로
     # 계획을 1회 생성하고 실행 중 분기는 로컬에서 처리(리뷰 Stage 3).
     mode: Literal['iterative', 'plan'] = 'iterative'
+    # 사용자가 미리보기에서 승인한 계획을 실행에 고정한다(리뷰 P3). 있으면 plan 모드에서 이
+    # 계획을 재생성 없이 그대로 실행한다. 스키마/범위 검증은 실행 직전에 수행한다(core.plan).
+    approved_plan: dict | None = None
 
     @model_validator(mode='after')
     def check_scope(self):
+        if self.approved_plan is not None:
+            self.mode = 'plan'   # 승인된 계획은 응답-블라인드 실행에만 의미가 있다
         root = origin(self.request.url)
         ids = [a.id for a in self.actors]
         if len(set(ids)) != len(ids):

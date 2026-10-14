@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from core.agent import get_manager, generate_plan
 from core.agent_findings import build_report_html
 from core.agent_models import RunSpec
+from core.plan import plan_fingerprint
 
 router = APIRouter(prefix='/api/agent', tags=['context-agent'])
 
@@ -47,7 +48,9 @@ async def preview_plan(spec: RunSpec):
     실행 중 분기는 로컬에서 처리되며 응답은 외부로 나가지 않는다."""
     try:
         plan = await generate_plan(spec)
-        return {'plan': plan.model_dump()}
+        # fingerprint 로 승인본을 실행에 고정할 수 있다(리뷰 P3). 같은 계획을 approved_plan 으로
+        # 보내 run 을 만들면 재생성 없이 그대로 실행되고, plan 이벤트의 fingerprint 로 대조한다.
+        return {'plan': plan.model_dump(), 'fingerprint': plan_fingerprint(plan)}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 

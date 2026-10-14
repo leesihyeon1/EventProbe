@@ -54,7 +54,7 @@ function openAgentNew() {
   agentEl('agentRequestUrl').textContent=req.url || '대상 요청 없음';
   // Local preview only. Rendering never invokes an AI provider.
   agentEl('agentRequestPreview').textContent=JSON.stringify({params:req.params,headers:getHeadersObj(),body:req.body||''},null,2);
-  agentEl('agentFormError').hidden=true; agentEl('agentNew').showModal();
+  agentEl('agentFormError').hidden=true; resetPlanPreview(); agentEl('agentNew').showModal();
 }
 let agentDetailMode='timeline', _awRun=null;
 const DETAIL_VIEWS={timeline:['agentEvents','awTabTimeline'],graph:['agentGraph','awTabGraph'],sitemap:['agentSiteMap','awTabSiteMap'],findings:['agentFindings','awTabFindings'],coverage:['agentCoverage','awTabCoverage']};
