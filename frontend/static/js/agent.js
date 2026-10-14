@@ -87,6 +87,8 @@ function initAgentView() {
   agentEl('agentAddObject').onclick = () => addObjectRow();
   agentEl('agentPlanMode').onchange = syncPlanPreview;
   agentEl('agentPlanPreviewBtn').onclick = previewPlan;
+  agentEl('egressAuditBtn').onclick = openEgressAudit;
+  agentEl('egressAuditClose').onclick = () => agentEl('egressAuditDialog').close();
   initAgentWorkspace();
   addActorRow({ id: 'current', label: '현재 계정', headers: {} });   // 기본 계정 1행
 }
@@ -140,6 +142,53 @@ async function loadEgressPolicy() {
       if (note) note.textContent = '활성화하면 내부 응답 일부가 외부 제공자에 전달됩니다.';
     }
   }
+}
+
+// 반출·AI 사용 감사(리뷰 P4). 서버의 읽기 전용 감사 요약/레코드를 로컬에 텍스트로만 렌더.
+async function openEgressAudit() {
+  const dialog = agentEl('egressAuditDialog');
+  agentEl('egressAuditSummary').replaceChildren();
+  agentEl('egressAuditRecords').replaceChildren(uiNode('p', 'aw-muted', '불러오는 중…'));
+  dialog.showModal();
+  try {
+    renderEgressAudit(await _asJson(await fetch('/api/egress/audit'), '반출 감사'));
+  } catch (e) {
+    agentEl('egressAuditRecords').replaceChildren(uiNode('p', 'aw-form-error', e.message));
+  }
+}
+const EA_FIELDS = [['channel', '채널'], ['model', '모델'], ['dest_host', '목적지'], ['chars', '문자'], ['findings', '발견'], ['result', '결과']];
+function renderEgressAudit(data) {
+  const s = data.summary || {}, records = data.records || [];
+  const sum = agentEl('egressAuditSummary'); sum.replaceChildren();
+  const chips = [['모드', String(s.mode || '-')], ['총 호출', String(s.count || 0)],
+    ['외부 전송', String(s.external || 0)], ['차단', String(s.blocked || 0)]];
+  for (const [k, c] of Object.entries(s.channels || {})) chips.push([`채널 ${k}`, String(c)]);
+  for (const [k, c] of Object.entries(s.findings || {})) chips.push([`발견 ${k}`, String(c)]);
+  for (const [label, value] of chips) {
+    const chip = uiNode('span', 'ea-chip'); chip.append(uiNode('span', 'ea-chip-k', label), uiNode('strong', '', value));
+    if (label === '차단' && Number(value) > 0) chip.dataset.alert = 'block';
+    if (label === '외부 전송' && Number(value) > 0) chip.dataset.alert = 'ext';
+    sum.append(chip);
+  }
+  const box = agentEl('egressAuditRecords'); box.replaceChildren();
+  if (!records.length) { box.append(uiNode('p', 'aw-muted', '기록된 외부 전송이 없습니다.')); return; }
+  const table = uiNode('table', 'ea-table'), head = uiNode('tr');
+  head.append(uiNode('th', '', '시각'));
+  for (const [, label] of EA_FIELDS) head.append(uiNode('th', '', label));
+  const thead = uiNode('thead'); thead.append(head);
+  const tbody = uiNode('tbody');
+  for (const r of [...records].reverse()) {   // 최신 먼저
+    const tr = uiNode('tr'); if (r.blocked) tr.dataset.blocked = 'true';
+    tr.append(uiNode('td', 'ea-ts', r.ts || ''));
+    tr.append(uiNode('td', '', r.channel || ''));
+    tr.append(uiNode('td', '', r.model || '-'));
+    tr.append(uiNode('td', '', (r.dest_host || '-') + (r.trusted_dest ? ' · 사내' : '')));
+    tr.append(uiNode('td', '', String(r.chars ?? 0)));
+    tr.append(uiNode('td', '', (r.findings || []).map(f => `${f.kind}:${f.severity}`).join(', ') || '-'));
+    tr.append(uiNode('td', '', r.blocked ? '차단' : '전송'));
+    tbody.append(tr);
+  }
+  table.append(thead, tbody); box.append(table);
 }
 
 const AGENT_STATE_LABELS = {

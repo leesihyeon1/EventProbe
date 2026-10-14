@@ -387,7 +387,10 @@
             <div><div class="aw-eyebrow">WORKSPACE</div><h1>자율 검증</h1></div>
             <button class="btn btn-primary" id="agentNewButton"><span data-icon="Plus"></span>새 검증 작업</button>
           </div>
-          <div id="egressPolicyBanner" class="aw-policy" role="status">반출 정책 확인 중</div>
+          <div class="aw-policy-row">
+            <div id="egressPolicyBanner" class="aw-policy" role="status">반출 정책 확인 중</div>
+            <button class="aw-link" id="egressAuditBtn" type="button"><span data-icon="Activity"></span>반출 감사</button>
+          </div>
           <div id="agentListView">
             <div class="aw-metrics" id="agentMetrics" aria-label="작업 현황"></div>
             <div class="aw-toolbar">
@@ -516,6 +519,13 @@
                 <div id="agentFormError" class="aw-form-error" role="alert" hidden></div>
               </div>
               <div class="aw-dialog-footer"><button class="btn btn-secondary" id="agentNewCancel">취소</button><button class="btn btn-primary" id="agentStart" type="button"><span data-icon="Play"></span>검증 시작</button></div>
+          </dialog>
+          <dialog class="aw-dialog" id="egressAuditDialog" aria-labelledby="egressAuditTitle">
+            <div class="aw-dialog-head"><div><span class="aw-eyebrow">EGRESS AUDIT</span><h2 id="egressAuditTitle">반출·AI 사용 감사</h2></div>
+              <button class="icon-button" id="egressAuditClose" aria-label="감사 닫기" title="닫기"><span data-icon="X"></span></button></div>
+            <p class="aw-muted">서버가 기록한 외부 전송 감사입니다. 원문 값과 API 키는 포함되지 않습니다.</p>
+            <div id="egressAuditSummary" class="ea-summary"></div>
+            <div id="egressAuditRecords" class="ea-records" role="status"></div>
           </dialog>
         </div>
       </div><!-- /view:agent -->

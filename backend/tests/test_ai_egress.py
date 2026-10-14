@@ -152,6 +152,27 @@ def test_audit_redacts_secret(monkeypatch):
     assert "email" in serialized             # 종류는 남는다
 
 
+# ── 감사 요약: 운영 집계(P4) ──────────────────────────────────────────────────
+def test_audit_summary_aggregates_without_raw_values(monkeypatch):
+    monkeypatch.setenv("AI_EXPORT_MODE", "permissive")
+    ai_egress.guard({"model": "m1", "messages": [{"role": "user", "content": "hi"}]}, channel="chat", destination_url=EXT)
+    ai_egress.guard({"model": "m1", "input": ["x"]}, channel="embeddings", destination_url=INT)
+    ai_egress.guard(_chat("mail admin@corp-internal.co.kr"), channel="chat", destination_url=EXT)
+    s = ai_egress.audit_summary()
+    assert s["count"] == 3
+    assert s["channels"] == {"chat": 2, "embeddings": 1}
+    assert s["models"]["m1"] == 2             # 세 번째 호출은 모델 'm'
+    assert s["external"] == 2                 # INT 목적지는 외부 아님
+    assert s["findings"].get("email") == 1
+    assert "admin@corp-internal.co.kr" not in str(s)   # 요약에도 원문 없음
+
+
+def test_audit_summary_empty_is_safe():
+    ai_egress.clear_audit()
+    s = ai_egress.audit_summary()
+    assert s["count"] == 0 and s["channels"] == {} and s["first_ts"] == ""
+
+
 # ── 임베딩 허용 매트릭스(F3) ──────────────────────────────────────────────────
 def test_embeddings_allowed_matrix(monkeypatch):
     monkeypatch.setenv("AI_EXPORT_MODE", "permissive")

@@ -228,6 +228,31 @@ def audit_log(limit: int = 100) -> list:
     return list(_audit_buf)[-limit:]
 
 
+def audit_summary(limit: int = 500) -> dict:
+    """반출 감사 버퍼를 운영용 요약으로 집계한다(리뷰 P4: 모델 사용 기록/로그).
+    채널·모델별 호출 수, 외부 목적지 전송·차단 수, 발견 종류 분포. 원문/키는 집계하지 않는다."""
+    records = list(_audit_buf)[-limit:]
+    channels, models, findings = {}, {}, {}
+    blocked = external = 0
+    for r in records:
+        channels[r["channel"]] = channels.get(r["channel"], 0) + 1
+        if r.get("model"):
+            models[r["model"]] = models.get(r["model"], 0) + 1
+        if r.get("blocked"):
+            blocked += 1
+        if not r.get("trusted_dest"):
+            external += 1
+        for f in r.get("findings", []):
+            findings[f["kind"]] = findings.get(f["kind"], 0) + 1
+    return {
+        "count": len(records), "mode": export_mode(), "policy": POLICY_VERSION,
+        "channels": channels, "models": models, "findings": findings,
+        "blocked": blocked, "external": external,
+        "first_ts": records[0]["ts"] if records else "",
+        "last_ts": records[-1]["ts"] if records else "",
+    }
+
+
 def clear_audit() -> None:
     _audit_buf.clear()
 

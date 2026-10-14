@@ -637,6 +637,13 @@ def egress_policy():
     }
 
 
+@router.get("/egress/audit")
+def egress_audit(limit: int = 100):
+    """반출 감사 요약 + 최근 레코드(읽기 전용, 리뷰 P4: 모델 사용 기록/로그).
+    원문 민감값·API 키는 포함하지 않고 발견 종류와 축약 샘플만 있다."""
+    return {"summary": ai_egress.audit_summary(), "records": ai_egress.audit_log(limit=limit)}
+
+
 # ── ASP.NET WebForms VIEWSTATE 자동 갱신 ────────────────────────────────────
 # ASP.NET 폼(.aspx)은 요청마다 __VIEWSTATE/__EVENTVALIDATION 토큰이 유효해야 로그인
 # 로직이 처리된다. 오래되거나 없는 토큰으로 보내면 서버는 폼만 다시 렌더 → 인젝션이

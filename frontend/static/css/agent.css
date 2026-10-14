@@ -242,3 +242,18 @@
 .aw-plan-step-branch { color:var(--text-muted); font-size:11px; overflow-wrap:anywhere; }
 .aw-plan-chip { font-size:10px; font-weight:600; padding:1px 7px; border-radius:999px; background:var(--bg-tertiary); color:var(--accent); }
 .aw-plan-chip[data-kind="cat"] { color:var(--danger); background:color-mix(in srgb, var(--danger) 12%, transparent); }
+
+/* 반출·AI 사용 감사(리뷰 P4) */
+.aw-policy-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.aw-policy-row .aw-policy { flex:1 1 auto; }
+.ea-summary { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 16px; }
+.ea-chip { display:flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--border); border-radius:999px; font-size:12px; background:var(--bg-secondary); }
+.ea-chip-k { color:var(--text-muted); }
+.ea-chip[data-alert="block"] { border-color:var(--danger); color:var(--danger); }
+.ea-chip[data-alert="ext"] { border-color:var(--warning); }
+.ea-records { max-height:52vh; overflow:auto; }
+.ea-table { border-collapse:collapse; width:100%; font-size:12px; }
+.ea-table th { position:sticky; top:0; background:var(--bg-primary); text-align:left; color:var(--text-muted); font-weight:600; padding:6px 8px; white-space:nowrap; }
+.ea-table td { padding:6px 8px; border-top:1px solid var(--border); overflow-wrap:anywhere; }
+.ea-table tr[data-blocked] td { color:var(--danger); }
+.ea-ts { white-space:nowrap; color:var(--text-muted); font-size:11px; }
