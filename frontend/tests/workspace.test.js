@@ -9,6 +9,9 @@ class Element {
   append(...nodes) {this.children.push(...nodes);}
   replaceChildren(...nodes) {this.children=[...nodes];}
   setAttribute(k,v) {this.attributes[k]=v;}
+  scrollIntoView() {this.scrolled=true;}
+  focus() {this.focused=true;}
+  querySelector(selector) {return this.children.find(n=>n.tagName===selector);}
 }
 function setup() {
   const nodes=new Map();
@@ -62,4 +65,36 @@ test('detail polling preserves expanded events without duplicates',()=>{
   assert.equal(get('agentEvents').children[0].open,true);
   assert.equal(get('agentResume').disabled,false);
   assert.equal(get('agentStop').disabled,true);
+});
+
+test('partial conclusion is visible, text-only, and stable between identical polls',()=>{
+  const {context,get}=setup();
+  const conclusion={completion:'partial',verdict:'inconclusive',text:'<script>synthetic</script>',
+    counts:{confirmed:0,suspicious:0,inconclusive:1},observation_count:3,
+    stop_reason:'budget',next_steps:['review evidence'],scope_note:'not a safety claim'};
+  context.renderAgentConclusion(conclusion);
+  const panel=get('agentConclusion'),first=panel.children[0];
+  assert.equal(panel.hidden,false);
+  assert(allNodes(panel).some(n=>n.textContent==='부분 결론 · 미완료'));
+  assert(allNodes(panel).some(n=>n.textContent===conclusion.text));
+  assert(allNodes(panel).every(n=>n.innerHTML===undefined));
+  context.renderAgentConclusion(conclusion);
+  assert.equal(panel.children[0],first);
+  context.renderAgentConclusion(null);
+  assert.equal(panel.hidden,true);
+});
+
+test('conclusion evidence button opens the linked verification event',()=>{
+  const {context,get}=setup();
+  const event=context.renderWorkspaceEvent({id:'verification-1',kind:'verification',data:{status:'inconclusive'}});
+  get('agentEvents').append(event);
+  context.renderAgentConclusion({completion:'partial',verdict:'inconclusive',text:'synthetic',
+    counts:{},verifications:[{id:'verification-1',category:'sqli',status:'inconclusive',evidence_ids:['observation-1']}],
+    next_steps:[],scope_note:'scope'});
+  const button=allNodes(get('agentConclusion')).find(n=>n.tagName==='button');
+  button.onclick();
+  assert.equal(event.open,true);
+  assert.equal(event.scrolled,true);
+  assert.equal(event.querySelector('summary').focused,true);
+  assert.equal(get('agentEvents').hidden,false);
 });

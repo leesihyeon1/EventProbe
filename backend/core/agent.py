@@ -8,6 +8,7 @@ from urllib.parse import urljoin, urlsplit, parse_qsl, urlencode
 import httpx
 from anyio import fail_after
 from bs4 import BeautifulSoup
+from pydantic import ValidationError
 
 from core import ai_analyzer as ai, oob, confirm
 from core import ai_egress
@@ -17,6 +18,7 @@ from core.ai_privacy import sanitize_headers
 from core.analyzer import analyze_response
 from core.agent_models import Action, RunSpec, origin
 from core.agent_store import get_store, uid
+from core.agent_outcome import build_conclusion
 
 BODY_LIMIT = 64000
 INJECT_HEADERS = {'x-forwarded-for', 'x-original-url', 'x-rewrite-url', 'referer', 'x-forwarded-host'}
@@ -42,6 +44,30 @@ def refresh_body(body, tokens):
 
 class LimitReached(Exception):
     pass
+
+
+class PlannerStalled(ValueError):
+    pass
+
+
+class PlannerOutputError(ValueError):
+    pass
+
+
+class PlannerServiceError(ValueError):
+    def __init__(self, status):
+        super().__init__(f'AI HTTP {status}; 기록을 유지하고 일시정지했습니다.')
+        self.retryable = status in (408, 429, 500, 502, 503, 504)
+
+
+def action_request_cost(action):
+    if action.kind in ('finish', 'wait_oob'):
+        return 0
+    if action.kind == 'observe':
+        return 1
+    if action.kind == 'confirm':
+        return 1 + 2 * len(confirm.probe_plan(action.category, ''))
+    return 3
 
 
 def safe_spec(spec):
@@ -341,6 +367,8 @@ each HTTP probe counts toward remaining_requests. Reflected XSS still requires b
 access tests an explicitly provided object ownership policy with owner and unauthorized actor.
 wait_oob polls callbacks previously requested with {{oob}} in a probe payload. Callbacks do not prove data access.
 finish means no useful next action; it cannot assert success. Never invent ownership policies or evidence.
+If planner_feedback is present, correct that rejection: never repeat an executed action, include real basis IDs,
+and choose an action whose request_costs fit remaining_requests. Use finish with an honest limitation when no useful action fits.
 Do not claim success yourself. Prefer small tests that distinguish competing explanations.
 Use existing form fields; credentials and auth headers are managed by the runtime.
 Only include fields relevant to your action. HTTP response content is shared only if explicitly enabled.'''
@@ -351,8 +379,11 @@ Only include fields relevant to your action. HTTP response content is shared onl
     r = await ai._post_chat(ai._base_url(), {'Authorization': 'Bearer ' + ai._api_key(),
                             'Content-Type': 'application/json'}, payload, tries=1)
     if r.status_code != 200:
-        raise ValueError(f'AI HTTP {r.status_code}; 기록을 유지하고 일시정지했습니다.')
-    return Action.model_validate(ai._extract_json(r.json()['choices'][0]['message']['content']))
+        raise PlannerServiceError(r.status_code)
+    try:
+        return Action.model_validate(ai._extract_json(r.json()['choices'][0]['message']['content']))
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise PlannerOutputError('AI 행동 형식이 올바르지 않습니다.') from exc
 
 
 class AgentManager:
@@ -378,6 +409,7 @@ class AgentManager:
     def snapshot(self, run_id):
         run = self.store.get(run_id)
         run['events'] = self.store.events(run_id)
+        run['conclusion'] = build_conclusion(run['data'], run['events'], run['state'])
         run['requires_session'] = run_id not in self.specs and run['data']['needs_credentials']
         return run
 
@@ -433,6 +465,61 @@ class AgentManager:
     async def shutdown(self):
         for run_id in list(self.tasks):
             await self.stop(run_id)
+
+    async def _next_action(self, run_id, spec, data, context, save, budget, deadline):
+        """Repair planner-only failures within the original budget; never replay HTTP here."""
+        feedback = None
+        for attempt in range(3):
+            budget()
+            if data['ai_calls'] >= spec.max_ai_calls:
+                raise LimitReached('AI 호출 한도에 도달했습니다.')
+            ctx = context()
+            ctx['request_costs'] = {'observe': 1, 'probe': 3, 'access': 3, 'finish': 0,
+                                   'confirm': {cat: action_request_cost(Action(kind='confirm', hypothesis='cost', category=cat))
+                                               for cat in sorted(_ALLOWED_PLAN_CATEGORIES) if confirm.probe_plan(cat, '')}}
+            if feedback:
+                ctx['planner_feedback'] = feedback
+            data['ai_calls'] += 1
+            save()
+            code, transient = '', False
+            try:
+                with fail_after(max(.01, deadline - time.monotonic())):
+                    action = Action.model_validate(await self.planner(ctx))
+            except PlannerServiceError as exc:
+                if not exc.retryable:
+                    raise
+                code, transient = 'provider_temporary', True
+            except httpx.TransportError:
+                code, transient = 'provider_temporary', True
+            except (PlannerOutputError, ValidationError):
+                code = 'invalid_action_schema'
+            else:
+                events = self.store.events(run_id)
+                known = {e['id'] for e in events if e['kind'] == 'observation'}
+                if any(ref not in known for ref in action.basis):
+                    raise ValueError('현재 실행에 속하지 않은 증거 ID입니다.')
+                if action.actor_id not in {a.id for a in spec.actors} and action.kind != 'finish':
+                    raise ValueError('AI가 알 수 없는 계정을 선택했습니다.')
+                signature = request_key(action.model_dump(exclude={'hypothesis', 'expected', 'basis'}))
+                if known and not action.basis:
+                    code = 'missing_evidence_basis'
+                elif signature in data['seen']:
+                    code = 'duplicate_action'
+                elif action_request_cost(action) > spec.max_requests - data['requests']:
+                    code = 'insufficient_request_budget'
+                if not code:
+                    return action
+            # Feedback is a closed code and counters, never response text or exception input.
+            feedback = {'code': code, 'attempt': attempt + 1, 'max_attempts': 3,
+                        'remaining_requests': spec.max_requests - data['requests']}
+            self.store.event(run_id, 'planner_retry', feedback)
+            if attempt < 2 and transient:
+                await asyncio.sleep(min(.25 * (attempt + 1), max(0, deadline - time.monotonic())))
+        if feedback['code'] == 'insufficient_request_budget':
+            raise LimitReached('선택한 검사를 완료할 HTTP 요청 예산이 부족합니다. 부분 결과를 정리했습니다.')
+        if feedback['code'] == 'provider_temporary':
+            raise PlannerStalled('AI 연결 일시 오류가 3회 이어져 일시정지했습니다. 연결 상태를 확인한 뒤 재개하세요.')
+        raise PlannerStalled('유효한 새 행동을 선택하지 못해 일시정지했습니다. 재계획 3회 결과와 부분 결론을 확인하세요.')
 
     async def _exec_plan_step(self, run_id, spec, data, fetch, action, step_id):
         """계획 한 단계를 실제로 실행하고 로컬 판정(StepResult)을 돌려준다(응답은 외부로 안 나감).
@@ -532,7 +619,10 @@ class AgentManager:
                 break
             if data['steps'] >= spec.max_steps:   # HTTP 요청 예산은 fetch 가 별도 강제
                 state, data['reason'] = 'limited', '단계 한도에 도달했습니다.'
+                data['stop_code'] = 'step_budget'
                 break
+            if action_request_cost(steps[current].action) > spec.max_requests - data['requests']:
+                raise LimitReached('계획의 다음 검사를 완료할 HTTP 요청 예산이 부족합니다.')
             data['steps'] += 1
             step, step_id = steps[current], uid()
             self.store.event(run_id, 'action', step.action.model_dump(), step_id)
@@ -543,18 +633,29 @@ class AgentManager:
             self.store.event(run_id, 'plan_branch',
                              {'action_id': current, 'verdict': result.verdict, 'next': nxt or '(stop)'}, step_id)
             visited.add(current)
-            if nxt == plan_mod.STOP or nxt in visited:
+            if nxt == plan_mod.STOP:
+                matched = any(plan_mod.evaluate_predicate(b.predicate, result) for b in step.branches)
+                data['stop_code'] = 'plan_end' if step.action.kind == 'finish' or matched else 'plan_dead_end'
+                data['reason'] = '계획의 종료 분기에 도달했습니다.' if data['stop_code'] == 'plan_end' else '후속 분기가 없어 계획을 종료했습니다. 부분 결론을 확인하세요.'
+                break
+            if nxt in visited:
+                state, data['stop_code'] = 'paused', 'plan_loop'
+                data['reason'] = '이미 실행한 계획 단계로 돌아가는 분기를 감지했습니다. 부분 결론을 확인하세요.'
                 break
             current = nxt
+        else:
+            state, data['stop_code'] = 'limited', 'plan_hop_budget'
+            data['reason'] = '계획의 순회 한도에 도달했습니다. 부분 결론을 확인하세요.'
         if not data.get('reason'):
             data['reason'] = f'계획 실행 완료 — 최종 판정: {best}'
-        self.store.event(run_id, 'plan_result', {'outcome': best}, '')
+        self.store.event(run_id, 'plan_result', {'outcome': best, 'stopped': data.get('stop_code', '')}, '')
         return state
 
     async def _run(self, run_id):
         spec = self.specs[run_id]
         _register_target_canaries(spec)   # 대상 호스트를 반출 금지 백스톱으로 등록(리뷰 F2)
         data = self.store.get(run_id)['data']
+        data['reason'], data['stop_code'] = '', ''
         started = time.monotonic()
         prior_elapsed = data['elapsed']
         deadline = started + max(0, spec.max_seconds - prior_elapsed)
@@ -701,13 +802,7 @@ class AgentManager:
                 if not any(e['kind'] == 'observation' for e in self.store.events(run_id)):
                     action = Action(kind='observe', hypothesis='현재 요청의 정상 응답을 관측합니다.', actor_id=spec.actors[0].id)
                 else:
-                    if data['ai_calls'] >= spec.max_ai_calls:
-                        raise LimitReached('AI 호출 한도에 도달했습니다.')
-                    data['ai_calls'] += 1
-                    save()
-                    with fail_after(max(.01, deadline - time.monotonic())):
-                        action = await self.planner(context())
-                    action = Action.model_validate(action)
+                    action = await self._next_action(run_id, spec, data, context, save, budget, deadline)
                 budget()
                 if action.actor_id not in clients and action.kind != 'finish':
                     raise ValueError('AI가 알 수 없는 계정을 선택했습니다.')
@@ -718,9 +813,7 @@ class AgentManager:
                     raise ValueError('현재 실행에 속하지 않은 증거 ID입니다.')
                 signature = request_key(action.model_dump(exclude={'hypothesis', 'expected', 'basis'}))
                 if signature in data['seen']:
-                    data['reason'] = '동일 행동 반복을 감지해 종료했습니다.'
-                    state = 'completed'
-                    break
+                    raise PlannerStalled('이미 시작한 행동의 완료 여부를 확인할 수 없습니다. 중복 실행하지 않고 일시정지했습니다.')
                 step_id = uid()
                 data['steps'] += 1
                 data['seen'].append(signature)
@@ -728,6 +821,7 @@ class AgentManager:
                 self.store.event(run_id, 'action', action.model_dump(), step_id)
                 if action.kind == 'finish':
                     data['reason'] = action.hypothesis + ' (완료는 전체 대상의 안전을 의미하지 않습니다.)'
+                    data['stop_code'] = 'planner_finish'
                     state = 'completed'
                     break
                 if action.kind == 'access':
@@ -816,18 +910,30 @@ class AgentManager:
             else:
                 if not plan_mode:
                     state, data['reason'] = 'limited', '단계 한도에 도달했습니다.'
+                    data['stop_code'] = 'step_budget'
         except LimitReached as exc:
             state, data['reason'] = 'limited', str(exc)
+            data['stop_code'] = 'budget'
+        except PlannerStalled as exc:
+            state, data['reason'] = 'paused', str(exc)
+            data['stop_code'] = 'planner_stalled'
         except asyncio.CancelledError:
             state, data['reason'] = 'paused', '사용자가 중단했습니다. 실행 중이던 요청의 처리 여부는 미확인입니다.'
+            data['stop_code'] = 'user_stop'
+        except TimeoutError:
+            state, data['reason'] = 'limited', '실행 시간 한도에 도달했습니다.'
+            data['stop_code'] = 'time_budget'
         except Exception as exc:
             state, data['reason'] = 'paused', str(exc)[:300] if isinstance(exc, ValueError) else type(exc).__name__
+            data['stop_code'] = 'error'
             self.store.event(run_id, 'error', {'reason': data['reason']}, step_id)
         finally:
             self.cookies[run_id] = {actor: client.cookies for actor, client in clients.items()}
             for client in clients.values():
                 await client.aclose()
             data['elapsed'] = round(prior_elapsed + time.monotonic() - started, 3)
+            data['conclusion'] = build_conclusion(data, self.store.events(run_id), state)
+            self.store.event(run_id, 'conclusion', data['conclusion'])
             self.store.update(run_id, data, state)
 
 

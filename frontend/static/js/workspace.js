@@ -39,6 +39,7 @@ function showAgentList() {
 function showAgentDetail() {
   agentEl('agentListView').hidden=true; agentEl('agentDetailView').hidden=false;
   agentEl('agentRunTitle').textContent='작업 불러오는 중';
+  agentEl('agentConclusion').hidden=true;
   agentEl('agentStatus').textContent=''; agentEl('agentSummary').replaceChildren(); agentEl('agentResults').replaceChildren();
   agentEl('agentRunBadge').textContent='조회 중'; agentEl('agentRunBadge').dataset.state='';
   ['agentStop','agentResume','agentExport'].forEach(id=>agentEl(id).disabled=true);
@@ -120,9 +121,11 @@ function evidenceSection(title, data) {
 function renderWorkspaceEvent(event) {
   const d=event.data||{},card=uiNode('details','aw-event');card.dataset.event=event.id;
   const types={action:['실행 계획','Crosshair'],request_started:['HTTP 요청','Send'],observation:['응답 관측','Activity'],verification:['검증 판정','CircleCheck'],plan:['조건부 계획','ListChecks'],plan_branch:['로컬 분기','ArrowRight'],plan_result:['계획 결과','FileChartColumn'],error:['오류','CircleAlert']};
+  types.planner_retry=['재계획','RefreshCw'];types.conclusion=['결론','FileChartColumn'];
   const [label,icon]=types[event.kind]||[event.kind,'CircleDashed'];
   const summary=uiNode('summary'),heading=uiNode('span','aw-event-title');
-  const text=event.kind==='action'?`${d.kind} · ${d.hypothesis}`:event.kind==='observation'?`${d.request?.method||''} ${d.request?.url||''} · HTTP ${d.response?.status}`:event.kind==='verification'?`${d.status} · 증거 ${(d.evidence_ids||[]).length}개`:d.reason||d.message||d.outcome||d.action_id||label;
+  const retryLabels={duplicate_action:'이전 행동 반복',missing_evidence_basis:'관측 근거 누락',invalid_action_schema:'행동 형식 오류',provider_temporary:'AI 연결 일시 오류',insufficient_request_budget:'검사 요청 예산 부족'};
+  const text=event.kind==='action'?`${d.kind} · ${d.hypothesis}`:event.kind==='observation'?`${d.request?.method||''} ${d.request?.url||''} · HTTP ${d.response?.status}`:event.kind==='verification'?`${d.status} · 증거 ${(d.evidence_ids||[]).length}개`:event.kind==='planner_retry'?`${retryLabels[d.code]||d.code} · ${d.attempt}/${d.max_attempts}`:d.text||d.reason||d.message||d.outcome||d.action_id||label;
   heading.append(uiNode('span','aw-event-kind',label),document.createTextNode(text));summary.append(epIcon(icon),heading);card.append(summary);
   const body=uiNode('div','aw-event-body');
   if (event.kind==='observation') {
@@ -132,7 +135,39 @@ function renderWorkspaceEvent(event) {
   } else if(event.kind==='action') {body.append(uiNode('p','',d.expected||d.hypothesis));}
   const raw=uiNode('details','aw-raw');raw.append(uiNode('summary','','원본 이벤트'),uiNode('pre','',JSON.stringify(d,null,2)));body.append(raw);card.append(body);return card;
 }
+function renderAgentConclusion(conclusion) {
+  const panel=agentEl('agentConclusion');
+  panel.hidden=!conclusion;
+  if(!conclusion) return;
+  const signature=JSON.stringify(conclusion);
+  if(panel.dataset.signature===signature) return;
+  panel.dataset.signature=signature;
+  panel.dataset.verdict=conclusion.verdict;
+  const title=conclusion.completion==='running'?'현재 관측 결과':conclusion.completion==='partial'?'부분 결론 · 미완료':'검증 결론';
+  const heading=uiNode('div','aw-conclusion-heading');
+  heading.append(epIcon(conclusion.verdict==='confirmed'?'CircleAlert':'FileSearch'),uiNode('h3','',title));
+  panel.replaceChildren(heading,uiNode('p','',conclusion.text));
+  const counts=conclusion.counts||{};
+  panel.append(uiNode('p','aw-muted',`확증 ${counts.confirmed||0} · 의심 ${counts.suspicious||0} · 미확정 ${counts.inconclusive||0} · 관측 ${conclusion.observation_count||0}건`));
+  if(conclusion.verifications?.length) {
+    const evidence=uiNode('ul','aw-conclusion-verifications');
+    const statuses={confirmed:'확증',suspicious:'의심',inconclusive:'미확정'};
+    for(const result of conclusion.verifications) {
+      const row=uiNode('li'),label=`${result.category} · ${statuses[result.status]||result.status} · 증거 ${result.evidence_ids.length}개`;
+      row.append(uiNode('span','',label),uiCommand('FileSearch','검증 근거 보기',()=>{
+        setDetailMode('timeline');
+        const event=[...agentEl('agentEvents').children].find(e=>e.dataset.event===result.id);
+        if(event){event.open=true;event.scrollIntoView({block:'center'});event.querySelector('summary').focus();}
+      }));evidence.append(row);
+    }
+    panel.append(evidence);
+  }
+  if(conclusion.stop_reason) panel.append(uiNode('p','aw-conclusion-reason',conclusion.stop_reason));
+  const next=uiNode('ul');for(const item of conclusion.next_steps||[]) next.append(uiNode('li','',item));
+  panel.append(next,uiNode('p','aw-muted',conclusion.scope_note));
+}
 function renderAgentWorkspace(run) {
+  renderAgentConclusion(run.conclusion);
   const data=run.data,spec=data.spec;
   agentEl('agentRunTitle').textContent=spec.goal;
   const badge=agentEl('agentRunBadge');badge.textContent=AGENT_STATE_LABELS[run.state]||run.state;badge.dataset.state=run.state;

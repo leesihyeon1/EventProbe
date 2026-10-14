@@ -56,12 +56,12 @@ def test_redirect_is_recorded_but_not_followed(tmp_path):
     assert len(run['data']['endpoints']) == 1
 
 
-def test_request_budget_caps_partial_test(tmp_path):
+def test_request_budget_rejects_incomplete_test_before_http(tmp_path):
     _, run = run_agent(tmp_path, lambda r: httpx.Response(200, text='OK'),
-        [{'kind': 'probe', 'hypothesis': '입력 확인', 'category': 'sqli', 'param': 'id', 'payload': "'"}],
+        [{'kind': 'probe', 'hypothesis': '입력 확인', 'category': 'sqli', 'param': 'id', 'payload': "'"}] * 3,
         spec(max_requests=2))
     assert run['state'] == 'limited'
-    assert run['data']['requests'] == 2
+    assert run['data']['requests'] == 1
     assert not any(e['kind'] == 'verification' for e in run['events'])
 
 
@@ -137,6 +137,8 @@ def test_cancel_and_resume_retains_evidence_and_budget(tmp_path):
         await ready.wait()
         stopped = await manager.stop(run_id)
         assert stopped['state'] == 'paused'
+        assert stopped['conclusion']['completion'] == 'partial'
+        assert stopped['events'][-1]['kind'] == 'conclusion'
         assert stopped['data']['ai_calls'] == 1
         manager.planner = planner()
         manager.start(run_id)

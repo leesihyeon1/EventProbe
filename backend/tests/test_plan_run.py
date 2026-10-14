@@ -158,3 +158,27 @@ def test_plan_observation_linked_to_action_step(tmp_path, monkeypatch):
     action_steps = {e["step_id"] for e in run["events"] if e["kind"] == "action"}
     observations = [e for e in run["events"] if e["kind"] == "observation"]
     assert observations and all(e["step_id"] in action_steps for e in observations)   # 증거 연결(리뷰 F6)
+
+
+@pytest.mark.parametrize('requests,hops,code', [(2, 8, 'budget'), (24, 1, 'plan_hop_budget')])
+def test_plan_limits_always_produce_partial_conclusion(tmp_path, monkeypatch, requests, hops, code):
+    async def gen(spec):
+        return _two_step_plan().model_copy(update={'max_hops': hops})
+    monkeypatch.setattr(agent_mod, 'generate_plan', gen)
+    monkeypatch.setattr(agent_mod, 'probe_verdict', lambda *a, **k: {
+        'status': 'suspicious', 'evidence_ids': [], 'confirmed': [], 'limitations': []})
+
+    async def scenario():
+        m = AgentManager(Store(tmp_path / 'limits.db'),
+                         transport=httpx.MockTransport(lambda r: httpx.Response(200, text='ok')))
+        rid = m.create(RunSpec(goal='t', request={'url': 'https://app.test/?id=1'},
+                               mode='plan', max_requests=requests))
+        await m.tasks[rid]
+        run = m.snapshot(rid)
+        assert run['state'] == 'limited'
+        assert run['conclusion']['completion'] == 'partial'
+        assert run['conclusion']['stop_code'] == code
+        assert run['events'][-1]['kind'] == 'conclusion'
+        if requests == 2:
+            assert run['data']['requests'] == 0  # Do not start an unaffordable three-request probe.
+    asyncio.run(scenario())
