@@ -51,6 +51,17 @@ function openAgentNew() {
   agentEl('agentRequestPreview').textContent=JSON.stringify({params:req.params,headers:getHeadersObj(),body:req.body||''},null,2);
   agentEl('agentFormError').hidden=true; agentEl('agentNew').showModal();
 }
+let agentDetailMode='timeline', _awRun=null;
+function setDetailMode(mode) {
+  agentDetailMode = mode==='graph' ? 'graph' : 'timeline';
+  const graph = agentDetailMode==='graph';
+  agentEl('agentEvents').hidden = graph;
+  agentEl('agentGraph').hidden = !graph;
+  agentEl('awTabTimeline').setAttribute('aria-selected', String(!graph));
+  agentEl('awTabGraph').setAttribute('aria-selected', String(graph));
+  try { localStorage.setItem('ep-detail-view', agentDetailMode); } catch(e) {}
+  if (graph && _awRun && typeof renderAgentGraph==='function') renderAgentGraph(_awRun);
+}
 function initAgentWorkspace() {
   agentEl('agentNewButton').onclick=openAgentNew;
   ['agentNewClose','agentNewCancel'].forEach(id=>agentEl(id).onclick=()=>agentEl('agentNew').close());
@@ -60,6 +71,12 @@ function initAgentWorkspace() {
   agentEl('agentFilter').onchange=()=>{workspacePage=0;renderAgentList();};
   agentEl('agentPrev').onclick=()=>{workspacePage--;renderAgentList();};
   agentEl('agentNext').onclick=()=>{workspacePage++;renderAgentList();};
+  agentEl('awTabTimeline').onclick=()=>setDetailMode('timeline');
+  agentEl('awTabGraph').onclick=()=>setDetailMode('graph');
+  agentEl('awGraphZoomIn').onclick=()=>_zoomGraph(1.2);
+  agentEl('awGraphZoomOut').onclick=()=>_zoomGraph(0.83);
+  agentEl('awGraphFit').onclick=()=>_fitGraph();
+  try { if (localStorage.getItem('ep-detail-view')==='graph') agentDetailMode='graph'; } catch(e) {}
 }
 function filteredAgentRuns(runs, search, stateFilter) {
   const q=search.trim().toLowerCase();
@@ -129,6 +146,12 @@ function renderAgentWorkspace(run) {
   const existing=new Set([...container.children].map(el=>el.dataset.event));
   for(const event of run.events) if(!existing.has(event.id)) container.append(renderWorkspaceEvent(event));
   agentEl('agentEventCount').textContent=`${run.events.length}개 이벤트`;
+  _awRun=run;   // 상세 보기 모드(타임라인|그래프) 동기화 + 그래프 모드면 로컬 그래프 렌더
+  const graph=agentDetailMode==='graph';
+  agentEl('agentEvents').hidden=graph; agentEl('agentGraph').hidden=!graph;
+  agentEl('awTabTimeline').setAttribute('aria-selected',String(!graph));
+  agentEl('awTabGraph').setAttribute('aria-selected',String(graph));
+  if(graph&&typeof renderAgentGraph==='function') renderAgentGraph(run);
 }
 function restoreWorkspaceRoute() {
   const match=location.hash.match(/^#(agent|request|results|report)(?:\/([a-zA-Z0-9_-]+))?$/);

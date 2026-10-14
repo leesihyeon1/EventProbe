@@ -405,8 +405,25 @@
             </div>
             <div id="agentSummary" class="aw-run-stats"></div>
             <div id="agentResults" class="aw-results" aria-label="검증 결과"></div>
-            <div class="aw-section-title"><h3>실행 기록</h3><span class="aw-muted" id="agentEventCount"></span></div>
+            <div class="aw-section-title"><h3>실행 기록</h3>
+              <div class="aw-view-toggle" role="tablist" aria-label="상세 보기 방식">
+                <button id="awTabTimeline" role="tab" aria-selected="true" aria-controls="agentEvents">타임라인</button>
+                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph">그래프</button>
+              </div>
+              <span class="aw-muted" id="agentEventCount"></span>
+            </div>
             <div id="agentEvents" class="aw-events"></div>
+            <div id="agentGraph" class="aw-graph" hidden>
+              <div class="aw-graph-toolbar" role="group" aria-label="그래프 보기 제어">
+                <span class="aw-muted aw-graph-legend">Run→Action→Request→Observation→Verification · 로컬 렌더(외부 통신 없음)</span>
+                <span class="aw-muted" id="agentGraphWarn" hidden></span>
+                <button class="icon-button" id="awGraphZoomIn" aria-label="확대" title="확대"><span data-icon="Plus"></span></button>
+                <button class="icon-button" id="awGraphZoomOut" aria-label="축소" title="축소"><span data-icon="Search"></span></button>
+                <button class="icon-button" id="awGraphFit" aria-label="전체 맞춤" title="전체 맞춤"><span data-icon="Crosshair"></span></button>
+              </div>
+              <div class="aw-graph-stage"><svg id="agentGraphSvg" role="img" aria-label="탐색 그래프"></svg></div>
+              <aside id="agentGraphDetail" class="aw-graph-detail" hidden aria-live="polite" aria-label="노드 상세"></aside>
+            </div>
           </section>
           <dialog class="aw-dialog" id="agentNew" aria-labelledby="agentNewTitle">
               <div class="aw-dialog-head"><div><span class="aw-eyebrow">NEW VERIFICATION</span><h2 id="agentNewTitle">새 검증 작업</h2></div><button class="icon-button" id="agentNewClose" aria-label="새 작업 닫기" title="닫기"><span data-icon="X"></span></button></div>
@@ -883,6 +900,7 @@
 <script src="/static/js/icons.js"></script>
 <script src="/static/js/app.js"></script>
 <script src="/static/js/agent.js"></script>
+<script src="/static/js/agent_graph.js"></script>
 <script src="/static/js/workspace.js"></script>
 </body>
 </html>
