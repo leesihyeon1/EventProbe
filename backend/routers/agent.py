@@ -15,6 +15,7 @@ router = APIRouter(prefix='/api/agent', tags=['context-agent'])
 class ResumeRequest(BaseModel):
     request_headers: dict[str, str] | None = None
     actor_headers: dict[str, dict[str, str]] | None = None
+    acknowledge_writes: bool = False     # 처리 여부 불명확한 쓰기 재전송 위험 확인(리뷰 P3)
 
 
 class FindingPatch(BaseModel):
@@ -168,7 +169,8 @@ async def resume_run(run_id: str, req: ResumeRequest, request: Request):
     try:
         if sum(not task.done() for task in manager.tasks.values()) >= 2:
             raise ValueError('동시에 최대 두 개 실행할 수 있습니다.')
-        manager.start(run_id, req.request_headers, req.actor_headers)
+        manager.start(run_id, req.request_headers, req.actor_headers,
+                      acknowledge_writes=req.acknowledge_writes)
         return manager.snapshot(run_id)
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')

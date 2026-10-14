@@ -62,6 +62,31 @@ class PlannerServiceError(ValueError):
         self.retryable = status in (408, 429, 500, 502, 503, 504)
 
 
+class AmbiguousWrite(ValueError):
+    """재개 시 재전송하면 중복 부작용이 날 수 있는, 처리 여부 불명확한 쓰기 요청이 남아 있을 때."""
+    def __init__(self, count):
+        self.count = count
+        super().__init__(f'중단 중 처리 여부가 불명확한 쓰기 요청 {count}건이 있습니다. '
+                         f'재개하면 재전송될 수 있어 중복 변경 위험이 있습니다. 확인 후 재개하세요.')
+
+
+_WRITE_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
+
+
+def ambiguous_writes(events):
+    """결과(완료 관측)가 없는 쓰기 request_started 들의 id. 재개 시 자동 재전송하면 안 된다(리뷰 P3).
+    보수적으로, 성공 관측이 없는 쓰기는 오류·중단 여부와 무관하게 '불명확'으로 본다."""
+    completed = {(e['data'] or {}).get('request_id') for e in events if e['kind'] == 'observation'}
+    pending = []
+    for e in events:
+        if e['kind'] != 'request_started':
+            continue
+        method = ((e['data'] or {}).get('request') or {}).get('method', 'GET').upper()
+        if method in _WRITE_METHODS and e['id'] not in completed:
+            pending.append(e['id'])
+    return pending
+
+
 def owner_scope_enabled():
     """작업 소유권 범위 적용 여부(리뷰 P4). 기본 off — 끄면 기존 단일 작업공간과 동일하다.
     켜면 작업은 생성한 주체(principal)만 조회·조작할 수 있고, 소유자 미기록(레거시) 작업은
@@ -508,10 +533,15 @@ class AgentManager:
                              owner=owner or '')
         return self.snapshot(new_id)
 
-    def start(self, run_id, request_headers=None, actor_headers=None):
+    def start(self, run_id, request_headers=None, actor_headers=None, acknowledge_writes=False):
         if run_id in self.tasks and not self.tasks[run_id].done():
             raise ValueError('이미 실행 중입니다.')
         run = self.store.get(run_id)
+        # 재개 안전장치(리뷰 P3): 처리 여부가 불명확한 쓰기가 있으면 명시적 확인 없이는 재개하지 않는다.
+        # (새로 만든 실행은 이벤트가 없어 항상 통과한다.)
+        pending = ambiguous_writes(self.store.events(run_id))
+        if pending and not acknowledge_writes:
+            raise AmbiguousWrite(len(pending))
         data = run['data']
         if run_id not in self.specs:
             if data['needs_credentials'] and (request_headers is None or actor_headers is None):
@@ -524,6 +554,10 @@ class AgentManager:
             self.store.event(run_id, 'session', {'message': '새 세션으로 재개; 이전 응답은 과거 증거로만 사용합니다.'})
         if not self.store.claim(run_id):
             raise ValueError('일시정지/중단된 실행만 재개할 수 있습니다.')
+        if pending:   # 확인 후 재개 — 재전송 위험을 수용한 사실을 증거로 남긴다
+            self.store.event(run_id, 'resume_ack', {
+                'ambiguous_writes': len(pending),
+                'note': '사용자가 처리 여부 불명확한 쓰기의 재전송 위험을 확인하고 재개했습니다.'})
         self.tasks[run_id] = asyncio.create_task(self._run(run_id))
 
     async def stop(self, run_id):

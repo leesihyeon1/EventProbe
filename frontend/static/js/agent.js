@@ -373,15 +373,26 @@ async function startAgent() {
 
 async function agentControl(action) {
   if (!agentRunId) return;
+  await _agentControl(action, false);
+}
+async function _agentControl(action, acknowledgeWrites) {
   try {
     const data = action === 'resume' ? {
       request_headers: getHeadersObj(),
       actor_headers: Object.fromEntries(collectActors().map(a => [a.id, a.headers || {}])),
+      acknowledge_writes: acknowledgeWrites,
     } : {};
     await agentApi(`/runs/${agentRunId}/${action}`, data);
     await pollAgent();
     loadAgentList();
-  } catch (e) { agentEl('agentStatus').textContent = e.message; }
+  } catch (e) {
+    // 재개 시 처리 여부 불명확한 쓰기 경고(리뷰 P3): 확인을 받으면 재전송 위험을 수용하고 재개한다.
+    if (action === 'resume' && !acknowledgeWrites && /재전송/.test(e.message || '')
+        && typeof confirm === 'function' && confirm((e.message || '') + '\n\n그래도 재개할까요?')) {
+      return _agentControl('resume', true);
+    }
+    agentEl('agentStatus').textContent = e.message;
+  }
 }
 
 function _agentViewActive() {
