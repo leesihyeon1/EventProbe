@@ -20,3 +20,4 @@
 .fd-note textarea { width:100%; min-height:62px; resize:vertical; border:1px solid var(--border); border-radius:6px; padding:8px; background:var(--bg-primary); color:var(--text-primary); font:inherit; font-size:12px; }
 .fd-history { margin:0; padding-left:16px; font-size:11px; color:var(--text-muted); display:flex; flex-direction:column; gap:4px; }
 .fd-retest { margin:4px 0 2px; }
+.fd-evidence-exports { display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px; margin:12px 0; }

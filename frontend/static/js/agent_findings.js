@@ -101,6 +101,19 @@ function renderFindingDetail(f) {
     fdSelect('상태',f.status,Object.entries(FD_STATUS),v=>patchFinding(f.id,{status:v})),
     fdSelect('심각도',f.severity,Object.entries(FD_SEVERITY),v=>patchFinding(f.id,{severity:v})));
   panel.append(controls);
+  const exports=uiNode('div','fd-evidence-exports');
+  const base=`/api/agent/runs/${encodeURIComponent(findingsState.runId)}/findings/${encodeURIComponent(f.id)}/evidence.zip`;
+  for(const [label,url] of [['증거 ZIP (요약)',base],['내부 원본 ZIP',base+'?raw=true']]) {
+    const link=uiNode('a','aw-link');
+    link.append(epIcon('Download'),document.createTextNode(label));
+    link.setAttribute('href',url);link.setAttribute('download','finding-evidence.zip');
+    link.title=label==='내부 원본 ZIP'?'요청·응답 원문이 포함됩니다.':'URL 값·헤더 값·본문을 제외합니다.';
+    if(label==='내부 원본 ZIP') link.onclick=event=>{
+      if(typeof confirm==='function' && !confirm('이 ZIP에는 내부 URL, 요청·응답 원문과 헤더가 포함됩니다. 로컬로 다운로드할까요?')) event.preventDefault();
+    };
+    exports.append(link);
+  }
+  panel.append(exports);
   if(FD_VULN.has(f.category)) {
     const retest=uiNode('button','aw-link fd-retest','새 실행으로 재검증');retest.type='button';
     retest.onclick=()=>retestFinding(f);

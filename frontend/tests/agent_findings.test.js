@@ -127,6 +127,24 @@ test('report button opens the local report endpoint for the current run only',()
   assert.equal(opens[0][1],'_blank');
 });
 
+test('selected finding exposes redacted and explicitly raw local ZIP downloads',()=>{
+  const {context,get}=setup();
+  context.renderAgentFindings(run());
+  const links=allNodes(get('fdDetail')).filter(n=>n.tagName==='a');
+  assert.equal(links.length,2);
+  assert.equal(links[0].getAttribute('href'),'/api/agent/runs/run1/findings/f1/evidence.zip');
+  assert.equal(links[1].getAttribute('href'),'/api/agent/runs/run1/findings/f1/evidence.zip?raw=true');
+  assert(links[1].title.includes('원문'));
+  let cancelled=false;
+  context._confirm=false;
+  links[1].onclick({preventDefault:()=>{cancelled=true;}});
+  assert.equal(cancelled,true);
+  cancelled=false;
+  context._confirm=true;
+  links[1].onclick({preventDefault:()=>{cancelled=true;}});
+  assert.equal(cancelled,false);
+});
+
 test('renderer has no network, no HTML injection, and only opens the local report',()=>{
   assert(!/\bfetch\s*\(/.test(source));                       // mutations go through agentApi
   assert(!/innerHTML|outerHTML|insertAdjacentHTML|location\s*=|\.href\s*=/.test(source));

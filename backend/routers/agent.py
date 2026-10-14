@@ -1,11 +1,12 @@
 import os
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from core.agent import get_manager, generate_plan, owner_scope_enabled, owns, template_spec
 from core.agent_findings import build_report_html
+from core.agent_evidence_export import build_finding_evidence_zip
 from core.agent_models import RunSpec
 from core.plan import plan_fingerprint
 
@@ -202,6 +203,23 @@ def run_report(run_id: str, request: Request):
         return HTMLResponse(build_report_html(manager.snapshot(run_id)))
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+
+
+@router.get('/runs/{run_id}/findings/{finding_id}/evidence.zip')
+def download_finding_evidence(run_id: str, finding_id: str, request: Request, raw: bool = False):
+    """Download one finding's linked evidence locally; raw bodies require explicit selection."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        archive = build_finding_evidence_zip(manager.snapshot(run_id), finding_id, include_raw=raw)
+    except KeyError:
+        raise HTTPException(404, '작업 또는 발견을 찾을 수 없습니다.')
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    return Response(archive, media_type='application/zip', headers={
+        'Content-Disposition': 'attachment; filename="finding-evidence.zip"',
+        'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    })
 
 
 @router.post('/runs/{run_id}/resume')
