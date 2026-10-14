@@ -11,6 +11,31 @@ from routers.agent import _guard, _principal
 router = APIRouter(prefix='/api/agent/history', tags=['agent-history'])
 
 
+@router.get('/runs/{run_id}/status')
+def run_status(run_id: str, request: Request):
+    """A small poll payload; no event bodies, target URLs, or credentials."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        run = manager.store.get(run_id)
+    except KeyError:
+        raise HTTPException(404, '작업을 찾을 수 없습니다.')
+    data = run['data']
+    spec = data.get('spec') or {}
+    with manager.store.connect() as db:
+        counts = db.execute('SELECT COUNT(*) AS n, '
+                            "MAX(CASE WHEN kind='oob_pending' THEN 1 ELSE 0 END) AS pending "
+                            'FROM events WHERE run_id=?', (run_id,)).fetchone()
+    return {'id': run_id, 'state': run['state'], 'updated': run['updated'],
+            'event_count': counts['n'], 'has_pending_oob': bool(counts['pending']),
+            'data': {'spec': {key: spec.get(key) for key in
+                              ('goal', 'max_steps', 'max_requests', 'max_ai_calls')},
+                     'steps': data.get('steps', 0), 'requests': data.get('requests', 0),
+                     'ai_calls': data.get('ai_calls', 0), 'elapsed': data.get('elapsed', 0),
+                     'endpoints_count': len(data.get('endpoints') or {}),
+                     'reason': data.get('reason', ''), 'retest_of': data.get('retest_of')}}
+
+
 @router.get('/runs')
 def search_runs(request: Request, search: str = Query('', max_length=200),
                 state: str = Query('', max_length=32), archived: bool = False,
@@ -22,6 +47,8 @@ def search_runs(request: Request, search: str = Query('', max_length=200),
     if owner_scope_enabled():
         clauses.append("COALESCE(json_extract(data, '$.owner'), '') IN ('', ?)")
         params.append(_principal(request))
+    scope_where = ' AND '.join(clauses)
+    scope_params = list(params)
     if search:
         clauses.append("(instr(lower(id), lower(?)) > 0 OR "
                        "instr(lower(COALESCE(json_extract(data, '$.spec.goal'), '')), lower(?)) > 0)")
@@ -31,6 +58,8 @@ def search_runs(request: Request, search: str = Query('', max_length=200),
         params.append(state)
     where = ' AND '.join(clauses)
     with manager.store.connect() as db:
+        counts = db.execute(f'SELECT state,COUNT(*) AS n FROM runs WHERE {scope_where} '
+                            'GROUP BY state', scope_params).fetchall()
         total = db.execute(f'SELECT COUNT(*) FROM runs WHERE {where}', params).fetchone()[0]
         rows = db.execute(
             f'SELECT id,created,updated,state,data FROM runs WHERE {where} '
@@ -42,7 +71,9 @@ def search_runs(request: Request, search: str = Query('', max_length=200),
         runs.append({'id': row['id'], 'created': row['created'], 'updated': row['updated'],
                      'state': row['state'], 'goal': (data.get('spec') or {}).get('goal', ''),
                      'owner': data.get('owner', ''), 'archived': bool(data.get('archived'))})
-    return {'runs': runs, 'total': total, 'offset': offset, 'limit': limit,
+    state_counts = {row['state']: row['n'] for row in counts}
+    return {'runs': runs, 'total': total, 'scope_total': sum(state_counts.values()),
+            'state_counts': state_counts, 'offset': offset, 'limit': limit,
             'has_more': offset + len(runs) < total}
 
 

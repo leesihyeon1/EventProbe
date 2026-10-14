@@ -3,6 +3,7 @@
 let agentRunId = null, agentTimer = null, agentBusy = false, agentInited = false, agentPolicy = null;
 let _approvedPlan = null;   // 미리보기에서 승인한 계획(있으면 실행에 고정, 리뷰 P3)
 let _showArchived = false;  // 목록을 보관함(보관된 작업)으로 볼지 여부(리뷰 N5)
+let _listQuery = 0;
 const agentEl = id => document.getElementById(id);
 
 async function agentApi(path, data, method) {
@@ -331,10 +332,18 @@ const AGENT_STATE_LABELS = {
 async function loadAgentList() {
   const list = agentEl('agentList');
   if (!list) return;
+  const query=++_listQuery;
   try {
-    const data = await agentApi('/runs' + (_showArchived ? '?archived=1' : ''));
-    renderAgentList(data.runs);
-  } catch (e) { renderAgentListError(e.message); }
+    const search=encodeURIComponent(agentEl('agentSearch').value||'');
+    const state=encodeURIComponent(agentEl('agentFilter').value||'');
+    const data=await agentApi(`/history/runs?archived=${_showArchived?1:0}&offset=${workspacePage*workspacePageSize}&limit=${workspacePageSize}&search=${search}&state=${state}`);
+    if(query!==_listQuery) return;
+    if(data.total && workspacePage*workspacePageSize>=data.total) {
+      workspacePage=Math.ceil(data.total/workspacePageSize)-1;
+      return loadAgentList();
+    }
+    renderAgentList(data);
+  } catch (e) { if(query===_listQuery) renderAgentListError(e.message); }
 }
 async function archiveRun(id) {
   try { await agentApi(`/runs/${encodeURIComponent(id)}/archive`, {}); await loadAgentList(); }
@@ -495,6 +504,24 @@ async function pollAgent() {
   const id = agentRunId;
   if (!id || !_agentViewActive()) return;   // 다른 뷰면 폴링 중단(자원 절약)
   try {
+    if(agentDetailMode==='history' && _awRun?.id===id) {
+      const status=await agentApi('/history/runs/'+encodeURIComponent(id)+'/status');
+      if(id!==agentRunId) return;
+      renderAgentRunHeader(status);
+      await loadHistoryPage();
+      if(status.state!=='running' && status.has_pending_oob && status.event_count!==_awRun.events.length) {
+        const updated=await agentApi('/runs/'+encodeURIComponent(id));
+        if(id!==agentRunId) return;
+        renderAgentWorkspace(updated);
+      }
+      if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+      else {
+        const finalRun=await agentApi('/runs/'+encodeURIComponent(id));
+        if(id!==agentRunId) return;
+        renderAgentWorkspace(finalRun);loadAgentList();
+      }
+      return;
+    }
     const run = await agentApi('/runs/' + id);
     if (id !== agentRunId) return;
     renderAgentWorkspace(run);

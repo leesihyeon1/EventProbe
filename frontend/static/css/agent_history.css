@@ -1,4 +1,6 @@
 .ah-history { min-width:0; }
+.aw-detail-tabs .aw-view-toggle { max-width:100%; overflow-x:auto; }
+.aw-detail-tabs .aw-view-toggle button { flex:0 0 auto; white-space:nowrap; }
 .ah-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 12px; }
 .ah-history .aw-events { min-width:0; }
 .ah-history .aw-event-title { min-width:0; overflow-wrap:anywhere; }

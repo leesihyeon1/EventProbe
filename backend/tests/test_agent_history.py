@@ -48,6 +48,12 @@ def test_event_cursor_and_lazy_body_are_scoped(tmp_path, monkeypatch):
     assert client.get(f'{base}/{ids[0]}', headers=headers).json()['data']['body'] == 'SECRET_0'
     assert client.get(f'/api/agent/history/runs/{other}/events/{ids[0]}', headers=headers).status_code == 404
     assert client.get(base, headers={'x-eventprobe-user': 'blocked'}).status_code == 403
+    status = client.get(f'/api/agent/history/runs/{own}/status', headers=headers)
+    assert status.status_code == 200
+    assert status.json()['event_count'] == 5
+    assert 'SECRET_' not in status.text
+    assert client.get(f'/api/agent/history/runs/{own}/status',
+                      headers={'x-eventprobe-user': 'blocked'}).status_code == 403
 
 
 def test_cursor_validation_and_missing_run(tmp_path, monkeypatch):

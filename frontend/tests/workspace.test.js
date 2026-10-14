@@ -20,7 +20,7 @@ function setup() {
     document:{createElement:tag=>new Element(tag),createTextNode:text=>new ElementText(text)},
     window:{addEventListener(){}},agentEl:get,epIcon:name=>new Element('icon-'+name),
     AGENT_STATE_LABELS:{running:'running',completed:'completed',paused:'paused',limited:'limited'},
-    selectRun(){},deleteRun(){},archiveRun(){},unarchiveRun(){},_showArchived:false,console,Date,Set,Map,
+    selectRun(){},deleteRun(){},archiveRun(){},unarchiveRun(){},pollAgent(){},agentRunId:null,_showArchived:false,console,Date,Set,Map,
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/js/workspace.js'),'utf8'),context);
   return {context,get};
@@ -45,6 +45,17 @@ test('pagination clamps after filtering and renders a proper table empty state',
   get('agentSearch').value='absent';context.renderAgentList();
   assert.equal(get('agentList').children[0].children[0].colSpan,5);
   assert.equal(get('agentNext').disabled,true);
+});
+test('server page reports the real total and state counts beyond the visible rows',()=>{
+  const {context,get}=setup();
+  vm.runInContext('workspacePage=2',context);
+  const runs=Array.from({length:10},(_,i)=>({id:'id'+i,goal:'Goal '+i,state:'completed',created:1700000000}));
+  context.renderAgentList({runs,total:64,scope_total:70,state_counts:{completed:60,running:10},offset:20,limit:10});
+  assert.equal(get('agentList').children.length,10);
+  assert.equal(get('agentCount').textContent,'64개');
+  assert.equal(get('agentPageInfo').textContent,'21–30 / 64개');
+  assert.equal(get('agentMetrics').children[0].children[1].textContent,'70');
+  assert.equal(get('agentNext').disabled,false);
 });
 test('response evidence stays text and has separate request/response panes',()=>{
   const {context}=setup();
@@ -110,6 +121,10 @@ test('detail tabs have one selected panel and support arrow navigation',()=>{
   assert.equal(get('agentGraph').hidden,true);
   assert.equal(get('awTabSiteMap').tabIndex,0);
   assert.equal(get('awTabTimeline').tabIndex,-1);
+  context.setDetailMode('history');
+  assert.equal(get('agentHistory').hidden,false);
+  assert.equal(get('agentConclusion').hidden,true);
+  context.setDetailMode('sitemap');
   let prevented=false;
   get('awTabSiteMap').onkeydown({key:'ArrowLeft',preventDefault(){prevented=true;}});
   assert(prevented);

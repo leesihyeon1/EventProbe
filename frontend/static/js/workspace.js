@@ -70,21 +70,25 @@ function syncDetailMode() {
   if(_awRun && agentDetailMode==='findings') renderAgentFindings(_awRun);
   if(_awRun && agentDetailMode==='coverage') renderAgentCoverage(_awRun);
   if(_awRun && agentDetailMode==='history') loadHistoryPage();
+  if(agentDetailMode==='history') agentEl('agentConclusion').hidden=true;
+  else if(_awRun) renderAgentConclusion(_awRun.conclusion);
 }
 function setDetailMode(mode) {
+  const previous=agentDetailMode;
   agentDetailMode = Object.hasOwn(DETAIL_VIEWS,mode) ? mode : 'timeline';
   try { localStorage.setItem('ep-detail-view', agentDetailMode); } catch(e) {}
   syncDetailMode();
+  if(previous==='history' && agentDetailMode!=='history' && agentRunId) pollAgent();
 }
 function initAgentWorkspace() {
   agentEl('agentNewButton').onclick=openAgentNew;
   ['agentNewClose','agentNewCancel'].forEach(id=>agentEl(id).onclick=()=>agentEl('agentNew').close());
   agentEl('agentEditRequest').onclick=()=>{agentEl('agentNew').close();switchView('request');agentEl('urlInput').focus();};
   agentEl('agentBack').onclick=showAgentList;
-  agentEl('agentSearch').oninput=()=>{workspacePage=0;renderAgentList();};
-  agentEl('agentFilter').onchange=()=>{workspacePage=0;renderAgentList();};
-  agentEl('agentPrev').onclick=()=>{workspacePage--;renderAgentList();};
-  agentEl('agentNext').onclick=()=>{workspacePage++;renderAgentList();};
+  agentEl('agentSearch').oninput=()=>{workspacePage=0;loadAgentList();};
+  agentEl('agentFilter').onchange=()=>{workspacePage=0;loadAgentList();};
+  agentEl('agentPrev').onclick=()=>{workspacePage--;loadAgentList();};
+  agentEl('agentNext').onclick=()=>{workspacePage++;loadAgentList();};
   const modes=Object.keys(DETAIL_VIEWS);
   modes.forEach((mode,index)=>{
     const tab=agentEl(DETAIL_VIEWS[mode][1]);tab.onclick=()=>setDetailMode(mode);
@@ -115,16 +119,20 @@ function renderAgentListError(message) {
   agentEl('agentList').replaceChildren(emptyAgentRow(message,'CircleAlert'));
   agentEl('agentCount').textContent='조회 실패';
 }
-function renderAgentList(runs) {
-  if (runs) workspaceRuns=runs;
+function renderAgentList(result) {
+  const server=result && !Array.isArray(result);
+  if(result) workspaceRuns=server?result.runs:result;
+  const counts=server?result.state_counts||{}:Object.fromEntries(['running','paused','interrupted','completed','limited'].map(state=>[state,workspaceRuns.filter(r=>r.state===state).length]));
+  const scopeTotal=server?result.scope_total:workspaceRuns.length;
   const metrics=agentEl('agentMetrics');metrics.replaceChildren();
-  const stats=[['전체 작업',workspaceRuns.length,'Layers',''],['실행 중',workspaceRuns.filter(r=>r.state==='running').length,'Activity','running'],['일시정지 / 중단',workspaceRuns.filter(r=>['paused','interrupted'].includes(r.state)).length,'Pause','paused'],['종료',workspaceRuns.filter(r=>['completed','limited'].includes(r.state)).length,'CircleCheck','']];
+  const stats=[['전체 작업',scopeTotal,'Layers',''],['실행 중',counts.running||0,'Activity','running'],['일시정지 / 중단',(counts.paused||0)+(counts.interrupted||0),'Pause','paused'],['종료',(counts.completed||0)+(counts.limited||0),'CircleCheck','']];
   for (const [label,count,icon,tone] of stats) {const d=uiNode('div','aw-metric');d.dataset.tone=tone;const l=uiNode('span');l.append(epIcon(icon),document.createTextNode(label));d.append(l,uiNode('strong','',String(count)));metrics.append(d);}
-  const filtered=filteredAgentRuns(workspaceRuns,agentEl('agentSearch').value,agentEl('agentFilter').value);
-  const pages=Math.max(1,Math.ceil(filtered.length/workspacePageSize));workspacePage=Math.max(0,Math.min(workspacePage,pages-1));
+  const filtered=server?workspaceRuns:filteredAgentRuns(workspaceRuns,agentEl('agentSearch').value,agentEl('agentFilter').value);
+  const total=server?result.total:filtered.length;
+  const pages=Math.max(1,Math.ceil(total/workspacePageSize));workspacePage=Math.max(0,Math.min(workspacePage,pages-1));
   const list=agentEl('agentList');list.replaceChildren();
   const start=workspacePage*workspacePageSize;
-  for (const run of filtered.slice(start,start+workspacePageSize)) {
+  for (const run of (server?filtered:filtered.slice(start,start+workspacePageSize))) {
     const row=uiNode('tr');row.dataset.run=run.id;
     const task=uiNode('td'),title=uiNode('button','aw-task-title',run.goal||'목표 없음');title.type='button';title.title=run.goal;title.onclick=()=>selectRun(run.id);task.append(title);
     const status=uiNode('td'),badge=uiNode('span','aw-badge',AGENT_STATE_LABELS[run.state]||run.state);badge.dataset.state=run.state;status.append(badge);
@@ -136,9 +144,9 @@ function renderAgentList(runs) {
     buttons.append(uiCommand('ArrowRight','작업 열기',()=>selectRun(run.id)),archive,uiCommand('Trash2','작업 및 증거 삭제',()=>deleteRun(run.id),'icon-button danger'));actions.append(buttons);
     row.append(task,status,created,id,actions);list.append(row);
   }
-  if (!filtered.length) list.append(emptyAgentRow(workspaceRuns.length?'검색 결과가 없습니다.':'아직 검증 작업이 없습니다.'));
-  agentEl('agentCount').textContent=`${filtered.length}개`;
-  agentEl('agentPageInfo').textContent=filtered.length?`${start+1}–${Math.min(start+workspacePageSize,filtered.length)} / ${filtered.length}개 · 최근 최대 50개`:'0개';
+  if (!filtered.length) list.append(emptyAgentRow(scopeTotal?'검색 결과가 없습니다.':'아직 검증 작업이 없습니다.'));
+  agentEl('agentCount').textContent=`${total}개`;
+  agentEl('agentPageInfo').textContent=total?`${start+1}–${Math.min(start+workspacePageSize,total)} / ${total}개`:'0개';
   agentEl('agentPrev').disabled=workspacePage===0;agentEl('agentNext').disabled=workspacePage>=pages-1;
 }
 function evidenceSection(title, data) {
@@ -193,15 +201,19 @@ function renderAgentConclusion(conclusion) {
   const next=uiNode('ul');for(const item of conclusion.next_steps||[]) next.append(uiNode('li','',item));
   panel.append(next,uiNode('p','aw-muted',conclusion.scope_note));
 }
-function renderAgentWorkspace(run) {
-  renderAgentConclusion(run.conclusion);
+function renderAgentRunHeader(run) {
   const data=run.data,spec=data.spec;
   agentEl('agentRunTitle').textContent=spec.goal;
   const badge=agentEl('agentRunBadge');badge.textContent=AGENT_STATE_LABELS[run.state]||run.state;badge.dataset.state=run.state;
   agentEl('agentStatus').textContent=(data.retest_of?'발견 재검증 실행 · ':'')+(data.reason||'실행 기록 수집 중');
   agentEl('agentStop').disabled=run.state!=='running';agentEl('agentResume').disabled=!['paused','interrupted'].includes(run.state);agentEl('agentExport').disabled=false;
   const stats=agentEl('agentSummary');stats.replaceChildren();
-  for(const [label,value] of [['단계',`${data.steps} / ${spec.max_steps}`],['HTTP 요청',`${data.requests} / ${spec.max_requests}`],['AI 호출',`${data.ai_calls} / ${spec.max_ai_calls}`],['경과 시간',`${Math.round(data.elapsed)}초`],['발견 경로',Object.keys(data.endpoints).length]]) {const s=uiNode('div','aw-run-stat');s.append(uiNode('span','',label),uiNode('strong','',String(value)));stats.append(s);}
+  for(const [label,value] of [['단계',`${data.steps} / ${spec.max_steps}`],['HTTP 요청',`${data.requests} / ${spec.max_requests}`],['AI 호출',`${data.ai_calls} / ${spec.max_ai_calls}`],['경과 시간',`${Math.round(data.elapsed)}초`],['발견 경로',data.endpoints_count??Object.keys(data.endpoints||{}).length]]) {const s=uiNode('div','aw-run-stat');s.append(uiNode('span','',label),uiNode('strong','',String(value)));stats.append(s);}
+  if(run.event_count!==undefined) agentEl('agentEventCount').textContent=`${run.event_count}개 이벤트`;
+}
+function renderAgentWorkspace(run) {
+  renderAgentConclusion(run.conclusion);
+  renderAgentRunHeader(run);
   const results=agentEl('agentResults');results.replaceChildren();
   for(const [key,label,icon] of [['confirmed','확증','CircleCheck'],['suspicious','의심','CircleAlert'],['inconclusive','미확정','CircleDashed']]) {const n=run.events.filter(e=>e.kind==='verification'&&e.data.status===key).length;const s=uiNode('span');s.dataset.verdict=key;s.append(epIcon(icon),document.createTextNode(`${label} ${n}`));results.append(s);}
   const container=agentEl('agentEvents');if(container.dataset.run!==run.id){container.replaceChildren();container.dataset.run=run.id;}

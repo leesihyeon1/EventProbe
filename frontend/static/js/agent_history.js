@@ -26,6 +26,7 @@ function historyRow(runId,event) {
   row.ontoggle=async()=>{
     if(!row.open || row.dataset.loaded) return;
     row.dataset.loaded='loading';
+    row.replaceChildren(summary);
     const detail=uiNode('p','aw-muted','불러오는 중');row.append(detail);
     try {
       const full=await agentApi(`/history/runs/${encodeURIComponent(runId)}/events/${encodeURIComponent(event.id)}`);
