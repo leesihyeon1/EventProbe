@@ -74,14 +74,20 @@ class Store:
         with self.connect() as db:
             db.execute("UPDATE runs SET state='interrupted' WHERE state='running'")
 
-    def list(self):
+    def list(self, include_archived=False):
+        """최근 run 목록(최대 50). 기본은 보관되지 않은 것만, include_archived 면 보관된 것만(리뷰 N5)."""
         with self.connect() as db:
-            rows = db.execute('SELECT id,created,updated,state,data FROM runs ORDER BY created DESC LIMIT 50').fetchall()
+            rows = db.execute('SELECT id,created,updated,state,data FROM runs ORDER BY created DESC LIMIT 200').fetchall()
         out = []
         for r in rows:
             data = json.loads(r['data'])
+            if bool(data.get('archived')) != bool(include_archived):
+                continue
             out.append({'id': r['id'], 'state': r['state'], 'created': r['created'],
-                        'goal': data['spec']['goal'], 'owner': data.get('owner', '')})
+                        'goal': data['spec']['goal'], 'owner': data.get('owner', ''),
+                        'archived': bool(data.get('archived'))})
+            if len(out) >= 50:
+                break
         return out
 
     def _audit_deletion(self, db, run_id, row, events, reason):

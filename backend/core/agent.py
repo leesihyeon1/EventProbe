@@ -517,6 +517,16 @@ class AgentManager:
         self.store.event(run_id, 'finding_update', {'finding_id': finding_id, **patch})
         return self.snapshot(run_id)
 
+    def set_archived(self, run_id, archived):
+        """작업을 보관(목록에서 숨김, 증거 보존)하거나 복원한다(리뷰 N5). 삭제와 달리 되돌릴 수 있다.
+        실행 중인 작업은 보관하지 않는다. KeyError 면 없음, 실행 중이면 ValueError."""
+        run = self.store.get(run_id)
+        if archived and run['state'] == 'running':
+            raise ValueError('실행 중인 작업은 보관할 수 없습니다. 먼저 중단하세요.')
+        run['data']['archived'] = bool(archived)
+        self.store.update(run_id, run['data'])   # 상태 유지(보관은 상태를 바꾸지 않는다)
+        return {'id': run_id, 'archived': bool(archived)}
+
     def retest_finding(self, run_id, finding_id, request_headers=None, actor_headers=None, owner=''):
         """발견을 '새 실행'으로 재검증한다(리뷰 P2). 원본 run/증거는 수정하지 않고, 발견의
         엔드포인트·공격 유형·행위자에 대해 고정 confirm 계획 한 단계를 실행하는 새 run 을 만든다.

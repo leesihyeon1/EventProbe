@@ -129,7 +129,9 @@ function renderAgentList(runs) {
     const created=uiNode('td'),date=new Date(run.created*1000),time=uiNode('time','',date.toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}));time.dateTime=date.toISOString();created.append(time);
     const id=uiNode('td');id.append(uiNode('code','',run.id.slice(0,8)));id.title=run.id;
     const actions=uiNode('td'),buttons=uiNode('div','aw-row-actions');
-    buttons.append(uiCommand('ArrowRight','작업 열기',()=>selectRun(run.id)),uiCommand('Trash2','작업 및 증거 삭제',()=>deleteRun(run.id),'icon-button danger'));actions.append(buttons);
+    const archive=uiNode('button','aw-link',_showArchived?'복원':'보관');archive.type='button';
+    archive.onclick=()=>_showArchived?unarchiveRun(run.id):archiveRun(run.id);
+    buttons.append(uiCommand('ArrowRight','작업 열기',()=>selectRun(run.id)),archive,uiCommand('Trash2','작업 및 증거 삭제',()=>deleteRun(run.id),'icon-button danger'));actions.append(buttons);
     row.append(task,status,created,id,actions);list.append(row);
   }
   if (!filtered.length) list.append(emptyAgentRow(workspaceRuns.length?'검색 결과가 없습니다.':'아직 검증 작업이 없습니다.'));

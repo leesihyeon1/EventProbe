@@ -2,6 +2,7 @@
    이전엔 모달이었으나(리뷰 agent.js:7) 장시간 작업에 맞게 작업 목록 + 상세 타임라인 뷰로 분리. */
 let agentRunId = null, agentTimer = null, agentBusy = false, agentInited = false, agentPolicy = null;
 let _approvedPlan = null;   // 미리보기에서 승인한 계획(있으면 실행에 고정, 리뷰 P3)
+let _showArchived = false;  // 목록을 보관함(보관된 작업)으로 볼지 여부(리뷰 N5)
 const agentEl = id => document.getElementById(id);
 
 async function agentApi(path, data, method) {
@@ -94,6 +95,11 @@ function initAgentView() {
   agentEl('agentTemplatesBtn').onclick = openTemplates;
   agentEl('templatesClose').onclick = () => agentEl('templatesDialog').close();
   agentEl('agentSaveTemplate').onclick = saveTemplate;
+  agentEl('agentArchivedToggle').onclick = () => {
+    _showArchived = !_showArchived;
+    agentEl('agentArchivedToggle').setAttribute('aria-pressed', String(_showArchived));
+    workspacePage = 0; loadAgentList();
+  };
   const user = agentEl('agentUser');
   try { user.value = localStorage.getItem('ep-user') || ''; } catch (e) {}
   setWorkspaceUser(user.value);     // 쿠키 동기화(보고서 new tab 포함 모든 요청에 실린다)
@@ -326,9 +332,17 @@ async function loadAgentList() {
   const list = agentEl('agentList');
   if (!list) return;
   try {
-    const data = await agentApi('/runs');
+    const data = await agentApi('/runs' + (_showArchived ? '?archived=1' : ''));
     renderAgentList(data.runs);
   } catch (e) { renderAgentListError(e.message); }
+}
+async function archiveRun(id) {
+  try { await agentApi(`/runs/${encodeURIComponent(id)}/archive`, {}); await loadAgentList(); }
+  catch (e) { agentEl('agentStatus').textContent = e.message; }
+}
+async function unarchiveRun(id) {
+  try { await agentApi(`/runs/${encodeURIComponent(id)}/unarchive`, {}); await loadAgentList(); }
+  catch (e) { agentEl('agentStatus').textContent = e.message; }
 }
 
 function selectRun(id) {

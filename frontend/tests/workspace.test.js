@@ -20,7 +20,7 @@ function setup() {
     document:{createElement:tag=>new Element(tag),createTextNode:text=>new ElementText(text)},
     window:{addEventListener(){}},agentEl:get,epIcon:name=>new Element('icon-'+name),
     AGENT_STATE_LABELS:{running:'running',completed:'completed',paused:'paused',limited:'limited'},
-    selectRun(){},deleteRun(){},console,Date,Set,Map,
+    selectRun(){},deleteRun(){},archiveRun(){},unarchiveRun(){},_showArchived:false,console,Date,Set,Map,
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/js/workspace.js'),'utf8'),context);
   return {context,get};

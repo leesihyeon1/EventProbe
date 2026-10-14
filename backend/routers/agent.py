@@ -62,8 +62,8 @@ async def stop_runs():
 
 
 @router.get('/runs')
-def list_runs(request: Request):
-    runs = get_manager().store.list()
+def list_runs(request: Request, archived: int = 0):
+    runs = get_manager().store.list(include_archived=bool(archived))   # archived=1 → 보관함(리뷰 N5)
     if owner_scope_enabled():        # 소유자 범위: 내 작업 + 소유자 미기록(레거시)만 노출(리뷰 P4)
         principal = _principal(request)
         runs = [r for r in runs if owns({'owner': r.get('owner', '')}, principal)]
@@ -161,6 +161,30 @@ async def delete_run(run_id: str, request: Request):
     _guard(manager, run_id, request)
     try:
         return await manager.delete(run_id)
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+
+
+@router.post('/runs/{run_id}/archive')
+def archive_run(run_id: str, request: Request):
+    """작업을 보관(목록에서 숨김, 증거 보존). 삭제와 달리 복원 가능(리뷰 N5)."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        return manager.set_archived(run_id, True)
+    except KeyError:
+        raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.post('/runs/{run_id}/unarchive')
+def unarchive_run(run_id: str, request: Request):
+    """보관한 작업을 목록으로 복원한다(리뷰 N5)."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        return manager.set_archived(run_id, False)
     except KeyError:
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
 
