@@ -2563,20 +2563,25 @@ def _detect_cve_sig(probe: str, body: str, headers_lower: Optional[dict], status
     return out
 
 
-def _cve_nonapplicable_reason(status_code: int, body: str, headers_lower: Optional[dict]) -> str:
-    """CVE 프로브 응답이 '익스플로잇 결과를 담을 수 없는 형태'인지 → 사유 문자열(아니면 '')."""
+def _cve_response_form(status_code: int, body: str, headers_lower: Optional[dict]) -> tuple:
+    """CVE 프로브 응답의 형태 → (사유, 종류). 매처 미매칭의 '의미'가 종류마다 다르다:
+      'absent'   — 취약 경로/컴포넌트가 대상에 아예 없음(404/410). 미매칭이면 '미해당(안전)'.
+      'untested' — 공격 엔드포인트가 실제로 실행되지 않음(3xx 리다이렉트·401/403·빈 본문).
+                   '검사할 응답 자체가 없음' 이므로 미매칭이 '안전'을 뜻하지 않음 → '판정불가'.
+      ''         — 평가 가능한 형태(여기서 특별 판정하지 않음).
+    (예전엔 셋을 모두 '미해당(안전)'으로 뭉갰다 — 리다이렉트/인증거부/빈본문을 '안전'으로 오표기.)"""
     if status_code in (301, 302, 303, 307, 308):
         loc = _hdr_raw(headers_lower, "location")
         return (f"HTTP {status_code} 리다이렉트" + (f" → {loc[:80]}" if loc else "")
-                + " — 취약 엔드포인트가 응답하지 않고 다른 곳으로 돌림")
+                + " — 취약 엔드포인트가 응답하지 않고 다른 곳으로 돌림", "untested")
     if status_code in (401, 403):
-        return f"HTTP {status_code} 인증/접근 거부 — 취약 엔드포인트에 도달하지 못함"
+        return f"HTTP {status_code} 인증/접근 거부 — 취약 엔드포인트에 도달하지 못함", "untested"
     if status_code in (404, 410):
-        return f"HTTP {status_code} — 해당 경로/컴포넌트가 대상에 존재하지 않음"
-    # 5xx 는 익스플로잇이 서버를 흔든 신호일 수 있다 → 빈 본문이어도 "미해당"으로 단정하지 않는다.
+        return f"HTTP {status_code} — 해당 경로/컴포넌트가 대상에 존재하지 않음", "absent"
+    # 5xx 는 익스플로잇이 서버를 흔든 신호일 수 있다 → 빈 본문이어도 특별 판정하지 않는다.
     if status_code < 500 and not (body or "").strip():
-        return f"HTTP {status_code} · 빈 응답 본문 — 익스플로잇 결과가 담길 내용 자체가 없음"
-    return ""
+        return f"HTTP {status_code} · 빈 응답 본문 — 익스플로잇 결과가 담길 내용 자체가 없음", "untested"
+    return "", ""
 
 
 # 앞단 프록시/CDN 지문 — Server 헤더가 이 값이면 뒤의 실제 백엔드(Apache/Tomcat/앱)를 가린다.
@@ -3813,28 +3818,32 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     #     '이 대상엔 해당 없음' 으로 정직하게 판정한다. (예전에는 무관한 파일읽기 시그니처로
     #      '미확인 + 무관한 확인 시그니처' 를 붙여 오해를 만들었다.)
     #     payload 가 다른 유형(트래버설 등)을 명확히 가리키면 그 유형 판정을 유지한다.
-    cve_non_applicable = False
+    cve_non_applicable = False      # ②-f 가 처리함 → ②-f-2(지문 불일치)는 건너뛴다
+    cve_safe = False                # '미해당(안전)' 확정 — 404/410 경로·컴포넌트 부재일 때만 outcome=safe 강제
     if (category or "").lower() == "cve" and _classify.classify(
             payload=payload, url=url, req_body=req_body, category=category).primary == "cve" \
             and not any(f["verdict"] in ("성공", "의심") for f in findings):
-        _reason = _cve_nonapplicable_reason(status_code, body, headers_lower)
+        _reason, _form = _cve_response_form(status_code, body, headers_lower)
         if _reason:
             _cchecked = _cve_checked_or_note(file_probe, headers_lower, only_sigs=_cve_only)
             _verify = _cve_verify_patterns(file_probe, only_sigs=_cve_only)
-            if _verify:
-                # 응답에서 이 패턴을 검사했는데 안 맞았다 → '영향없음(미해당)'을 그 근거로 명시
+            if _form == "untested":
+                # 3xx 리다이렉트·401/403·빈 본문 — 공격 엔드포인트가 실제로 실행되지 않음.
+                # 확증 패턴이 '안 맞은' 게 아니라 '검사할 응답 자체가 없음' 이므로, 미매칭을 '안전'으로
+                # 읽으면 안 된다 → 판정불가(안전 오표기 금지). (예전엔 전부 '미해당(안전)'으로 뭉갰다.)
+                _vtxt = f"확증 패턴({_verify})을 " if _verify else ""
                 findings.append({
-                    "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
-                    "why": f"{_reason}. 응답에서 확증 패턴({_verify})을 검사했으나 매칭되지 않았고, "
-                           "응답도 익스플로잇 결과를 담을 수 없는 형태 → 이 대상에는 해당 없음(미해당). "
-                           "(컴포넌트/버전이 다르거나 취약 경로가 없는 경우입니다)",
+                    "name": "CVE 프로브 — 엔드포인트 미도달(판정불가)", "verdict": "미확정", "confidence": 40,
+                    "why": f"{_reason}. 공격 엔드포인트가 실제로 실행되지 않아 {_vtxt}응답에서 검사할 수 없었음 "
+                           "→ 취약 여부 판정불가(미매칭 ≠ 안전). 리다이렉트를 따라가거나(HTTP→HTTPS 승격일 "
+                           "수 있음) 인증/우회 후 재시도하세요.",
                     "checked": _cchecked,
-                    "evidence": f"{_reason} · 확증 패턴 미매칭 (HTTP {status_code} · {len(body or '')}B)",
+                    "evidence": f"{_reason} · 엔드포인트 미실행으로 확증 불가 (HTTP {status_code} · {len(body or '')}B)",
                 })
                 cve_non_applicable = True
-            else:
-                # 응답 기반 확증 패턴이 없는 CVE(무출력 RCE·OOB·타이밍) — 검사할 패턴이 없으므로
-                # '영향없음'으로 단정할 수 없다 → 판정불가(안전 오표기 금지).
+            elif not _verify and _cve_only is not None:
+                # 특정 CVE 로 식별(payload_id·PoC 지문)됐는데 그 CVE 에 응답 확증 패턴이 없음
+                # (무출력 RCE·OOB·타이밍) → 404 라도 '영향없음' 으로 단정할 수 없다 → 판정불가.
                 findings.append({
                     "name": "CVE 프로브 — 응답 확증 불가(판정불가)", "verdict": "미확정", "confidence": 45,
                     "why": f"{_reason}. 다만 이 CVE 는 응답에서 취약을 확증할 패턴이 없어(무출력 RCE·OOB·"
@@ -3843,6 +3852,20 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
                     "evidence": f"{_reason} · 응답 확증 패턴 없음 (HTTP {status_code} · {len(body or '')}B)",
                 })
                 cve_non_applicable = True
+            else:
+                # _form == 'absent'(404/410) — 취약 경로/컴포넌트가 대상에 아예 없음. 확증 패턴까지
+                # 검사했으나 미매칭(있을 때)이거나, 특정 CVE 미식별이면 경로 부재 자체가 근거 →
+                # '미해당(안전)'. (경로 존재 + 미실행인 3xx·401/403 과 달리, 부재는 확정적 음성)
+                _vtxt = f"응답에서 확증 패턴({_verify})을 검사했으나 매칭되지 않았고, " if _verify else ""
+                findings.append({
+                    "name": "CVE 프로브 — 취약 징후 없음(미해당)", "verdict": "안전", "confidence": 75,
+                    "why": f"{_reason}. {_vtxt}취약 경로/컴포넌트가 대상에 존재하지 않음 → 이 대상에는 "
+                           "해당 없음(미해당). (컴포넌트/버전이 다르거나 취약 경로가 없는 경우입니다)",
+                    "checked": _cchecked,
+                    "evidence": f"{_reason} · 확증 패턴 미매칭 (HTTP {status_code} · {len(body or '')}B)",
+                })
+                cve_non_applicable = True
+                cve_safe = True
 
     # ②-f-2 CVE 스택 지문 불일치 — 200+내용이라 '미해당' 형태는 아니지만, 대상의 비-프록시
     #        지문이 이 CVE 대상 제품과 다르면 '해당 가능성 낮음'으로 낮춘다(하드 '안전' 아님 —
@@ -3930,8 +3953,9 @@ def attack_findings(status_code, headers_lower, body, response_time, payload, ca
     if success:
         outcome = "success"
         conf = max(f["confidence"] for f in success)
-    elif cve_non_applicable:
-        # 401/403 도 '차단' 이 아니라 'CVE 미해당' 이 더 정확한 서술이라 차단보다 우선한다.
+    elif cve_safe:
+        # 404/410 — 취약 경로/컴포넌트가 대상에 아예 없음(미해당) 만 '안전' 으로 확정한다.
+        # (3xx 리다이렉트·401/403·빈 본문·무매처 CVE 는 cve_safe 가 아니라 판정불가로 남는다.)
         outcome = "safe"
         conf = max((f["confidence"] for f in findings if f["verdict"] == "안전"), default=75)
     elif blocked:

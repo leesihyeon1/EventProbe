@@ -6,7 +6,9 @@
     그 결과 `/plugin` 302 · 빈 응답에도 "미확인 + 무관한 확인 시그니처" 가 붙었다.
 
 이제:
-  - 응답이 3xx·401/403·404·빈 본문이면 → "CVE 프로브 — 취약 징후 없음(미해당)" (안전)
+  - 404/410(경로·컴포넌트 부재) → "CVE 프로브 — 취약 징후 없음(미해당)" (안전)
+  - 3xx 리다이렉트·401/403·빈 본문(엔드포인트 미실행) → "CVE 프로브 — 엔드포인트 미도달(판정불가)"
+    (미매칭 ≠ 안전 — '검사할 응답 자체가 없음' 이므로 판정불가. 리다이렉트/인증게이트/WAF 앞단 가능)
   - 확증은 오직 그 CVE 항목이 들고 있는 nuclei matcher(status/word/regex) 로만
   - '확인 시그니처(checked)' 에는 무관한 파일읽기 시그니처가 절대 등장하지 않는다
 
@@ -38,24 +40,39 @@ def _cve(status, headers=None, body="", payload="/plugin", url="https://t.exampl
 # (B) 응답 형태만으로 '미해당' 판정 — 무관한 시그니처로 검증하지 않는다
 # ─────────────────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("status,headers,body,expect_in_evidence", [
-    (302, {"location": "https://t.example.com/login"}, "", "리다이렉트"),
-    (301, {"location": "/elsewhere"}, "", "리다이렉트"),
-    (401, {}, "Unauthorized", "인증/접근 거부"),
-    (403, {}, "Forbidden", "인증/접근 거부"),
     (404, {}, "<html>Not Found</html>", "존재하지 않음"),
-    (200, {}, "", "빈 응답 본문"),
-    (200, {}, "   \n  ", "빈 응답 본문"),
+    (410, {}, "<html>Gone</html>", "존재하지 않음"),
 ])
-def test_cve_probe_non_applicable(status, headers, body, expect_in_evidence):
-    """3xx·401/403·404·빈 본문 → '취약 징후 없음(미해당)' 로 정직하게 판정."""
+def test_cve_probe_absent_is_safe(status, headers, body, expect_in_evidence):
+    """404/410 — 취약 경로/컴포넌트가 대상에 아예 없음 → '취약 징후 없음(미해당)'(안전)."""
     r = _cve(status, headers, body)
     na = _f(r, "CVE 프로브 — 취약 징후 없음(미해당)")
-    assert na, f"HTTP {status} 는 '미해당' 으로 판정돼야 한다"
+    assert na, f"HTTP {status} 는 '미해당(안전)' 으로 판정돼야 한다"
     assert na[0]["verdict"] == "안전"
     assert expect_in_evidence in na[0]["evidence"]
     assert r["attack_outcome"] == "safe"
     # '미확인' 으로 남지 않는다
     assert not _f(r, "자동 판정 불가")
+
+
+@pytest.mark.parametrize("status,headers,body,expect_in_evidence", [
+    (302, {"location": "https://t.example.com/login"}, "", "리다이렉트"),
+    (301, {"location": "/elsewhere"}, "", "리다이렉트"),
+    (308, {"location": "https://other.example.com/owa/"}, "", "리다이렉트"),
+    (401, {}, "Unauthorized", "인증/접근 거부"),
+    (200, {}, "", "빈 응답 본문"),
+    (200, {}, "   \n  ", "빈 응답 본문"),
+])
+def test_cve_probe_untested_is_inconclusive_not_safe(status, headers, body, expect_in_evidence):
+    """3xx 리다이렉트·401·빈 본문 — 공격 엔드포인트가 실제로 실행되지 않음 → 확증 패턴 미매칭을
+    '안전'으로 읽으면 안 된다 → 판정불가(엔드포인트 미도달). 핵심 회귀: 안전 오표기 금지."""
+    r = _cve(status, headers, body)
+    na = _f(r, "CVE 프로브 — 엔드포인트 미도달(판정불가)")
+    assert na, f"HTTP {status} 는 '판정불가' 로 판정돼야 한다"
+    assert na[0]["verdict"] == "미확정"
+    assert expect_in_evidence in na[0]["evidence"]
+    assert r["attack_outcome"] != "safe"                     # 안전 오표기 금지(판정불가를 안전으로 금지)
+    assert not any(f["verdict"] == "안전" for f in r["findings"])
 
 
 @pytest.mark.parametrize("status", [302, 401, 403, 404, 200])
@@ -75,11 +92,13 @@ def test_cve_probe_5xx_empty_body_stays_inconclusive():
         assert r["attack_outcome"] != "safe", f"HTTP {status}"
 
 
-def test_cve_probe_403_is_non_applicable_not_blocked():
-    """401/403 은 'WAF 차단' 보다 'CVE 미해당' 이 정확한 서술 → outcome=safe."""
+def test_cve_probe_403_untested_not_safe():
+    """401/403 은 '취약 엔드포인트 미도달' 이라 '안전' 으로 뒤집지 않는다 — WAF/인증 게이트 뒤에
+    취약 앱이 있을 수 있으므로 판정불가(또는 차단), 절대 safe 아님."""
     r = _cve(403, {}, "Forbidden")
-    assert r["attack_outcome"] == "safe"
-    assert not _f(r, "차단됨")
+    assert r["attack_outcome"] != "safe"
+    assert not any(f["verdict"] == "안전" for f in r["findings"])
+    assert _f(r, "CVE 프로브 — 엔드포인트 미도달(판정불가)")
 
 
 def test_cve_probe_200_with_body_and_no_matcher_stays_inconclusive():
