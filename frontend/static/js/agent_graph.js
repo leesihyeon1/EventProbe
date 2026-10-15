@@ -447,7 +447,24 @@ function selectGraphNode(id, keepView) {
     graphView.ty = (r.height || 520) / 2 - (n.y + 24) * graphView.k;
     _applyGraphTransform();
   }
-  if (_graphModel && _graphModel.nodes.has(id)) showGraphDetail(_graphModel.nodes.get(id), _graphRun);
+  if (_graphModel && _graphModel.nodes.has(id)) {
+    const node=_graphModel.nodes.get(id), run=_graphRun;
+    const event=run?.events?.find(e=>e.id===node.event_id);
+    if(run?.compact && event && !event._rawLoaded) {
+      const panel=agentEl('agentGraphDetail');
+      panel.hidden=false;panel.replaceChildren(_detailEl('p','aw-muted','증거 불러오는 중…'));
+      agentApi(`/history/runs/${encodeURIComponent(run.id)}/events/${encodeURIComponent(node.event_id)}`)
+        .then(full=>{
+          if(_graphRun!==run || graphView.selectedId!==id) return;
+          const index=run.events.findIndex(e=>e.id===node.event_id);
+          if(index<0) return;
+          run.events[index]={...full,_rawLoaded:true};
+          showGraphDetail(node,run);
+        })
+        .catch(error=>{if(_graphRun===run && graphView.selectedId===id)
+          panel.replaceChildren(_detailEl('p','aw-muted',error.message));});
+    } else showGraphDetail(node,run);
+  }
 }
 
 function _detailEl(tag, cls, text) {
@@ -523,6 +540,7 @@ function showGraphDetail(n, run) {
 function navigateToEvidence(id) {
   if (_graphModel && _graphModel.nodes.has(id)) { selectGraphNode(id); return; }
   // 그래프에 없으면 타임라인에서 해당 이벤트 카드를 연다(폴백)
+  if(_graphRun?.compact) {openHistoryEvidence(id);return;}
   if (typeof setDetailMode === 'function') setDetailMode('timeline');
   const card = document.querySelector('.aw-event[data-event="' + _cssEscape(id) + '"]');
   if (card) { card.open = true; card.scrollIntoView({ block: 'center' }); card.classList.add('aw-flash'); setTimeout(() => card.classList.remove('aw-flash'), 1200); }

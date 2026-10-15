@@ -29,7 +29,7 @@ function setup() {
   vm.runInContext(source,ctx);
   ctx.agentApi=async(p,data,method)=>{
     calls.push({path:p,data,method});
-    if (p==='/templates' && !method && data===undefined) return {templates:ctx._templates};
+    if (p.startsWith('/templates?') && !method && data===undefined) return {templates:ctx._templates};
     return ctx._updated || {};
   };
   ctx._collectSpec=()=>({goal:'g', request:{url:'https://app.test/'}});
@@ -79,5 +79,75 @@ test('delete template sends DELETE then refreshes',async()=>{
   const {ctx,calls}=setup();
   await ctx.deleteTemplate('t1');
   assert(calls.some(x=>x.path==='/templates/t1' && x.method==='DELETE'));
-  assert(calls.some(x=>x.path==='/templates' && !x.method));   // 목록 재조회
+  assert(calls.some(x=>x.path.startsWith('/templates?') && !x.method));   // 목록 재조회
+});
+
+test('template search sends encoded filters and disables stale pinned plans',async()=>{
+  const {ctx,get,calls}=setup();
+  get('templatesSearch').value='로그인 검사';
+  get('templatesCategory').value='access';
+  ctx.agentApi=async(p)=>{calls.push({path:p});return {policy_version:2,templates:[
+    {id:'old',name:'로그인 검사',category:'access',goal:'g',pinned_plan:true,policy_version:1}
+  ]};};
+  await ctx.loadTemplates();
+  assert.equal(calls[0].path,'/templates?search='+encodeURIComponent('로그인 검사')+'&category=access&offset=0&limit=25');
+  const nodes=all(get('templatesList'));
+  assert(nodes.some(n=>n.textContent==='정책 갱신 필요'));
+  assert.equal(nodes.find(n=>n.tagName==='button' && n.textContent==='실행').disabled,true);
+});
+
+test('template pages append and keep the current search scope',async()=>{
+  const {ctx,get,calls}=setup();
+  get('templatesSearch').value='login';
+  ctx.agentApi=async p=>{calls.push({path:p});return p.includes('offset=0')?
+    {templates:[{id:'t1',name:'first'}],has_more:true}:
+    {templates:[{id:'t2',name:'second'}],has_more:false};};
+  await ctx.loadTemplates();
+  assert.equal(get('templatesMore').hidden,false);
+  await get('templatesMore').onclick();
+  assert.deepEqual(calls.map(x=>x.path),[
+    '/templates?search=login&offset=0&limit=25',
+    '/templates?search=login&offset=1&limit=25']);
+  assert.equal(all(get('templatesList')).filter(n=>n.tagName==='strong').length,2);
+  assert.equal(get('templatesMore').hidden,true);
+});
+
+test('bulk category updates only selected templates and reports each failure',async()=>{
+  const {ctx,get,calls,promptQueue}=setup();
+  ctx._templates=[{id:'t1',name:'first'},{id:'t2',name:'second'}];
+  ctx.agentApi=async(p,data,method)=>{
+    calls.push({path:p,data,method});
+    return p==='/templates/batch/category'?
+      {succeeded:1,failed:1,results:[{id:'t1',ok:true},{id:'t2',ok:false,error:'권한 없음'}]}:
+      {templates:ctx._templates};
+  };
+  ctx.renderTemplates(ctx._templates);
+  const checks=all(get('templatesList')).filter(n=>n.tagName==='input');
+  checks.forEach(check=>{check.checked=true;check.onchange();});
+  assert.equal(get('templatesBulkCategory').disabled,false);
+  promptQueue.push('access');
+  await ctx.batchTemplateCategory();
+  const call=calls.find(c=>c.path==='/templates/batch/category');
+  assert.equal(call.data.category,'access');
+  assert.deepEqual(Array.from(call.data.ids),['t1','t2']);
+  assert(get('templatesBulkResult').textContent.includes('1건 실패'));
+  assert(all(get('templatesBulkResult')).some(n=>n.textContent.includes('t2: 권한 없음')));
+});
+
+test('template revision saves current form and displays version history as text',async()=>{
+  const {ctx,get,calls,promptQueue}=setup();
+  promptQueue.push('새 이름','access');
+  await ctx.reviseTemplate({id:'t1',name:'old',category:'auth'});
+  const saved=calls.find(call=>call.path==='/templates/t1' && call.method==='PATCH');
+  assert(saved && saved.data.name==='새 이름' && saved.data.spec.goal==='g');
+  ctx.agentApi=async(path,data,method)=>{calls.push({path,data,method});
+    return path.endsWith('/revisions')?{revisions:[
+      {version:2,created:1700000001,name:'new',category:'access'},
+      {version:1,created:1700000000,name:'<script>x</script>',category:'access'}]}:{templates:[]};};
+  await ctx.showTemplateRevisions({id:'t1',name:'새 이름'});
+  assert(all(get('templatesRevisions')).some(node=>(node.textContent||'').includes('<script>x</script>')));
+  assert(all(get('templatesRevisions')).every(node=>node.innerHTML===undefined));
+  const restore=all(get('templatesRevisions')).find(node=>node.textContent==='이 버전 복원');
+  await restore.onclick();
+  assert(calls.some(call=>call.path==='/templates/t1/revisions/1/restore'));
 });

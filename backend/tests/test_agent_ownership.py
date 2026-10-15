@@ -56,13 +56,25 @@ def test_check_access_enforced_only_when_scoped(tmp_path, monkeypatch):
         m.check_access('missing', 'alice')               # 없는 run → KeyError(→404)
 
 
+def test_scope_guard_reads_only_owner_projection(tmp_path, monkeypatch):
+    store = Store(tmp_path / 'owners.db')
+    rid = store.create(_data(owner='alice'))
+    manager = AgentManager(store)
+    monkeypatch.setenv('AGENT_SCOPE_OWNER', '1')
+    monkeypatch.setattr(store, 'get', lambda _: pytest.fail('owner guard loaded full run'))
+    manager.check_access(rid, 'alice')
+    with pytest.raises(PermissionError):
+        manager.check_access(rid, 'bob')
+
+
 # ── 라우터(소유권 범위 ON) ─────────────────────────────────────────────────────
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_mod, '_manager', AgentManager(Store(tmp_path / 'own.db')))
     from fastapi.testclient import TestClient
-    from main import app
-    return TestClient(app)
+    import main
+    monkeypatch.setattr(main, '_access_token', lambda: '')
+    return TestClient(main.app)
 
 
 def _insert(owner):
@@ -88,6 +100,23 @@ def test_scope_on_filters_list_and_guards_access(client, monkeypatch):
     assert client.delete('/api/agent/runs/' + a, headers={'X-EventProbe-User': 'bob'}).status_code == 403
     assert client.post('/api/agent/runs/' + a + '/findings/x/retest', json={},
                        headers={'X-EventProbe-User': 'bob'}).status_code == 403
+
+
+def test_scope_filters_before_list_limit(client, monkeypatch):
+    monkeypatch.setenv('AGENT_SCOPE_OWNER', '1')
+    store = agent_mod.get_manager().store
+    alice = _insert('alice')
+    legacy = _insert('')
+    archived = store.create({**_data('alice'), 'archived': True})
+    for index in range(60):
+        _insert('bob')
+        store.create({**_data('bob'), 'archived': True})
+    headers = {'X-EventProbe-User': 'alice'}
+    visible = {run['id'] for run in client.get('/api/agent/runs', headers=headers).json()['runs']}
+    assert visible == {alice, legacy}
+    archived_visible = {run['id'] for run in client.get('/api/agent/runs?archived=1',
+                                                       headers=headers).json()['runs']}
+    assert archived_visible == {archived}
 
 
 def test_create_via_endpoint_records_principal(client, monkeypatch):

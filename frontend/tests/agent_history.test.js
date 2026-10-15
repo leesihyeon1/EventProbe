@@ -10,6 +10,8 @@ class Element {
   append(...nodes){this.children.push(...nodes);}
   replaceChildren(...nodes){this.children=[...nodes];}
   replaceWith(node){this.replacement=node;}
+  scrollIntoView(){this.scrolled=true;}
+  querySelector(){return null;}
 }
 
 function setup() {
@@ -21,6 +23,7 @@ function setup() {
     epIcon:name=>new Element('icon-'+name),
     agentApi:async url=>{calls.push(url);return context.answer(url);},
     renderWorkspaceEvent:event=>{const row=new Element('details');row.dataset.event=event.id;row.textContent=event.data.body;return row;},
+    setDetailMode:mode=>{context.agentDetailMode=mode;},
   });
   vm.runInContext(source,context);
   return {context,get,calls};
@@ -54,4 +57,31 @@ test('switching runs resets the cursor and ignores the old page',async()=>{
   await context.loadHistoryPage();
   assert(calls[1].includes('/runs/run2/events?after=0'));
   assert.equal(get('ahEvents').children.length,0);
+});
+
+test('linked map evidence opens one local event without a full run snapshot',async()=>{
+  const {context,get,calls}=setup();
+  context.agentDetailMode='sitemap';
+  context.answer=()=>({id:'event1',kind:'observation',data:{body:'PRIVATE_RESPONSE'}});
+  await context.openHistoryEvidence('event1');
+  assert.deepEqual(calls,['/history/runs/run1/events/event1']);
+  assert.equal(context.agentDetailMode,'history');
+  assert.equal(get('ahEvents').children[0].open,true);
+});
+
+test('timeline pages metadata and opens only selected raw event',async()=>{
+  const {context,get,calls}=setup();
+  context.agentDetailMode='timeline';
+  const event={id:'event1',kind:'observation',created:1700000000,cursor:7};
+  context.answer=url=>url.endsWith('/event1')?{...event,data:{body:'PRIVATE_RESPONSE'}}:
+    {events:[event],cursor:7,has_more:false};
+  context.initHistory();
+  await context.loadTimelinePage();
+  assert.equal(get('agentEvents').children.length,1);
+  assert.equal(get('agentEventCount').textContent,'1개 이벤트 표시');
+  assert(!JSON.stringify(get('agentEvents').children).includes('PRIVATE_RESPONSE'));
+  const row=get('agentEvents').children[0];row.open=true;
+  await row.ontoggle();
+  assert.equal(row.replacement.textContent,'PRIVATE_RESPONSE');
+  assert.equal(calls.length,2);
 });

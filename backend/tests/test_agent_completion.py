@@ -152,6 +152,8 @@ def test_http_error_is_not_replayed_and_has_conclusion(tmp_path):
         run = manager.snapshot(rid)
         assert len(calls) == 1 and run['state'] == 'paused'
         assert run['conclusion']['completion'] == 'partial'
+        assert run['tool_summary']['http_error'] == 1
+        assert run['tool_summary']['http_unresolved'] == 0
         assert run['events'][-1]['kind'] == 'conclusion'
     asyncio.run(scenario())
 

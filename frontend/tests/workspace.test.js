@@ -34,6 +34,10 @@ test('search matches goal or ID, independently combined with status',()=>{
   assert.equal(context.filteredAgentRuns(runs,' LOGIN ','running').length,1);
   assert.equal(context.filteredAgentRuns(runs,'ABC123','').length,1);
   assert.equal(context.filteredAgentRuns(runs,'Login','completed').length,0);
+  assert.equal(context.filteredAgentRuns([{...runs[0],name:'Reviewed',category:'access'}],
+    'Reviewed','running','access').length,1);
+  assert.equal(context.filteredAgentRuns([{...runs[0],category:'access'}],
+    '','running','xss').length,0);
 });
 test('pagination clamps after filtering and renders a proper table empty state',()=>{
   const {context,get}=setup();
@@ -57,6 +61,55 @@ test('server page reports the real total and state counts beyond the visible row
   assert.equal(get('agentMetrics').children[0].children[1].textContent,'70');
   assert.equal(get('agentNext').disabled,false);
 });
+
+test('bulk controls follow selected visible rows and running state',()=>{
+  const {context,get}=setup();
+  const runs=[{id:'one',goal:'One',state:'completed',created:1700000000},
+    {id:'two',goal:'Two',state:'running',created:1700000001}];
+  context.renderAgentList({runs,total:2,scope_total:2,state_counts:{completed:1,running:1}});
+  const first=get('agentList').children[0].children[0].children[0];
+  first.checked=true;first.onchange();
+  assert.equal(get('agentBatchArchive').disabled,false);
+  assert.equal(get('agentBatchStop').disabled,true);
+  const second=get('agentList').children[1].children[0].children[0];
+  second.checked=true;second.onchange();
+  assert.equal(get('agentBatchStop').disabled,false);
+  context.renderAgentList({runs,total:2,scope_total:2,state_counts:{completed:1,running:1}});
+  assert.equal(get('agentBatchArchive').disabled,true);
+});
+
+test('leaving compact history requests map detail for graph tabs',()=>{
+  const {context}=setup();
+  let refreshed=0;context.pollAgent=()=>{refreshed++;};
+  vm.runInContext("agentRunId='run';agentDetailMode='history';_awRun={id:'run',compact:true,events:[]};setDetailMode('graph')",context);
+  assert.equal(refreshed,1);
+  assert.equal(vm.runInContext('_awRun',context),null);
+});
+
+test('switching compact map tabs reuses metadata but timeline refreshes',()=>{
+  const {context}=setup();
+  let refreshed=0;context.pollAgent=()=>{refreshed++;};
+  context.renderAgentSiteMap=()=>{};
+  vm.runInContext("agentRunId='run';agentDetailMode='graph';_awRun={id:'run',compact:true,view:'map',events:[]};setDetailMode('sitemap')",context);
+  assert.equal(refreshed,0);
+  vm.runInContext("setDetailMode('timeline')",context);
+  assert.equal(refreshed,1);
+  assert.equal(vm.runInContext('_awRun',context),null);
+});
+
+test('state, category and archive filters restore without saving search text',()=>{
+  const {context,get}=setup();
+  const values=new Map();
+  context.localStorage={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
+  get('agentFilter').value='paused';get('agentCategory').value='access';get('agentSearch').value='sensitive query';
+  vm.runInContext('_showArchived=true;saveAgentFilters()',context);
+  assert(!values.get('ep-agent-filters').includes('sensitive query'));
+  get('agentFilter').value='';get('agentCategory').value='';
+  vm.runInContext('_showArchived=false;restoreAgentFilters()',context);
+  assert.equal(get('agentFilter').value,'paused');
+  assert.equal(get('agentCategory').value,'access');
+  assert.equal(get('agentArchivedToggle').attributes['aria-pressed'],'true');
+});
 test('response evidence stays text and has separate request/response panes',()=>{
   const {context}=setup();
   const raw='<script>throw new Error("never execute")</script>';
@@ -66,8 +119,20 @@ test('response evidence stays text and has separate request/response panes',()=>
   assert.equal(descendants.filter(n=>n.tagName==='section').length,2);
   assert(descendants.every(n=>n.innerHTML===undefined));
 });
+
+test('goal completion and missing reason render as text',()=>{
+  const {context,get}=setup();
+  context.renderAgentConclusion({completion:'partial',verdict:'inconclusive',text:'부분 결론',
+    counts:{},observation_count:0,verifications:[],next_steps:[],scope_note:'범위 제한',
+    goals:[{id:'g1',title:'<script>not markup</script>',category:'xss',status:'unmet',
+            reason:'연결 증거 없음',evidence_ids:[]}]});
+  const nodes=allNodes(get('agentConclusion'));
+  assert(nodes.some(n=>n.textContent.includes('미충족 · <script>not markup</script>')));
+  assert(nodes.every(n=>n.innerHTML===undefined));
+});
 test('detail polling preserves expanded events without duplicates',()=>{
   const {context,get}=setup();
+  vm.runInContext("agentDetailMode='timeline'",context);
   const run={id:'run',state:'paused',data:{spec:{goal:'test',max_steps:8,max_requests:24,max_ai_calls:8},steps:1,requests:1,ai_calls:0,elapsed:1,endpoints:{seed:{}}},events:[{id:'a',kind:'action',data:{kind:'observe',hypothesis:'test'}}]};
   context.renderAgentWorkspace(run);
   get('agentEvents').children[0].open=true;
@@ -76,6 +141,66 @@ test('detail polling preserves expanded events without duplicates',()=>{
   assert.equal(get('agentEvents').children[0].open,true);
   assert.equal(get('agentResume').disabled,false);
   assert.equal(get('agentStop').disabled,true);
+});
+
+test('revoked approval disables resume and intervention controls',()=>{
+  const {context,get}=setup();
+  const run={id:'run',state:'paused',data:{spec:{goal:'test',mode:'plan',approved_plan:{entry:'s',steps:[]},
+    max_steps:8,max_requests:24,max_ai_calls:0},plan_checkpoint:{current:'s',phase:'ready'},
+    steps:0,requests:0,ai_calls:0,elapsed:0,endpoints:{seed:{}}},events:[{kind:'plan'}]};
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentRevokePlan').disabled,false);
+  assert.equal(get('agentResume').disabled,false);
+  run.data.spec.approved_plan_revoked_at=100;
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentRevokePlan').disabled,true);
+  assert.equal(get('agentResume').disabled,true);
+  assert.equal(get('agentSkipPlan').disabled,true);
+});
+
+test('active plan exposes hold control only after its plan is recorded',()=>{
+  const {context,get}=setup();
+  const run={id:'run',state:'running',data:{spec:{goal:'test',mode:'plan',max_steps:8,max_requests:24,max_ai_calls:0},
+    steps:0,requests:0,ai_calls:0,elapsed:0,endpoints:{seed:{}}},events:[]};
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentHoldPlan').disabled,true);
+  run.events=[{kind:'plan'}];
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentHoldPlan').disabled,false);
+  run.data.spec.approved_plan_revoked_at=100;
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentHoldPlan').disabled,true);
+});
+
+test('review gate disables resume and exposes approve or deny until decided',()=>{
+  const {context,get}=setup();
+  const run={id:'r',state:'paused',data:{spec:{goal:'g',mode:'plan',max_steps:2,max_requests:2,max_ai_calls:0},
+    plan_checkpoint:{current:'second',phase:'approval_required'},steps:1,requests:1,ai_calls:0,elapsed:1,endpoints:{}}};
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentResume').disabled,true);
+  assert.equal(get('agentApproveStep').disabled,false);
+  assert.equal(get('agentDenyStep').disabled,false);
+  run.data.plan_checkpoint.phase='approved';
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentResume').disabled,false);
+  assert.equal(get('agentApproveStep').disabled,true);
+  run.data.plan_checkpoint.phase='denied';
+  context.renderAgentRunHeader(run);
+  assert.equal(get('agentResume').disabled,true);
+  assert.equal(get('agentSkipPlan').disabled,true);
+});
+
+test('run header shows recorded model, procedure hash and tool outcomes as text',()=>{
+  const {context,get}=setup();
+  context.renderAgentRunHeader({id:'r',state:'completed',data:{spec:{goal:'g',max_steps:1,max_requests:2,max_ai_calls:1},
+    steps:1,requests:1,ai_calls:1,elapsed:1,endpoints:{},procedure_sha256:{agent:'a'.repeat(64)},
+    planner_attempts:[{model:'synthetic-model',prompt_sha256:'b'.repeat(64)}]},
+    tool_summary:{http_observed:1,http_error:0,http_unresolved:0},events:[]});
+  const text=allNodes(get('agentSummary')).map(item=>item.textContent).join(' ');
+  assert.match(text,/synthetic-model/);
+  assert.match(text,/aaaaaaaaaaaa/);
+  assert.match(text,/bbbbbbbbbbbb/);
+  assert.match(text,/응답 관측/);
 });
 
 test('partial conclusion is visible, text-only, and stable between identical polls',()=>{

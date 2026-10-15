@@ -198,3 +198,23 @@ test('11. static guard: no egress / innerHTML in agent_graph.js and agent.css', 
   assert.ok(!/@import|url\(\s*["']?https?:/i.test(css), 'css: no remote @import/url');
   assert.ok(!/https?:\/\//.test(css), 'css: no external URL');
 });
+
+test('compact graph opens one raw event only after node selection', async () => {
+  const local=loadCtx(),calls=[];
+  local.CSS={escape:s=>s};
+  local.agentApi=async url=>{calls.push(url);return ev('o1','observation','S1',{
+    request:{method:'GET'},response:{status:200,body:'PRIVATE_RESPONSE'}});};
+  local.run={id:'R',compact:true,events:[ev('o1','observation','S1',{
+    response:{status:200}})]};
+  local.model={nodes:new Map([['o1',{id:'o1',type:'observation',event_id:'o1',label:'HTTP 200'}]])};
+  vm.runInContext('_graphRun=run;_graphModel=model',local);
+  local.selectGraphNode('o1');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(calls,['/history/runs/R/events/o1']);
+  assert.equal(local.run.events[0]._rawLoaded,true);
+  assert(allText(local.__panel).includes('PRIVATE_RESPONSE'));
+  local.selectGraphNode('o1');
+  assert.equal(calls.length,1);
+});
+
+function allText(node){return [node.textContent,...node.children.flatMap(allText)].join(' ');}

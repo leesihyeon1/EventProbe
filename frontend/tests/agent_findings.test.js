@@ -96,6 +96,37 @@ test('triage PATCHes the local endpoint and adopts the returned snapshot',async(
   assert.equal(context._awRun.findings[0].status,'resolved'); // server truth adopted
 });
 
+test('compact finding evidence fetches only the selected event in history',async()=>{
+  const {context,get,calls}=setup();
+  context._awRun={id:'run1',compact:true};context.agentRunId='run1';
+  context.historyState={runId:'run1',seen:new Set()};
+  context.setDetailMode=mode=>{context._mode=mode;};
+  context.renderWorkspaceEvent=full=>{
+    const row=new Element('details');row.dataset.event=full.id;
+    row.append(new Element('summary'));return row;
+  };
+  context._updated={id:'o1',data:{body:'private'}};
+  await context.showFindingEvidence('o1');
+  assert.equal(context._mode,'history');
+  assert.equal(calls[0].path,'/history/runs/run1/events/o1');
+  assert.equal(get('ahEvents').children.length,1);
+  assert.equal(get('ahEvents').children[0].open,true);
+});
+
+test('late compact evidence response cannot appear under another run',async()=>{
+  const {context,get}=setup();
+  context._awRun={id:'run1',compact:true};context.agentRunId='run1';
+  context.historyState={runId:'run1',seen:new Set()};
+  context.setDetailMode=()=>{};
+  let finish;
+  context.agentApi=()=>new Promise(resolve=>{finish=resolve;});
+  const pending=context.showFindingEvidence('o1');
+  context.agentRunId='run2';context.historyState={runId:'run2',seen:new Set()};
+  finish({id:'o1',data:{body:'private'}});
+  await pending;
+  assert.equal(get('ahEvents').children.length,0);
+});
+
 test('vuln findings offer retest; it confirms, posts to the retest endpoint, and navigates',async()=>{
   const {context,get,calls}=setup();
   context.renderAgentFindings(run([finding({id:'f1',category:'sqli'})]));

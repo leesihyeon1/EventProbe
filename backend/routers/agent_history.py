@@ -17,28 +17,71 @@ def run_status(run_id: str, request: Request):
     manager = get_manager()
     _guard(manager, run_id, request)
     try:
-        run = manager.store.get(run_id)
+        status = manager.store.run_status_fields(run_id)
     except KeyError:
         raise HTTPException(404, '작업을 찾을 수 없습니다.')
-    data = run['data']
-    spec = data.get('spec') or {}
     with manager.store.connect() as db:
         counts = db.execute('SELECT COUNT(*) AS n, '
-                            "MAX(CASE WHEN kind='oob_pending' THEN 1 ELSE 0 END) AS pending "
+                            "MAX(CASE WHEN kind='oob_pending' THEN 1 ELSE 0 END) AS pending, "
+                            "MAX(CASE WHEN kind='plan' THEN 1 ELSE 0 END) AS has_plan "
                             'FROM events WHERE run_id=?', (run_id,)).fetchone()
-    return {'id': run_id, 'state': run['state'], 'updated': run['updated'],
+    return {'id': run_id, 'state': status['state'], 'updated': status['updated'],
             'event_count': counts['n'], 'has_pending_oob': bool(counts['pending']),
-            'data': {'spec': {key: spec.get(key) for key in
-                              ('goal', 'max_steps', 'max_requests', 'max_ai_calls')},
-                     'steps': data.get('steps', 0), 'requests': data.get('requests', 0),
-                     'ai_calls': data.get('ai_calls', 0), 'elapsed': data.get('elapsed', 0),
-                     'endpoints_count': len(data.get('endpoints') or {}),
-                     'reason': data.get('reason', ''), 'retest_of': data.get('retest_of')}}
+            'has_plan_event': bool(counts['has_plan']),
+            'data': {'spec': {key: status[key] for key in
+                              ('goal', 'mode', 'max_steps', 'max_requests', 'max_ai_calls',
+                               'approved_plan_revoked_at')},
+                     **{key: status[key] for key in
+                        ('has_approved_plan', 'plan_checkpoint', 'name', 'category',
+                         'steps', 'requests', 'ai_calls', 'elapsed', 'endpoints_count',
+                         'reason', 'retest_of')}}}
+
+
+@router.get('/runs/{run_id}/findings')
+def run_findings(run_id: str, request: Request):
+    """Return the finding view without transferring raw event bodies to the client."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        view = manager.finding_view(run_id)
+    except KeyError:
+        raise HTTPException(404, '작업을 찾을 수 없습니다.')
+    status = run_status(run_id, request)
+    return {**status, **view, 'compact': True}
+
+
+@router.get('/runs/{run_id}/map')
+def run_map(run_id: str, request: Request):
+    """Passive graph, sitemap, and coverage data without raw evidence bodies."""
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        view = manager.map_view(run_id)
+    except KeyError:
+        raise HTTPException(404, '작업을 찾을 수 없습니다.')
+    status = run_status(run_id, request)
+    status['data']['endpoints'] = view['data']['endpoints']
+    status['data']['spec']['request'] = view['data']['spec_request']
+    return {**status, 'events': view['events'], 'conclusion': view['conclusion'],
+            'compact': True, 'view': 'map'}
+
+
+@router.get('/runs/{run_id}/conclusion')
+def run_conclusion(run_id: str, request: Request):
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    try:
+        conclusion = manager.conclusion_view(run_id)
+    except KeyError:
+        raise HTTPException(404, '작업을 찾을 수 없습니다.')
+    return {**run_status(run_id, request), 'conclusion': conclusion,
+            'compact': True, 'view': 'timeline'}
 
 
 @router.get('/runs')
 def search_runs(request: Request, search: str = Query('', max_length=200),
-                state: str = Query('', max_length=32), archived: bool = False,
+                state: str = Query('', max_length=32), category: str = Query('', max_length=40),
+                archived: bool = False,
                 offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100)):
     """Search every stored run, including records older than the legacy 50-run list."""
     manager = get_manager()
@@ -51,26 +94,31 @@ def search_runs(request: Request, search: str = Query('', max_length=200),
     scope_params = list(params)
     if search:
         clauses.append("(instr(lower(id), lower(?)) > 0 OR "
+                       "instr(lower(COALESCE(json_extract(data, '$.name'), '')), lower(?)) > 0 OR "
                        "instr(lower(COALESCE(json_extract(data, '$.spec.goal'), '')), lower(?)) > 0)")
-        params.extend((search, search))
+        params.extend((search, search, search))
     if state:
         clauses.append('state = ?')
         params.append(state)
+    if category:
+        clauses.append("COALESCE(json_extract(data, '$.category'), '') = ?")
+        params.append(category)
     where = ' AND '.join(clauses)
     with manager.store.connect() as db:
         counts = db.execute(f'SELECT state,COUNT(*) AS n FROM runs WHERE {scope_where} '
                             'GROUP BY state', scope_params).fetchall()
         total = db.execute(f'SELECT COUNT(*) FROM runs WHERE {where}', params).fetchone()[0]
         rows = db.execute(
-            f'SELECT id,created,updated,state,data FROM runs WHERE {where} '
+            'SELECT id,created,updated,state,'
+            "COALESCE(json_extract(data, '$.spec.goal'), '') AS goal,"
+            "COALESCE(json_extract(data, '$.name'), '') AS name,"
+            "COALESCE(json_extract(data, '$.category'), '') AS category,"
+            "COALESCE(json_extract(data, '$.owner'), '') AS owner,"
+            "COALESCE(json_extract(data, '$.archived'), 0) AS archived "
+            f'FROM runs WHERE {where} '
             'ORDER BY created DESC,id DESC LIMIT ? OFFSET ?', (*params, limit, offset),
         ).fetchall()
-    runs = []
-    for row in rows:
-        data = json.loads(row['data'])
-        runs.append({'id': row['id'], 'created': row['created'], 'updated': row['updated'],
-                     'state': row['state'], 'goal': (data.get('spec') or {}).get('goal', ''),
-                     'owner': data.get('owner', ''), 'archived': bool(data.get('archived'))})
+    runs = [{**dict(row), 'archived': bool(row['archived'])} for row in rows]
     state_counts = {row['state']: row['n'] for row in counts}
     return {'runs': runs, 'total': total, 'scope_total': sum(state_counts.values()),
             'state_counts': state_counts, 'offset': offset, 'limit': limit,

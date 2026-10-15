@@ -91,6 +91,9 @@ def build_findings(run_id, data, events):
         request = endpoints.get(finding['endpoint_id']) or endpoints.get('seed') or {}
         address = _address(request)
         finding.update(address)
+        incident = (data or {}).get('incident') or {}
+        finding['asset_id'] = incident.get('asset_id', '')
+        finding['traffic_id'] = incident.get('traffic_id', '')
         finding['method'] = (request.get('method') or 'GET').upper()
         default_severity = _DEFAULT_SEVERITY[finding['verdict']]
         finding['default_severity'] = default_severity
@@ -171,6 +174,15 @@ def build_report_html(run):
              '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table>')
     next_steps = ''.join(f'<li>{_h(s)}</li>' for s in (conclusion.get('next_steps') or []))
     unfinished = len(conclusion.get('unfinished_steps') or [])
+    goal_rows = ''.join('<tr>'
+                        f'<td>{_h(g.get("title", ""))}</td>'
+                        f'<td>{_h(g.get("category", ""))}</td>'
+                        f'<td>{"충족" if g.get("status") == "met" else "진행 중" if g.get("status") == "pending" else "미충족"}</td>'
+                        f'<td>{len(g.get("evidence_ids") or [])}</td>'
+                        f'<td>{_h(g.get("reason", ""))}</td>'
+                        '</tr>' for g in (conclusion.get('goals') or []))
+    goals_section = ('<h2>세부 검증 목표</h2><table><thead><tr><th>목표</th><th>유형</th><th>상태</th>'
+                     '<th>연결 증거</th><th>미완료 사유</th></tr></thead><tbody>' + goal_rows + '</tbody></table>') if goal_rows else ''
     return f'''<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -210,6 +222,7 @@ def build_report_html(run):
     <dt>미완료 검사</dt><dd>{unfinished}</dd>
   </dl>
   <p>{_h(conclusion.get('text', ''))}</p>
+  {goals_section}
   <h2>발견 ({len(findings)})</h2>
   {table}
   <h2>다음 조치</h2>

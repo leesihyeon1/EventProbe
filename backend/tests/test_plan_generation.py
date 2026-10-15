@@ -75,13 +75,14 @@ def test_generate_plan_rejects_malformed_schema():
 
 def test_plan_endpoint_ok(monkeypatch):
     from fastapi.testclient import TestClient
-    from main import app
+    import main
+    monkeypatch.setattr(main, '_access_token', lambda: '')
 
     async def planner(ctx):
         return _valid_plan()
     monkeypatch.setattr(agent_mod, '_default_plan_planner', planner)
 
-    r = TestClient(app).post('/api/agent/plan',
+    r = TestClient(main.app).post('/api/agent/plan',
                              json={'goal': 't', 'request': {'url': 'https://app.test/?q=1'}})
     assert r.status_code == 200
     assert r.json()['plan']['entry'] == 'p1'
@@ -89,12 +90,13 @@ def test_plan_endpoint_ok(monkeypatch):
 
 def test_plan_endpoint_rejects_bad_plan(monkeypatch):
     from fastapi.testclient import TestClient
-    from main import app
+    import main
+    monkeypatch.setattr(main, '_access_token', lambda: '')
 
     async def planner(ctx):
         return {'nope': True}
     monkeypatch.setattr(agent_mod, '_default_plan_planner', planner)
 
-    r = TestClient(app).post('/api/agent/plan',
+    r = TestClient(main.app).post('/api/agent/plan',
                              json={'goal': 't', 'request': {'url': 'https://app.test/?q=1'}})
     assert r.status_code == 400

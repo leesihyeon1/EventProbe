@@ -90,7 +90,8 @@ def test_resume_endpoint_409_then_ok(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_mod, '_manager', m)
     rid = _resumable_run(m)
     from fastapi.testclient import TestClient
-    from main import app
-    client = TestClient(app)
+    import main
+    monkeypatch.setattr(main, '_access_token', lambda: '')
+    client = TestClient(main.app)
     assert client.post(f'/api/agent/runs/{rid}/resume', json={}).status_code == 409
     assert client.post(f'/api/agent/runs/{rid}/resume', json={'acknowledge_writes': True}).status_code == 200

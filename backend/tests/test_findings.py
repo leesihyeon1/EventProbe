@@ -118,6 +118,26 @@ def test_finding_ids_and_triage_survive_a_restart(tmp_path):
     assert reopened[0]['status'] == 'triaged'         # append-only update persists
 
 
+def test_finding_projection_matches_full_snapshot_without_loading_bodies(tmp_path, monkeypatch):
+    manager = AgentManager(Store(tmp_path / 'projection.sqlite3'))
+    rid = manager.store.create(_run_data())
+    manager.store.event(rid, 'action', {'kind': 'probe', 'category': 'xss',
+                                      'endpoint_id': 'seed', 'actor_id': 'owner'}, 'step')
+    manager.store.event(rid, 'observation', {'body': 'PRIVATE_' + 'x' * 100000}, 'step', 'obs')
+    manager.store.event(rid, 'verification', {'status': 'confirmed',
+                                             'evidence_ids': ['obs']}, 'step')
+    fid = manager.snapshot(rid)['findings'][0]['id']
+    manager.store.event(rid, 'finding_update', {'finding_id': fid, 'status': 'triaged',
+                                               'note': 'local note'})
+    full = manager.snapshot(rid)
+    monkeypatch.setattr(manager.store, 'events', lambda _: (_ for _ in ()).throw(
+        AssertionError('full evidence load is forbidden')))
+    projected = manager.finding_view(rid)
+    assert projected['findings'] == full['findings']
+    assert projected['conclusion'] == full['conclusion']
+    assert 'PRIVATE_' not in str(manager.store.finding_events(rid))
+
+
 def test_update_finding_rejects_unknown_id(tmp_path):
     manager = AgentManager(Store(tmp_path / 'agent.db'))
     run_id = manager.store.create(_run_data())

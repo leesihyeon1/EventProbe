@@ -13,6 +13,8 @@ function setup() {
     window:{}, console,
     getHeadersObj:()=>({}), pollAgent:async()=>{}, loadAgentList:async()=>{},
     confirm:(..._a)=>ctx._confirm!==false, _confirm:true,
+    prompt:()=>ctx._reason, _reason:'검사 범위 변경으로 건너뜀',
+    _awRun:{data:{plan_checkpoint:{current:'step-two'}}},
   });
   vm.runInContext(source,ctx);
   vm.runInContext('agentRunId="r1"',ctx);
@@ -48,4 +50,40 @@ test('a non-write resume succeeds on the first try',async()=>{
   ctx.agentApi=async(pathStr,data)=>{calls.push({path:pathStr,data});return {};};  // 서버가 경고하지 않음
   await ctx.agentControl('resume');
   assert.equal(calls.filter(c=>c.path.endsWith('/resume')).length,1);
+});
+
+test('skip sends an audited reason and never resumes automatically',async()=>{
+  const {ctx,calls}=setup();
+  await ctx.skipAgentPlanStep();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].path,'/runs/r1/plan/skip');
+  assert.equal(calls[0].data.reason,'검사 범위 변경으로 건너뜀');
+});
+
+test('revoke sends an audited reason and never resumes automatically',async()=>{
+  const {ctx,calls}=setup();
+  ctx._reason='정책 변경으로 승인 철회';
+  await ctx.revokeAgentPlan();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].path,'/runs/r1/plan/revoke');
+  assert.equal(calls[0].data.reason,'정책 변경으로 승인 철회');
+});
+
+test('hold sends an audited reason and never resumes automatically',async()=>{
+  const {ctx,calls}=setup();
+  ctx._reason='범위 확인 필요';
+  await ctx.holdAgentPlan();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].path,'/runs/r1/plan/hold');
+  assert.equal(calls[0].data.reason,'범위 확인 필요');
+});
+
+test('step approval and denial only record decisions',async()=>{
+  const {ctx,calls}=setup();
+  ctx._reason='로컬 범위 검토';
+  await ctx.reviewAgentPlanStep(true);
+  await ctx.reviewAgentPlanStep(false);
+  assert.deepEqual(calls.map(call=>call.path),
+    ['/runs/r1/plan/step/approve','/runs/r1/plan/step/deny']);
+  assert(calls.every(call=>call.data.reason==='로컬 범위 검토'));
 });

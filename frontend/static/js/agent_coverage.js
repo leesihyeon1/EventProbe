@@ -156,6 +156,7 @@ function drawCoverage() {
   renderCoverageDetail(sel?.[0],sel?.[1]);
 }
 function showCoverageEvidence(id) {
+  if(_awRun?.compact) return openHistoryEvidence(id);
   setDetailMode('timeline');
   const event=[...agentEl('agentEvents').children].find(el=>el.dataset.event===id);
   if(event){event.open=true;event.scrollIntoView({block:'center'});event.querySelector('summary')?.focus();}

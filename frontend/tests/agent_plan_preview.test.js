@@ -53,6 +53,26 @@ test('startAgent pins the approved plan only in plan mode',async()=>{
   const body=calls.find(c=>c.path==='/runs').data;
   assert.equal(body.mode,'plan');
   assert.deepEqual(body.approved_plan,PLAN);                              // exact approved plan pinned
+  assert(body.approved_plan_expires_at>Date.now()/1000);
+});
+
+test('preview policy revision is pinned into the approved run',async()=>{
+  const {ctx,get,calls}=setup();
+  ctx.agentApi=async(p,data)=>{calls.push({path:p,data});return p==='/plan'
+    ?{plan:PLAN,fingerprint:'abc1234567',policy_version:2}:{id:'run1'};};
+  get('agentPlanMode').checked=true; ctx.syncPlanPreview();
+  await ctx.previewPlan(); await ctx.startAgent();
+  assert.equal(calls.find(c=>c.path==='/runs').data.policy_version,2);
+});
+
+test('an expired preview cannot start a pinned run',async()=>{
+  const {ctx,get,calls}=setup();
+  get('agentPlanMode').checked=true; ctx.syncPlanPreview();
+  await ctx.previewPlan();
+  vm.runInContext('_approvedPlanExpiresAt=1',ctx);
+  await ctx.startAgent();
+  assert(!calls.some(c=>c.path==='/runs'));
+  assert.match(get('agentFormError').textContent,/만료/);
 });
 
 test('turning plan mode off clears the pin and hides the preview',async()=>{
@@ -66,6 +86,33 @@ test('turning plan mode off clears the pin and hides the preview',async()=>{
   const body=calls.find(c=>c.path==='/runs').data;
   assert.equal(body.mode,'iterative');
   assert(!('approved_plan' in body));                                     // no stale pin
+});
+
+test('local scope restrictions are included in the run spec',()=>{
+  const {ctx,get}=setup();
+  get('agentAllowedPaths').value='/api\n/api/v2';
+  get('agentDeniedPaths').value='/api/admin';
+  get('agentAllowedMethods').value='GET, head';
+  get('agentAllowedCategories').value='SQLI, xss';
+  const spec=ctx._collectSpec();
+  assert.deepEqual(Array.from(spec.allowed_path_prefixes),['/api','/api/v2']);
+  assert.deepEqual(Array.from(spec.denied_path_prefixes),['/api/admin']);
+  assert.deepEqual(Array.from(spec.allowed_methods),['GET','HEAD']);
+  assert.deepEqual(Array.from(spec.allowed_categories),['sqli','xss']);
+  assert.equal(spec.policy_version,1);
+});
+
+test('multiple evidence goals are collected with independent completion rules',()=>{
+  const {ctx}=setup();
+  const rows=[
+    {'goal-id':'sql','goal-title':'SQL 검증','goal-category':'sqli','goal-completion':'confirmed','goal-actor':'current','goal-endpoint':'seed'},
+    {'goal-id':'xss','goal-title':'XSS 검증','goal-category':'xss','goal-completion':'tested','goal-actor':'','goal-endpoint':''},
+  ].map(values=>({querySelector:selector=>({value:values[selector.slice(1)]})}));
+  ctx.document.querySelectorAll=selector=>selector==='#agentGoalsForm .goal-row'?rows:[];
+  const goals=ctx._collectSpec().goals;
+  assert.equal(goals.length,2);
+  assert.equal(goals[0].completion,'confirmed');
+  assert.equal(goals[1].category,'xss');
 });
 
 test('predicate text maps the enumerated branch kinds',()=>{

@@ -7,9 +7,23 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from core.agent_archive import build_archive, read_archive
+
 
 def uid():
     return uuid.uuid4().hex
+
+
+def _credential_free_template_spec(spec):
+    """Enforce the credential boundary even for direct store calls and old rows."""
+    data = json.loads(json.dumps(spec, ensure_ascii=False))
+    request = data.get('request')
+    if isinstance(request, dict) and 'headers' in request:
+        request['headers'] = {}
+    for actor in data.get('actors') or []:
+        if isinstance(actor, dict) and 'headers' in actor:
+            actor['headers'] = {}
+    return data
 
 
 class Store:
@@ -22,6 +36,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY, created REAL NOT NULL, updated REAL NOT NULL,
                     state TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS runs_incident ON runs(json_extract(data, '$.incident.incident_id'));
+                CREATE INDEX IF NOT EXISTS runs_history_archive ON runs(
+                    COALESCE(json_extract(data, '$.archived'), 0), created DESC, id DESC);
                 CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created REAL NOT NULL,
                     kind TEXT NOT NULL, step_id TEXT NOT NULL, data TEXT NOT NULL);
@@ -32,8 +49,42 @@ class Store:
                     goal TEXT NOT NULL, created REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS templates (
                     id TEXT PRIMARY KEY, created REAL NOT NULL, name TEXT NOT NULL,
-                    category TEXT NOT NULL, spec TEXT NOT NULL);
+                    category TEXT NOT NULL, spec TEXT NOT NULL,
+                    owner TEXT NOT NULL DEFAULT '');
+                CREATE TABLE IF NOT EXISTS template_revisions (
+                    template_id TEXT NOT NULL, version INTEGER NOT NULL, created REAL NOT NULL,
+                    name TEXT NOT NULL, category TEXT NOT NULL, spec TEXT NOT NULL,
+                    owner TEXT NOT NULL, PRIMARY KEY(template_id,version));
+                CREATE TABLE IF NOT EXISTS store_migrations (name TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS incidents (
+                    id TEXT PRIMARY KEY, created REAL NOT NULL, source TEXT NOT NULL,
+                    asset_id TEXT NOT NULL, traffic_id TEXT NOT NULL, category TEXT NOT NULL,
+                    owner TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS incidents_asset ON incidents(asset_id, created);
+                CREATE INDEX IF NOT EXISTS incidents_recent ON incidents(created DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS incidents_owner_recent ON incidents(owner,created DESC,id DESC);
+                CREATE TABLE IF NOT EXISTS incident_deletions (
+                    id TEXT PRIMARY KEY, incident_id TEXT NOT NULL, deleted REAL NOT NULL,
+                    created REAL NOT NULL, source TEXT NOT NULL, category TEXT NOT NULL,
+                    owner TEXT NOT NULL);
             ''')
+            if 'owner' not in {row['name'] for row in db.execute('PRAGMA table_info(templates)')}:
+                db.execute("ALTER TABLE templates ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+            db.execute('INSERT OR IGNORE INTO template_revisions '
+                       '(template_id,version,created,name,category,spec,owner) '
+                       'SELECT id,1,created,name,category,spec,owner FROM templates')
+            if db.execute("SELECT 1 FROM store_migrations WHERE name='template_headers_v1'").fetchone() is None:
+                for table in ('templates', 'template_revisions'):
+                    for row in db.execute(f'SELECT rowid,spec FROM {table}').fetchall():
+                        try:
+                            original = json.loads(row['spec'])
+                            clean = _credential_free_template_spec(original)
+                        except (ValueError, TypeError, AttributeError):
+                            continue  # Leave malformed legacy rows untouched for explicit repair.
+                        if clean != original:
+                            db.execute(f'UPDATE {table} SET spec=? WHERE rowid=?',
+                                       (json.dumps(clean, ensure_ascii=False), row['rowid']))
+                db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('template_headers_v1')")
 
     @contextmanager
     def connect(self):
@@ -59,35 +110,147 @@ class Store:
             raise KeyError(run_id)
         return {**dict(row), 'data': json.loads(row['data'])}
 
+    def run_owner(self, run_id):
+        with self.connect() as db:
+            row = db.execute("SELECT COALESCE(json_extract(data,'$.owner'),'') AS owner "
+                             'FROM runs WHERE id=?', (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return row['owner']
+
+    def run_status_fields(self, run_id):
+        """Projection for frequent history polls; never materialize stored evidence fields."""
+        with self.connect() as db:
+            row = db.execute(
+                'SELECT state,updated,'
+                "COALESCE(json_extract(data,'$.spec.goal'),'') AS goal,"
+                "COALESCE(json_extract(data,'$.spec.mode'),'') AS mode,"
+                "COALESCE(json_extract(data,'$.spec.max_steps'),0) AS max_steps,"
+                "COALESCE(json_extract(data,'$.spec.max_requests'),0) AS max_requests,"
+                "COALESCE(json_extract(data,'$.spec.max_ai_calls'),0) AS max_ai_calls,"
+                "json_extract(data,'$.spec.approved_plan_revoked_at') AS approved_plan_revoked_at,"
+                "CASE WHEN json_type(data,'$.spec.approved_plan') IN ('object','array') "
+                'THEN 1 ELSE 0 END AS has_approved_plan,'
+                "json_extract(data,'$.plan_checkpoint') AS plan_checkpoint,"
+                "COALESCE(json_extract(data,'$.name'),'') AS name,"
+                "COALESCE(json_extract(data,'$.category'),'') AS category,"
+                "COALESCE(json_extract(data,'$.steps'),0) AS steps,"
+                "COALESCE(json_extract(data,'$.requests'),0) AS requests,"
+                "COALESCE(json_extract(data,'$.ai_calls'),0) AS ai_calls,"
+                "COALESCE(json_extract(data,'$.elapsed'),0) AS elapsed,"
+                "COALESCE(json_extract(data,'$.reason'),'') AS reason,"
+                "json_extract(data,'$.retest_of') AS retest_of "
+                'FROM runs WHERE id=?', (run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            endpoints_count = db.execute(
+                "SELECT COUNT(*) FROM runs,json_each(runs.data,'$.endpoints') WHERE runs.id=?",
+                (run_id,),
+            ).fetchone()[0]
+        result = dict(row)
+        result['plan_checkpoint'] = json.loads(result['plan_checkpoint']) if result['plan_checkpoint'] else None
+        result['has_approved_plan'] = bool(result['has_approved_plan'])
+        result['endpoints_count'] = endpoints_count
+        return result
+
+    def export_run_archive(self, run_id):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            events = db.execute('SELECT * FROM events WHERE run_id=? ORDER BY created,rowid',
+                                (run_id,)).fetchall()
+        run = {**dict(row), 'data': json.loads(row['data'])}
+        records = [{**dict(event), 'data': json.loads(event['data'])} for event in events]
+        return build_archive(run, records)
+
+    def import_run_archive(self, blob, owner=''):
+        """Restore IDs and relations transactionally; keep the run archived, never start it."""
+        run, events = read_archive(blob)
+        data = run['data']
+        data['owner'] = owner or ''
+        data['archived'] = True
+        data['restored_at'] = time.time()
+        with self.connect() as db:
+            if db.execute('SELECT 1 FROM runs WHERE id=?', (run['id'],)).fetchone():
+                raise ValueError('동일한 작업 ID가 이미 존재합니다.')
+            for event in events:
+                if db.execute('SELECT 1 FROM events WHERE id=?', (event['id'],)).fetchone():
+                    raise ValueError('동일한 증거/이벤트 ID가 이미 존재합니다.')
+            db.execute('INSERT INTO runs VALUES (?,?,?,?,?)',
+                       (run['id'], run['created'], time.time(), run['state'],
+                        json.dumps(data, ensure_ascii=False)))
+            db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?)',
+                           [(event['id'], run['id'], event['created'], event['kind'], event['step_id'],
+                             json.dumps(event['data'], ensure_ascii=False)) for event in events])
+        return {'id': run['id'], 'state': run['state'], 'archived': True,
+                'event_count': len(events)}
+
     def update(self, run_id, data, state=None):
         state = state or self.get(run_id)['state']
         with self.connect() as db:
             db.execute('UPDATE runs SET updated=?,state=?,data=? WHERE id=?',
                        (time.time(), state, json.dumps(data, ensure_ascii=False), run_id))
 
+    def set_run_metadata(self, run_id, name, category):
+        """Edit display fields atomically without overwriting evidence or an active run."""
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE runs SET updated=?,data=json_set(data,'$.name',?,'$.category',?) "
+                "WHERE id=? AND state!='running'",
+                (time.time(), name, category, run_id),
+            ).rowcount
+            if not changed:
+                if db.execute('SELECT 1 FROM runs WHERE id=?', (run_id,)).fetchone() is None:
+                    raise KeyError(run_id)
+                raise ValueError('실행 중인 작업의 이름과 분류는 수정할 수 없습니다.')
+        return {'id': run_id, 'name': name, 'category': category}
+
     def claim(self, run_id):
         with self.connect() as db:
-            return db.execute("UPDATE runs SET state='running',updated=? WHERE id=? AND state IN ('paused','interrupted')",
+            return db.execute("UPDATE runs SET state='running',updated=? WHERE id=? "
+                              "AND state IN ('paused','interrupted') "
+                              "AND COALESCE(json_extract(data, '$.archived'), 0) = 0 "
+                              "AND json_extract(data, '$.restored_at') IS NULL "
+                              "AND json_extract(data, '$.spec.approved_plan_revoked_at') IS NULL",
                               (time.time(), run_id)).rowcount == 1
+
+    def set_archived(self, run_id, archived):
+        """Change only the archive flag, conditional on state in the same transaction."""
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE runs SET updated=?,data=json_set(data,'$.archived',json(?)) "
+                "WHERE id=? AND (?=0 OR state!='running')",
+                (time.time(), 'true' if archived else 'false', run_id, int(bool(archived))),
+            ).rowcount
+            if not changed:
+                if db.execute('SELECT 1 FROM runs WHERE id=?', (run_id,)).fetchone() is None:
+                    raise KeyError(run_id)
+                raise ValueError('실행 중인 작업은 보관할 수 없습니다. 먼저 중단하세요.')
 
     def recover(self):
         with self.connect() as db:
             db.execute("UPDATE runs SET state='interrupted' WHERE state='running'")
 
-    def list(self, include_archived=False):
-        """최근 run 목록(최대 50). 기본은 보관되지 않은 것만, include_archived 면 보관된 것만(리뷰 N5)."""
+    def list(self, include_archived=False, owner=None):
+        """최근 run 목록(최대 50). 범위가 켜졌으면 소유자 필터를 먼저 적용한다."""
+        where = "WHERE COALESCE(json_extract(data, '$.archived'), 0) = ? "
+        params = [int(bool(include_archived))]
+        if owner is not None:
+            where += "AND COALESCE(json_extract(data, '$.owner'), '') IN ('', ?) "
+            params.append(owner)
         with self.connect() as db:
-            rows = db.execute('SELECT id,created,updated,state,data FROM runs ORDER BY created DESC LIMIT 200').fetchall()
+            rows = db.execute(
+                "SELECT id,created,updated,state,data FROM runs "
+                + where + 'ORDER BY created DESC,id DESC LIMIT 50', params
+            ).fetchall()
         out = []
         for r in rows:
             data = json.loads(r['data'])
-            if bool(data.get('archived')) != bool(include_archived):
-                continue
             out.append({'id': r['id'], 'state': r['state'], 'created': r['created'],
                         'goal': data['spec']['goal'], 'owner': data.get('owner', ''),
                         'archived': bool(data.get('archived'))})
-            if len(out) >= 50:
-                break
         return out
 
     def _audit_deletion(self, db, run_id, row, events, reason):
@@ -118,29 +281,107 @@ class Store:
             rows = db.execute('SELECT * FROM deletions ORDER BY deleted DESC LIMIT ?', (limit,)).fetchall()
         return [dict(r) for r in rows]
 
-    def save_template(self, name, category, spec):
+    def save_template(self, name, category, spec, owner=''):
         """재사용 검증 템플릿 저장(리뷰 N1). spec 에는 자격증명을 담지 않는다(호출부에서 제거)."""
         tid = uid()
+        created = time.time()
+        encoded = json.dumps(_credential_free_template_spec(spec), ensure_ascii=False)
         with self.connect() as db:
-            db.execute('INSERT INTO templates VALUES (?,?,?,?,?)',
-                       (tid, time.time(), name, category, json.dumps(spec, ensure_ascii=False)))
+            db.execute('INSERT INTO templates(id,created,name,category,spec,owner) VALUES (?,?,?,?,?,?)',
+                       (tid, created, name, category, encoded, owner or ''))
+            db.execute('INSERT INTO template_revisions VALUES (?,?,?,?,?,?,?)',
+                       (tid, 1, created, name, category, encoded, owner or ''))
         return tid
 
-    def templates(self):
-        with self.connect() as db:
-            rows = db.execute('SELECT id,created,name,category,spec FROM templates ORDER BY created DESC LIMIT 100').fetchall()
-        return [{'id': r['id'], 'created': r['created'], 'name': r['name'], 'category': r['category'],
-                 'goal': json.loads(r['spec']).get('goal', '')} for r in rows]
+    def _template_filter(self, search='', category='', owner=None):
+        clauses = []
+        params = []
+        if owner is not None:
+            clauses.append('owner = ?')
+            params.append(owner)
+        if search:
+            clauses.append("(instr(lower(name), lower(?)) > 0 OR "
+                           "instr(lower(COALESCE(json_extract(spec, '$.goal'), '')), lower(?)) > 0)")
+            params.extend((search, search))
+        if category:
+            clauses.append('category = ?')
+            params.append(category)
+        where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
+        return where, params
 
-    def template(self, tid):
+    def templates(self, search='', category='', owner=None, limit=100, offset=0):
+        where, params = self._template_filter(search, category, owner)
+        with self.connect() as db:
+            rows = db.execute('SELECT id,created,name,category,'
+                              "COALESCE(json_extract(spec,'$.goal'),'') AS goal,"
+                              "COALESCE(json_extract(spec,'$.policy_version'),1) AS policy_version,"
+                              "json_type(spec,'$.approved_plan') AS plan_type,"
+                              '(SELECT MAX(version) FROM template_revisions WHERE template_id=templates.id) AS version '
+                              'FROM templates' + where +
+                              ' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',
+                              (*params, limit, offset)).fetchall()
+        return [{'id': row['id'], 'created': row['created'], 'name': row['name'],
+                 'category': row['category'], 'goal': row['goal'],
+                 'version': row['version'] or 1, 'policy_version': row['policy_version'],
+                 'pinned_plan': row['plan_type'] in ('object', 'array')}
+                for row in rows]
+
+    def templates_count(self, search='', category='', owner=None):
+        where, params = self._template_filter(search, category, owner)
+        with self.connect() as db:
+            return db.execute('SELECT COUNT(*) FROM templates' + where, params).fetchone()[0]
+
+    def template(self, tid, owner=None):
         with self.connect() as db:
             row = db.execute('SELECT * FROM templates WHERE id=?', (tid,)).fetchone()
         if row is None:
             raise KeyError(tid)
-        return {'id': row['id'], 'name': row['name'], 'category': row['category'], 'spec': json.loads(row['spec'])}
+        if owner is not None and (not owner or row['owner'] != owner):
+            raise PermissionError('다른 작업공간의 템플릿입니다.')
+        return {'id': row['id'], 'name': row['name'], 'category': row['category'],
+                'spec': json.loads(row['spec'])}
 
-    def delete_template(self, tid):
+    def update_template(self, tid, name, category, spec, owner=None):
+        encoded = json.dumps(_credential_free_template_spec(spec), ensure_ascii=False)
         with self.connect() as db:
+            row = db.execute('SELECT owner FROM templates WHERE id=?', (tid,)).fetchone()
+            if row is None:
+                raise KeyError(tid)
+            if owner is not None and (not owner or row['owner'] != owner):
+                raise PermissionError('다른 작업공간의 템플릿입니다.')
+            version = db.execute('SELECT COALESCE(MAX(version),0)+1 FROM template_revisions '
+                                 'WHERE template_id=?', (tid,)).fetchone()[0]
+            created = time.time()
+            db.execute('UPDATE templates SET name=?,category=?,spec=? WHERE id=?',
+                       (name, category, encoded, tid))
+            db.execute('INSERT INTO template_revisions VALUES (?,?,?,?,?,?,?)',
+                       (tid, version, created, name, category, encoded, row['owner']))
+        return {'id': tid, 'version': version}
+
+    def template_revisions(self, tid, owner=None):
+        self.template(tid, owner=owner)
+        with self.connect() as db:
+            rows = db.execute('SELECT version,created,name,category FROM template_revisions '
+                              'WHERE template_id=? ORDER BY version DESC', (tid,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def restore_template_revision(self, tid, version, owner=None):
+        self.template(tid, owner=owner)
+        with self.connect() as db:
+            row = db.execute('SELECT name,category,spec FROM template_revisions '
+                             'WHERE template_id=? AND version=?', (tid, version)).fetchone()
+        if row is None:
+            raise KeyError((tid, version))
+        return self.update_template(tid, row['name'], row['category'], json.loads(row['spec']), owner=owner)
+
+    def delete_template(self, tid, owner=None):
+        with self.connect() as db:
+            row = db.execute('SELECT owner FROM templates WHERE id=?', (tid,)).fetchone()
+            if row is None:
+                return False
+            if owner is not None and row['owner'] != owner:
+                raise PermissionError('다른 작업공간의 템플릿입니다.')
+            db.execute('DELETE FROM template_revisions WHERE template_id=?', (tid,))
             cur = db.execute('DELETE FROM templates WHERE id=?', (tid,))
         return cur.rowcount > 0
 
@@ -166,6 +407,97 @@ class Store:
                 db.execute(f'DELETE FROM runs WHERE id IN ({marks})', ids)
         return len(ids)
 
+    def create_incident(self, incident, owner=''):
+        """사내 이벤트(SIEM/SOAR) 수동 수집(리뷰 P2/N4). 본문(title/summary)은 로컬에만 보관한다."""
+        iid = uid()
+        with self.connect() as db:
+            db.execute('INSERT INTO incidents VALUES (?,?,?,?,?,?,?,?)',
+                       (iid, time.time(), incident['source'], incident.get('asset_id', ''),
+                        incident.get('traffic_id', ''), incident['category'], owner or '',
+                        json.dumps(incident, ensure_ascii=False)))
+        return iid
+
+    def incident(self, iid):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM incidents WHERE id=?', (iid,)).fetchone()
+        if row is None:
+            raise KeyError(iid)
+        return {'id': row['id'], 'created': row['created'], 'owner': row['owner'],
+                **json.loads(row['data'])}
+
+    def incidents(self, limit=100, offset=0, owner=None, before_created=None, before_id=None):
+        """수집된 사건 목록(최신순). 원문 JSON 대신 목록 필드만 조회한다."""
+        clauses, params = [], []
+        if owner is not None:
+            clauses.append("owner IN ('', ?)")
+            params.append(owner)
+        if before_created is not None and before_id is not None:
+            clauses.append('(created<? OR (created=? AND id<?))')
+            params.extend((before_created, before_created, before_id))
+        where = 'WHERE ' + ' AND '.join(clauses) if clauses else ''
+        params.extend((limit, offset))
+        with self.connect() as db:
+            rows = db.execute(
+                'SELECT id,created,source,asset_id,traffic_id,category,owner,'
+                "COALESCE(json_extract(data,'$.title'),'') AS title,"
+                "COALESCE(json_extract(data,'$.external_id'),'') AS external_id,"
+                "json_extract(data,'$.observed_at') AS observed_at "
+                f'FROM incidents {where} ORDER BY created DESC,id DESC LIMIT ? OFFSET ?', params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def incidents_count(self, owner=None):
+        with self.connect() as db:
+            if owner is None:
+                return db.execute('SELECT COUNT(*) FROM incidents').fetchone()[0]
+            return db.execute("SELECT COUNT(*) FROM incidents WHERE owner IN ('', ?)",
+                              (owner,)).fetchone()[0]
+
+    def incidents_for_asset(self, asset_id, owner=None):
+        """All incidents with an explicitly supplied asset ID, scoped before retrieval."""
+        if not asset_id:
+            return []
+        with self.connect() as db:
+            if owner is None:
+                rows = db.execute('SELECT id FROM incidents WHERE asset_id=? ORDER BY created DESC',
+                                  (asset_id,)).fetchall()
+            else:
+                rows = db.execute("SELECT id FROM incidents WHERE asset_id=? AND owner IN ('', ?) "
+                                  'ORDER BY created DESC', (asset_id, owner)).fetchall()
+        return [row['id'] for row in rows]
+
+    def delete_incident(self, iid):
+        with self.connect() as db:
+            row = db.execute('SELECT id,created,source,category,owner FROM incidents WHERE id=?',
+                             (iid,)).fetchone()
+            if row is None:
+                return False
+            db.execute('INSERT INTO incident_deletions VALUES (?,?,?,?,?,?,?)',
+                       (uid(), iid, time.time(), row['created'], row['source'],
+                        row['category'], row['owner']))
+            cur = db.execute('DELETE FROM incidents WHERE id=?', (iid,))
+        return cur.rowcount > 0
+
+    def incident_deletions(self, limit=100, owner=None):
+        """Deletion audit without incident title, request, response, or summary."""
+        with self.connect() as db:
+            if owner is None:
+                rows = db.execute('SELECT * FROM incident_deletions ORDER BY deleted DESC LIMIT ?',
+                                  (limit,)).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM incident_deletions WHERE owner IN ('', ?) "
+                                  'ORDER BY deleted DESC LIMIT ?', (owner, limit)).fetchall()
+        return [dict(row) for row in rows]
+
+    def runs_for_incident(self, iid):
+        """이 사건을 재검증하려고 만든 run 들(읽기 전용 연결). 대상/AI 호출 없음."""
+        with self.connect() as db:
+            rows = db.execute("SELECT id,created,state,data FROM runs "
+                              "WHERE json_extract(data, '$.incident.incident_id')=? "
+                              'ORDER BY created DESC', (iid,)).fetchall()
+        return [{'id': row['id'], 'created': row['created'], 'state': row['state'],
+                 'data': json.loads(row['data'])} for row in rows]
+
     def event(self, run_id, kind, data, step_id='', event_id=None):
         event_id = event_id or uid()
         with self.connect() as db:
@@ -177,6 +509,57 @@ class Store:
         with self.connect() as db:
             rows = db.execute('SELECT * FROM events WHERE run_id=? ORDER BY created,rowid', (run_id,)).fetchall()
         return [{**dict(r), 'data': json.loads(r['data'])} for r in rows]
+
+    def finding_events(self, run_id):
+        """Fields consumed by findings and conclusion; omit observation bodies."""
+        with self.connect() as db:
+            rows = db.execute(
+                'SELECT id,kind,step_id,created,'
+                "json_extract(data,'$.kind') AS action_kind,"
+                "json_extract(data,'$.category') AS category,"
+                "json_extract(data,'$.endpoint_id') AS endpoint_id,"
+                "json_extract(data,'$.actor_id') AS actor_id,"
+                "json_extract(data,'$.status') AS status,"
+                "json_extract(data,'$.evidence_ids') AS evidence_ids,"
+                "json_extract(data,'$.finding_id') AS finding_id,"
+                "json_extract(data,'$.severity') AS severity,"
+                "json_extract(data,'$.note') AS note "
+                "FROM events WHERE run_id=? AND kind IN "
+                "('action','observation','verification','finding_update') "
+                'ORDER BY created,rowid', (run_id,),
+            ).fetchall()
+        events = []
+        for row in rows:
+            kind = row['kind']
+            if kind == 'action':
+                data = {'kind': row['action_kind'], 'category': row['category'],
+                        'endpoint_id': row['endpoint_id'], 'actor_id': row['actor_id']}
+            elif kind == 'verification':
+                data = {'status': row['status'],
+                        'evidence_ids': json.loads(row['evidence_ids']) if row['evidence_ids'] else []}
+            elif kind == 'finding_update':
+                data = {'finding_id': row['finding_id'], 'status': row['status'],
+                        'severity': row['severity']}
+                if row['note'] is not None:
+                    data['note'] = row['note']
+            else:
+                data = {}
+            events.append({'id': row['id'], 'kind': kind, 'step_id': row['step_id'],
+                           'created': row['created'], 'data': data})
+        return events
+
+    def map_events(self, run_id):
+        """Exclude large request/response evidence before Python JSON decoding."""
+        with self.connect() as db:
+            rows = db.execute(
+                'SELECT id,created,kind,step_id,'
+                "CASE WHEN kind IN ('observation','request_started') THEN "
+                "json_remove(data,'$.request.headers','$.request.body',"
+                "'$.response.body','$.response.headers','$.analysis.findings',"
+                "'$.analysis.signals') ELSE data END AS data "
+                'FROM events WHERE run_id=? ORDER BY created,rowid', (run_id,),
+            ).fetchall()
+        return [{**dict(row), 'data': json.loads(row['data'])} for row in rows]
 
 
 _store = None

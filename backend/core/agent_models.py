@@ -1,4 +1,5 @@
 """Validated contracts for a bounded, HTTP context-aware test agent."""
+import time
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -40,8 +41,44 @@ class ObjectPolicy(Contract):
     description: str = Field(min_length=1, max_length=500)
 
 
+class VerificationGoal(Contract):
+    """A local completion condition; goal text is never added to model context."""
+    id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,32}$')
+    title: str = Field(min_length=1, max_length=200)
+    category: Literal['sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql', 'access']
+    completion: Literal['tested', 'confirmed'] = 'tested'
+    endpoint_id: str = Field(default='', max_length=40)
+    actor_id: str = Field(default='', max_length=32)
+
+
+class IncidentEvent(Contract):
+    """A manually-ingested SIEM/SOAR event (리뷰 P2/N4). The source body — title/summary —
+    stays local and is never added to model context; only the request skeleton drives a
+    fixed re-verification run. 사건 입력은 제품 연동 전 수동 JSON/파일 계약이다."""
+    source: str = Field(min_length=1, max_length=80)          # 'siem' | 'soar' | 'manual' | ...
+    external_id: str = Field(default='', max_length=120)      # the source system's own event id
+    observed_at: float | None = None                         # field observation time (epoch seconds)
+    asset_id: str = Field(default='', max_length=120)         # common asset correlation id
+    traffic_id: str = Field(default='', max_length=120)       # request/flow correlation id
+    category: Literal['sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql', 'access']
+    title: str = Field(min_length=1, max_length=200)          # local-only description
+    summary: str = Field(default='', max_length=2000)         # local-only description
+    request: AgentRequest | None = None                      # optional skeleton to re-verify
+    location: Literal['param', 'body', 'header'] = 'param'    # where the attacked input is
+    param: str = Field(default='', max_length=120)            # which field; '' → derive from request
+
+    @model_validator(mode='after')
+    def check_time(self):
+        # 과거 증거를 새 확증으로 오인하지 않기 위해 사건 '관측 시각' 은 입력만 받고 판정 근거로 쓰지
+        # 않는다. 미래/음수 시각은 잘못된 입력이므로 거부한다.
+        if self.observed_at is not None and (self.observed_at < 0 or self.observed_at > time.time() + 60):
+            raise ValueError('관측 시각(observed_at)이 유효하지 않습니다(미래 시각 불가).')
+        return self
+
+
 class RunSpec(Contract):
     goal: str = Field(min_length=1, max_length=2000)
+    goals: list[VerificationGoal] = Field(default_factory=list, max_length=20)
     request: AgentRequest
     actors: list[Actor] = Field(default_factory=lambda: [Actor(id='current')], min_length=1, max_length=8)
     objects: list[ObjectPolicy] = Field(default_factory=list, max_length=20)
@@ -51,6 +88,11 @@ class RunSpec(Contract):
     max_seconds: int = Field(default=300, ge=10, le=1800)
     timeout: int = Field(default=15, ge=1, le=60)
     allow_write_methods: bool = False
+    policy_version: int = Field(default=1, ge=1, le=1000000)
+    allowed_path_prefixes: list[str] = Field(default_factory=list, max_length=40)
+    denied_path_prefixes: list[str] = Field(default_factory=list, max_length=40)
+    allowed_methods: list[Literal['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']] = Field(default_factory=list, max_length=6)
+    allowed_categories: list[Literal['sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql']] = Field(default_factory=list, max_length=8)
     share_response_context: bool = False
     # 'iterative'(기본): 매 단계 planner 호출(응답 되먹임). 'plan': 응답-블라인드 — 비식별 입력으로
     # 계획을 1회 생성하고 실행 중 분기는 로컬에서 처리(리뷰 Stage 3).
@@ -58,17 +100,39 @@ class RunSpec(Contract):
     # 사용자가 미리보기에서 승인한 계획을 실행에 고정한다(리뷰 P3). 있으면 plan 모드에서 이
     # 계획을 재생성 없이 그대로 실행한다. 스키마/범위 검증은 실행 직전에 수행한다(core.plan).
     approved_plan: dict | None = None
+    approved_plan_expires_at: float | None = None
+    approved_plan_revoked_at: float | None = None
 
     @model_validator(mode='after')
     def check_scope(self):
         if self.approved_plan is not None:
             self.mode = 'plan'   # 승인된 계획은 응답-블라인드 실행에만 의미가 있다
+            if self.approved_plan_expires_at is None:
+                self.approved_plan_expires_at = time.time() + 3600
+            if self.approved_plan_expires_at > time.time() + 3600:
+                raise ValueError('승인 계획의 유효 시간은 최대 1시간입니다.')
+        elif self.approved_plan_expires_at is not None or self.approved_plan_revoked_at is not None:
+            raise ValueError('승인 계획 없이 만료/철회 시각을 지정할 수 없습니다.')
         root = origin(self.request.url)
+        for prefix in [*self.allowed_path_prefixes, *self.denied_path_prefixes]:
+            if (not prefix.startswith('/') or '?' in prefix or '#' in prefix or '//' in prefix
+                    or '%' in prefix or '\\' in prefix or ';' in prefix
+                    or any(s in ('.', '..') for s in prefix.split('/'))):
+                raise ValueError('경로 제약은 /로 시작하는 경로 접두사만 허용합니다.')
+        if len(set(self.allowed_methods)) != len(self.allowed_methods) or len(set(self.allowed_categories)) != len(self.allowed_categories):
+            raise ValueError('중복된 허용 메서드/검사 유형이 있습니다.')
         ids = [a.id for a in self.actors]
         if len(set(ids)) != len(ids):
             raise ValueError('계정 ID는 중복될 수 없습니다.')
         if len({o.id for o in self.objects}) != len(self.objects):
             raise ValueError('객체 정책 ID는 중복될 수 없습니다.')
+        if len({g.id for g in self.goals}) != len(self.goals):
+            raise ValueError('검증 목표 ID는 중복될 수 없습니다.')
+        for goal in self.goals:
+            if goal.actor_id and goal.actor_id not in ids:
+                raise ValueError('검증 목표에 알 수 없는 계정이 있습니다.')
+            if self.allowed_categories and goal.category != 'access' and goal.category not in self.allowed_categories:
+                raise ValueError('검증 목표의 유형이 허용 검사 유형에 없습니다.')
         if self.request.method not in ('GET', 'HEAD') and not self.allow_write_methods:
             raise ValueError('현재 요청 메서드를 사용하려면 쓰기 메서드 허용을 켜세요.')
         for obj in self.objects:

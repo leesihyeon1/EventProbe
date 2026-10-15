@@ -66,6 +66,7 @@ class Branch(_Contract):
 class PlanStep(_Contract):
     action_id: str = Field(pattern=_ID)
     action: Action
+    requires_approval: bool = False
     branches: list[Branch] = Field(default_factory=list, max_length=8)
     default_next: str = Field(default=STOP, max_length=40)   # 어느 분기도 안 맞을 때
 
@@ -97,7 +98,11 @@ class Plan(_Contract):
 def plan_fingerprint(plan: Plan) -> str:
     """승인된 계획을 실행에 '고정'하기 위한 안정적 지문. 미리보기와 실제 실행이 같은 계획인지
     로컬에서 대조하는 감사 용도이며, 외부로 나가지 않는다(리뷰 P3: 승인본 버전/해시 고정)."""
-    canonical = json.dumps(plan.model_dump(), sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    payload = plan.model_dump()
+    for step in payload['steps']:
+        if not step['requires_approval']:
+            del step['requires_approval']  # preserve fingerprints of older stored plans
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 

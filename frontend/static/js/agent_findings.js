@@ -73,7 +73,7 @@ async function retestFinding(f) {
 async function patchFinding(id,patch) {
   try {
     const updated=await agentApi(`/runs/${encodeURIComponent(findingsState.runId)}/findings/${encodeURIComponent(id)}`,patch,'PATCH');
-    _awRun=updated;findingsState.signature='';renderAgentFindings(updated);selectFinding(id);
+    _awRun={...updated,view:'findings'};findingsState.signature='';renderAgentFindings(updated);selectFinding(id);
   } catch(e) { /* _asJson surfaces the error to the user */ }
 }
 function fdSelect(label,current,options,onchange) {
@@ -136,8 +136,19 @@ function renderFindingDetail(f) {
     panel.append(log);
   }
 }
-function showFindingEvidence(id) {
-  setDetailMode('timeline');
-  const event=[...agentEl('agentEvents').children].find(el=>el.dataset.event===id);
+async function showFindingEvidence(id) {
+  const runId=agentRunId;
+  const compact=_awRun?.compact;
+  setDetailMode(compact?'history':'timeline');
+  const container=agentEl(compact?'ahEvents':'agentEvents');
+  let event=[...container.children].find(el=>el.dataset.event===id);
+  if(!event && compact) {
+    try {
+      const full=await agentApi(`/history/runs/${encodeURIComponent(runId)}/events/${encodeURIComponent(id)}`);
+      if(runId!==agentRunId || historyState.runId!==runId) return;
+      event=[...container.children].find(el=>el.dataset.event===id);
+      if(!event) {event=renderWorkspaceEvent(full);container.append(event);historyState.seen.add(id);}
+    } catch(error) {agentEl('ahCount').textContent=error.message;return;}
+  }
   if(event){event.open=true;event.scrollIntoView({block:'center'});event.querySelector('summary')?.focus();}
 }
