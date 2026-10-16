@@ -1,4 +1,5 @@
 """Deterministic, local run conclusions. Never calls an LLM or reads response bodies."""
+from .agent_intent import requested_categories
 
 
 def build_conclusion(data, events, state):
@@ -45,9 +46,15 @@ def build_conclusion(data, events, state):
                   and e['data'].get('kind') in ('probe', 'confirm', 'access')
                   and e['step_id'] not in verified_steps]
     stop_code = data.get('stop_code', '')
+    spec = data.get('spec') or {}
+    requested = requested_categories(spec.get('goal', ''), [g['category'] for g in spec.get('goals', [])])
+    requested_checks = [{'category': category, 'status': 'tested' if any(
+        v['category'] == category and v['evidence_ids'] for v in verifications) else 'not_tested'}
+        for category in sorted(requested)]
+    missing = [c['category'] for c in requested_checks if c['status'] == 'not_tested']
     legacy_repeat = data.get('reason', '').startswith('동일 행동 반복')
     complete = state == 'completed' and not unfinished and not legacy_repeat and all(g['status'] == 'met' for g in goals)
-    if stop_code in ('plan_dead_end', 'planner_stalled', 'plan_loop'):
+    if missing or stop_code in ('plan_dead_end', 'planner_stalled', 'plan_loop'):
         complete = False
     outcome = 'confirmed' if counts['confirmed'] else 'suspicious' if counts['suspicious'] else 'inconclusive'
     text = {
@@ -55,6 +62,8 @@ def build_conclusion(data, events, state):
         'suspicious': '의심 신호가 있으나 취약성 확증은 완료되지 않았습니다.',
         'inconclusive': '취약성을 확증할 증거가 부족합니다. 안전 판정이 아닙니다.',
     }[outcome]
+    if missing:
+        text = '요청한 검사 미실행: ' + ', '.join(missing) + '. ' + text
     next_steps = []
     if state == 'running':
         next_steps.append('실행 중인 관측 결과이며 최종 결론이 아닙니다.')
@@ -74,7 +83,7 @@ def build_conclusion(data, events, state):
         'version': 1, 'completion': 'running' if state == 'running' else 'complete' if complete else 'partial',
         'verdict': outcome, 'text': text, 'counts': counts, 'observation_count': len(observations),
         'evidence_ids': sorted(evidence_ids), 'unfinished_steps': unfinished,
-        'verifications': verifications, 'goals': goals,
+        'verifications': verifications, 'goals': goals, 'requested_checks': requested_checks,
         'stop_code': stop_code or ('legacy_repeat' if legacy_repeat else 'legacy'),
         'stop_reason': data.get('reason', ''), 'next_steps': next_steps,
         'scope_note': '작업 종료는 전체 대상의 안전 또는 모든 목표의 달성을 의미하지 않습니다.',

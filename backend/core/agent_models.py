@@ -4,6 +4,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, model_validator, ConfigDict
+from core.agent_intent import requested_categories
 
 
 def origin(url: str) -> tuple:
@@ -80,6 +81,7 @@ class RunSpec(Contract):
     goal: str = Field(min_length=1, max_length=2000)
     goals: list[VerificationGoal] = Field(default_factory=list, max_length=20)
     request: AgentRequest
+    target_scope: Literal['request_only', 'same_origin'] = 'same_origin'
     actors: list[Actor] = Field(default_factory=lambda: [Actor(id='current')], min_length=1, max_length=8)
     objects: list[ObjectPolicy] = Field(default_factory=list, max_length=20)
     max_steps: int = Field(default=8, ge=1, le=50)
@@ -114,6 +116,8 @@ class RunSpec(Contract):
         elif self.approved_plan_expires_at is not None or self.approved_plan_revoked_at is not None:
             raise ValueError('승인 계획 없이 만료/철회 시각을 지정할 수 없습니다.')
         root = origin(self.request.url)
+        if self.target_scope == 'request_only' and (self.objects or any(g.category == 'access' for g in self.goals)):
+            raise ValueError('객체 접근 검증은 같은 출처 탐색 범위에서만 사용할 수 있습니다.')
         for prefix in [*self.allowed_path_prefixes, *self.denied_path_prefixes]:
             if (not prefix.startswith('/') or '?' in prefix or '#' in prefix or '//' in prefix
                     or '%' in prefix or '\\' in prefix or ';' in prefix
@@ -121,6 +125,9 @@ class RunSpec(Contract):
                 raise ValueError('경로 제약은 /로 시작하는 경로 접두사만 허용합니다.')
         if len(set(self.allowed_methods)) != len(self.allowed_methods) or len(set(self.allowed_categories)) != len(self.allowed_categories):
             raise ValueError('중복된 허용 메서드/검사 유형이 있습니다.')
+        requested = requested_categories(self.goal, [g.category for g in self.goals]) - {'access'}
+        if self.allowed_categories and requested - set(self.allowed_categories):
+            raise ValueError('요청한 검사 유형과 허용 검사 유형이 충돌합니다. 목표 또는 허용 유형을 확인하세요.')
         ids = [a.id for a in self.actors]
         if len(set(ids)) != len(ids):
             raise ValueError('계정 ID는 중복될 수 없습니다.')

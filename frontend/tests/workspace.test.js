@@ -12,6 +12,7 @@ class Element {
   scrollIntoView() {this.scrolled=true;}
   focus() {this.focused=true;}
   querySelector(selector) {return this.children.find(n=>n.tagName===selector);}
+  querySelectorAll() {return this.children;}
 }
 function setup() {
   const nodes=new Map();
@@ -20,13 +21,29 @@ function setup() {
     document:{createElement:tag=>new Element(tag),createTextNode:text=>new ElementText(text)},
     window:{addEventListener(){}},agentEl:get,epIcon:name=>new Element('icon-'+name),
     AGENT_STATE_LABELS:{running:'running',completed:'completed',paused:'paused',limited:'limited'},
-    selectRun(){},deleteRun(){},archiveRun(){},unarchiveRun(){},pollAgent(){},agentRunId:null,_showArchived:false,console,Date,Set,Map,
+    selectRun(){},deleteRun(){},archiveRun(){},unarchiveRun(){},pollAgent(){},resetPlanPreview(){},agentRunId:null,_showArchived:false,console,Date,Set,Map,
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/js/workspace.js'),'utf8'),context);
   return {context,get};
 }
 class ElementText {constructor(text){this.textContent=text;this.children=[];}}
 const allNodes = n => [n,...n.children.flatMap(allNodes)];
+
+test('source switch isolates domain fields and clears old plan approval',()=>{
+  const {context,get}=setup();
+  let resets=0;context.resetPlanPreview=()=>resets++;
+  const credential=new Element('textarea');get('agentPolicyDetails').append(credential);
+  get('agentSourceDomain').checked=true;context.syncAgentSource();
+  assert.equal(get('agentPacketFields').hidden,true);
+  assert.equal(get('agentDomainUrl').required,true);
+  assert.equal(get('agentTargetScope').value,'same_origin');
+  assert.equal(credential.disabled,true);
+  get('agentSourceDomain').checked=false;context.syncAgentSource();
+  assert.equal(get('agentDomainUrl').disabled,true);
+  assert.equal(get('agentTargetScope').value,'request_only');
+  assert.equal(credential.disabled,false);
+  assert.equal(resets,2);
+});
 
 test('search matches goal or ID, independently combined with status',()=>{
   const {context}=setup();

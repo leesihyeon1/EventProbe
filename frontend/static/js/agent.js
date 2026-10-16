@@ -837,9 +837,10 @@ async function deleteRun(id) {
 }
 
 function _collectSpec() {
-  const form = _currentRequestForm();
+  const domain = agentEl('agentSourceDomain')?.checked === true;
+  const form = domain ? {method:'GET',url:_agentDomainUrl(agentEl('agentDomainUrl').value),params:{},body:''} : _currentRequestForm();
   if (!/^https?:\/\//i.test(form.url)) throw new Error('요청 편집에서 HTTP(S) 대상 URL을 입력하세요.');
-  const headers = { ...(getUseDefaults() ? getDefaultHeaderProfile() : {}), ...getHeadersObj() };
+  const headers = domain ? {} : { ...(getUseDefaults() ? getDefaultHeaderProfile() : {}), ...getHeadersObj() };
   // strict 모드면 응답 공유를 요청하지 않는다(서버도 context 에서 발췌를 제거하지만 이중 방어).
   const share = agentEl('agentShare').checked && !(agentPolicy && agentPolicy.strict);
   const pathLines = id => (agentEl(id)?.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -848,7 +849,8 @@ function _collectSpec() {
     goal: agentEl('agentGoal').value,
     goals: collectGoals(),
     request: { method: form.method, url: form.url, params: form.params, body: form.body || '', headers },
-    actors: collectActors(), objects: collectObjects(),
+    target_scope: domain ? 'same_origin' : (agentEl('agentTargetScope')?.value || 'request_only'),
+    actors: domain ? [{id:'current',label:'새 세션',headers:{}}] : collectActors(), objects: domain ? [] : collectObjects(),
     max_steps: Number(agentEl('agentSteps').value), max_requests: Number(agentEl('agentRequests').value),
     max_ai_calls: Number(agentEl('agentAiCalls').value), max_seconds: Number(agentEl('agentSeconds').value),
     allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
@@ -859,6 +861,18 @@ function _collectSpec() {
     allowed_categories: csv('agentAllowedCategories'),
     mode: agentEl('agentPlanMode').checked ? 'plan' : 'iterative',
   };
+}
+
+function _agentDomainUrl(value) {
+  const raw=value.trim();
+  if(!raw || /\s|\\/.test(raw)) throw new Error('유효한 HTTP(S) 도메인 또는 URL을 입력하세요.');
+  const candidate=/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)?raw:'https://'+raw;
+  let url;
+  try { url=new URL(candidate); } catch(e) { throw new Error('유효한 HTTP(S) 도메인 또는 URL을 입력하세요.'); }
+  if(!['http:','https:'].includes(url.protocol) || !url.hostname || url.username || url.password)
+    throw new Error('인증정보가 없는 HTTP(S) URL만 사용할 수 있습니다.');
+  url.hash='';
+  return url.href;
 }
 
 // 새 작업 대화상자를 열 때 승인 상태를 초기화한다(리뷰 P3).

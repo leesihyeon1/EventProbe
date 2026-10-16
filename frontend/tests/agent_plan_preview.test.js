@@ -24,7 +24,7 @@ function setup() {
   const calls=[];
   const ctx=vm.createContext({
     document:{getElementById:get,createElement:t=>new Element(t),createTextNode:t=>{const e=new Element('#text');e.textContent=t;return e;},querySelector:()=>null,querySelectorAll:()=>[]},
-    window:{}, console,
+    window:{}, console, URL,
     _currentRequestForm:()=>({method:'GET',url:'https://app.test/?id=1',params:{},body:''}),
     getHeadersObj:()=>({}), getUseDefaults:()=>false, getDefaultHeaderProfile:()=>({}),
     loadAgentList:async()=>{}, selectRun:()=>{}, switchView:()=>{}, epIcon:()=>new Element('icon'),
@@ -100,6 +100,29 @@ test('local scope restrictions are included in the run spec',()=>{
   assert.deepEqual(Array.from(spec.allowed_methods),['GET','HEAD']);
   assert.deepEqual(Array.from(spec.allowed_categories),['sqli','xss']);
   assert.equal(spec.policy_version,1);
+  assert.equal(spec.target_scope,'request_only');
+});
+
+test('domain tasks start with an isolated GET and never copy packet credentials',()=>{
+  const {ctx,get}=setup();
+  get('agentSourceDomain').checked=true;
+  get('agentDomainUrl').value='new.test:8443/start#section';
+  ctx._currentRequestForm=()=>{throw new Error('Must not read packet');};
+  ctx.getHeadersObj=()=>{throw new Error('Must not read credentials');};
+  ctx.collectActors=()=>{throw new Error('Must not read old actors');};
+  ctx.collectObjects=()=>{throw new Error('Must not read old objects');};
+  const spec=JSON.parse(JSON.stringify(ctx._collectSpec()));
+  assert.equal(spec.target_scope,'same_origin');
+  assert.deepEqual(spec.request,{method:'GET',url:'https://new.test:8443/start',params:{},body:'',headers:{}});
+  assert.deepEqual(spec.actors,[{id:'current',label:'새 세션',headers:{}}]);
+  assert.deepEqual(spec.objects,[]);
+});
+
+test('domain URL validation rejects credentials, unsupported schemes and empty input',()=>{
+  const {ctx}=setup();
+  for(const value of ['', 'http://user:pass@app.test', 'ftp://app.test', 'https://bad host', 'https://'])
+    assert.throws(()=>ctx._agentDomainUrl(value));
+  assert.equal(ctx._agentDomainUrl('http://localhost:8080/a'),'http://localhost:8080/a');
 });
 
 test('multiple evidence goals are collected with independent completion rules',()=>{

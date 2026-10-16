@@ -507,11 +507,23 @@
           <dialog class="aw-dialog" id="agentNew" aria-labelledby="agentNewTitle">
               <div class="aw-dialog-head"><div><span class="aw-eyebrow">NEW VERIFICATION</span><h2 id="agentNewTitle">새 검증 작업</h2></div><button class="icon-button" id="agentNewClose" aria-label="새 작업 닫기" title="닫기"><span data-icon="X"></span></button></div>
               <div class="aw-form">
+                <fieldset class="aw-source-switch"><legend>검증 대상</legend>
+                  <label><input type="radio" name="agentSource" id="agentSourceRequest" value="request" checked><span>현재 요청</span></label>
+                  <label><input type="radio" name="agentSource" id="agentSourceDomain" value="domain"><span>도메인 입력</span></label>
+                </fieldset>
+                <div id="agentDomainFields" hidden>
+                  <label for="agentDomainUrl">대상 도메인 / URL</label>
+                  <input id="agentDomainUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="https://example.test" disabled>
+                </div>
+                <div id="agentPacketFields">
                 <div class="aw-section-title"><h3>대상 요청</h3><button class="aw-link" id="agentEditRequest" type="button"><span data-icon="Pencil"></span>요청 편집</button></div>
                 <div class="aw-request-preview"><span id="agentRequestMethod" class="aw-method"></span><code id="agentRequestUrl"></code></div>
                 <details class="aw-request-details"><summary>요청 데이터</summary><pre id="agentRequestPreview"></pre></details>
+                </div>
+                <label for="agentTargetScope">검증 범위</label>
+                <select id="agentTargetScope"><option value="request_only">원본 요청 한정</option><option value="same_origin">같은 출처 탐색</option></select>
                 <label for="agentGoal">테스트 목표</label>
-                <textarea id="agentGoal" rows="3" required>현재 요청에서 취약 신호를 확인하고 근거가 있는 후속 테스트를 진행해줘.</textarea>
+                <textarea id="agentGoal" rows="3" required>대상에서 취약 신호를 확인하고 근거가 있는 후속 테스트를 진행해줘.</textarea>
                 <details class="aw-policy-details" id="agentGoalsDetails">
                   <summary>세부 검증 목표와 완료 조건</summary>
                   <p class="aw-muted">각 목표는 연결된 로컬 증거로만 충족됩니다. 미충족 목표가 있으면 작업 결론은 부분 완료로 표시합니다.</p>
