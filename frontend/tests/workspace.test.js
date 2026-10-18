@@ -29,6 +29,43 @@ function setup() {
 class ElementText {constructor(text){this.textContent=text;this.children=[];}}
 const allNodes = n => [n,...n.children.flatMap(allNodes)];
 
+test('workspace opens requests by default and preserves direct run links',()=>{
+  const {context,get}=setup();
+  const views=[];context.switchView=view=>views.push(view);
+  context.location={hash:''};context.restoreWorkspaceRoute();
+  assert.equal(views[0],'request');
+  context.location.hash='#agent/run123';
+  context.resetSiteMap=()=>{};context.resetFindings=()=>{};context.resetCoverage=()=>{};
+  context.restoreWorkspaceRoute();
+  assert.equal(views[1],'agent');
+  assert.equal(get('agentDetailView').hidden,false);
+});
+
+test('bulk test has a restorable workspace route',()=>{
+  const {context}=setup();
+  let opened;
+  context.switchView=view=>{opened=view;};
+  context.location={hash:'#bulk'};
+  context.restoreWorkspaceRoute();
+  assert.equal(opened,'bulk');
+});
+
+test('detail tab is encoded in a direct link and restored',()=>{
+  const {context}=setup();
+  const location={hash:'#agent/run123'};
+  context.location=location;
+  context.history={pushState(_a,_b,hash){location.hash=hash;},replaceState(_a,_b,hash){location.hash=hash;}};
+  context.resetSiteMap=()=>{};context.resetFindings=()=>{};context.resetCoverage=()=>{};
+  context.switchView=()=>{};
+  context.restoreWorkspaceRoute();
+  context.setDetailMode('explore');
+  assert.equal(location.hash,'#agent/run123/explore');
+  context.setDetailMode('findings');
+  location.hash='#agent/run123/explore';
+  context.restoreWorkspaceRoute();
+  assert.equal(vm.runInContext('agentDetailMode',context),'explore');
+});
+
 test('source switch isolates domain fields and clears old plan approval',()=>{
   const {context,get}=setup();
   let resets=0;context.resetPlanPreview=()=>resets++;
@@ -61,10 +98,14 @@ test('pagination clamps after filtering and renders a proper table empty state',
   const runs=Array.from({length:23},(_,i)=>({id:'id'+i,goal:'Goal '+i,state:'completed',created:1700000000}));
   context.renderAgentList(runs);
   assert.equal(get('agentList').children.length,10);
+  const cells=get('agentList').children[0].children;
+  assert.equal(cells.length,6);
+  assert.equal(cells[0].children[0].tagName,'input');
+  assert.equal(cells[1].children[0].tagName,'button');
   vm.runInContext('workspacePage=2;renderAgentList()',context);
   assert.equal(get('agentList').children.length,3);
   get('agentSearch').value='absent';context.renderAgentList();
-  assert.equal(get('agentList').children[0].children[0].colSpan,5);
+  assert.equal(get('agentList').children[0].children[0].colSpan,6);
   assert.equal(get('agentNext').disabled,true);
 });
 test('server page reports the real total and state counts beyond the visible rows',()=>{
@@ -265,14 +306,14 @@ test('detail tabs have one selected panel and support arrow navigation',()=>{
   assert.equal(get('awTabTimeline').tabIndex,-1);
   context.setDetailMode('history');
   assert.equal(get('agentHistory').hidden,false);
-  assert.equal(get('agentConclusion').hidden,true);
+  assert.notEqual(get('agentConclusion').hidden,true);
   context.setDetailMode('sitemap');
   let prevented=false;
   get('awTabSiteMap').onkeydown({key:'ArrowLeft',preventDefault(){prevented=true;}});
   assert(prevented);
-  assert.equal(get('agentGraph').hidden,false);
+  assert.equal(get('agentFindings').hidden,false);
   assert.equal(get('agentSiteMap').hidden,true);
-  assert.equal(get('awTabGraph').focused,true);
+  assert.equal(get('awTabFindings').focused,true);
 });
 
 test('sitemap receives only the existing run snapshot, and switching tasks clears it',()=>{

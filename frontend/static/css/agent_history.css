@@ -1,4 +1,8 @@
 .ah-history { min-width:0; }
+.aw-timeline-step { padding:16px 0 8px; border-bottom:1px solid var(--border); }
+.aw-timeline-step h4 { display:inline; font-size:12px; font-weight:600; margin-right:10px; overflow-wrap:anywhere; }
+.aw-timeline-step > .aw-muted { display:inline; }
+.aw-timeline-step > .aw-events { margin-top:8px; border-top:1px solid var(--border); }
 .aw-detail-tabs .aw-view-toggle { max-width:100%; overflow-x:auto; }
 .aw-detail-tabs .aw-view-toggle button { flex:0 0 auto; white-space:nowrap; }
 .ah-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 12px; }

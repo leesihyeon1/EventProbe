@@ -1,4 +1,20 @@
 .sm-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:16px 0 12px; }
+.asset-page { padding:28px; min-width:0; }
+.view-area > .view[data-view="assets"] { overflow:auto; }
+.asset-page h1 { font-size:24px; margin:0 0 12px; }
+.asset-page input:not([type="checkbox"]) { width:260px; min-height:36px; max-width:100%; }
+.asset-page select { max-width:420px; }
+.asset-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; border-block:1px solid var(--border); margin-top:16px; }
+.asset-graph { overflow:auto; max-height:65vh; min-height:360px; padding:24px; }
+.asset-branch { display:flex; align-items:center; gap:24px; position:relative; }
+.asset-folder { width:160px; flex-shrink:0; overflow-wrap:anywhere; padding:10px; background:var(--bg-secondary); border:1px solid var(--border); border-radius:4px; font-size:12px; }
+.asset-children { display:flex; flex-direction:column; gap:12px; padding:8px 0 8px 24px; border-left:1px solid var(--border); }
+.asset-children > * { position:relative; }
+.asset-children > *::before { content:''; position:absolute; width:24px; height:1px; background:var(--border); left:-25px; top:50%; }
+.asset-folder::after { content:''; position:absolute; width:24px; height:1px; background:var(--border); left:160px; top:50%; }
+.asset-node { display:flex; flex-wrap:wrap; align-items:center; gap:8px; width:240px; min-height:56px; text-align:left; padding:10px; border:1px solid var(--border); border-radius:4px; background:var(--bg-primary); color:var(--text-primary); cursor:pointer; }
+.asset-node[aria-pressed="true"] { border-color:var(--accent); background:var(--bg-secondary); }
+@media(max-width:800px) { .asset-page { padding:16px; } .asset-layout { grid-template-columns:minmax(0,1fr); } .asset-page select { width:100%; max-width:100%; } }
 .sm-toolbar .aw-search { flex:1 1 220px; max-width:420px; }
 .sm-toolbar select { min-height:36px; max-width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px; background:var(--bg-primary); color:var(--text-primary); font-size:12px; }
 .sm-modes { display:flex; gap:2px; margin-left:auto; }

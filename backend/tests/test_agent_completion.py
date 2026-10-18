@@ -96,6 +96,28 @@ def test_missing_basis_can_be_repaired(tmp_path):
     assert calls[1]['planner_feedback']['code'] == 'missing_evidence_basis'
 
 
+def test_foreign_basis_is_replanned_without_pausing_or_replaying_http(tmp_path):
+    calls = []
+    async def choose(ctx):
+        calls.append(ctx)
+        return {'kind': 'finish', 'hypothesis': 'end', 'basis': ['foreign-id']} if len(calls) == 1 else action(ctx)
+    run = execute(tmp_path, choose)
+    assert run['state'] == 'completed'
+    assert run['data']['requests'] == 1
+    assert calls[1]['planner_feedback']['code'] == 'invalid_evidence_basis'
+    assert sum(e['kind'] == 'planner_retry' for e in run['events']) == 1
+
+
+def test_repeated_foreign_basis_stops_with_partial_conclusion(tmp_path):
+    async def choose(ctx):
+        return {'kind': 'finish', 'hypothesis': 'end', 'basis': ['foreign-id']}
+    run = execute(tmp_path, choose)
+    assert run['state'] == 'paused'
+    assert run['data']['stop_code'] == 'planner_stalled'
+    assert run['data']['requests'] == 1
+    assert run['conclusion']['completion'] == 'partial'
+
+
 def test_unaffordable_action_is_replanned_before_any_partial_probe(tmp_path):
     calls = []
     async def choose(ctx):

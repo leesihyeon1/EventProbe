@@ -11,27 +11,30 @@
   <link rel="stylesheet" href="/static/css/findings.css">
   <link rel="stylesheet" href="/static/css/coverage.css">
   <link rel="stylesheet" href="/static/css/agent_history.css">
+  <link rel="stylesheet" href="/static/css/global_lookup.css">
 </head>
-<body data-view="agent">
+<body data-view="request">
 <aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
-  <a class="workspace-brand" href="#agent"><span class="brand-mark" data-icon="ShieldCheck"></span><span>EventProbe</span></a>
+  <a class="workspace-brand" href="#request"><span class="brand-mark" data-icon="ShieldCheck"></span><span>EventProbe</span></a>
   <span class="nav-section-label">워크스페이스</span>
   <nav class="workspace-links">
-    <button class="topbar-tab active" data-view="agent" onclick="switchView('agent')"><span data-icon="Crosshair"></span><span>자율 검증</span></button>
-    <button class="topbar-tab" data-view="request" onclick="switchView('request')"><span data-icon="SquareTerminal"></span><span>요청 / 분석</span></button>
+    <button class="topbar-tab active" data-view="request" onclick="switchView('request')"><span data-icon="SquareTerminal"></span><span>요청 / 분석</span></button>
+    <button class="topbar-tab" data-view="agent" onclick="switchView('agent')"><span data-icon="Crosshair"></span><span>자율 검증</span></button>
+    <button class="topbar-tab" data-view="assets" onclick="switchView('assets')"><span data-icon="Layers"></span><span>Asset</span></button>
+    <button class="topbar-tab" data-view="findings" onclick="switchView('findings')"><span data-icon="ListChecks"></span><span>발견</span></button>
+    <button class="topbar-tab" data-view="traffic" onclick="switchView('traffic')"><span data-icon="Activity"></span><span>트래픽</span></button>
+    <button class="topbar-tab" data-view="bulk" type="button" onclick="switchView('bulk')"><span data-icon="Layers"></span><span>일괄 테스트</span></button>
     <button class="topbar-tab" data-view="results" onclick="switchView('results')"><span data-icon="ListChecks"></span><span>일괄 테스트 결과</span></button>
     <button class="topbar-tab" data-view="report" onclick="switchView('report')"><span data-icon="FileChartColumn"></span><span>검증 리포트</span></button>
   </nav>
-  <div class="workspace-nav-footer"><span class="local-dot"></span><span>로컬 워크스페이스</span><span class="nav-version">v1.0</span></div>
+  <div class="workspace-nav-footer"><button class="aw-link" type="button" data-view="settings" onclick="switchView('settings')"><span data-icon="Settings2"></span>설정 · 감사</button><span class="nav-version">v1.0</span></div>
 </aside>
 
 <!-- ══════════════════════════════════ TOPBAR ══════════════════════════════════ -->
 <div class="topbar">
   <button class="icon-button" id="navToggle" aria-label="주 메뉴 접기" aria-expanded="true" aria-controls="workspaceNav" title="주 메뉴 접기"><span data-icon="PanelLeft"></span></button>
-  <div class="workspace-breadcrumb"><span>워크스페이스</span><span data-icon="ChevronRight"></span><strong id="workspaceTitle">자율 검증</strong></div>
+  <div class="workspace-breadcrumb"><span>워크스페이스</span><span data-icon="ChevronRight"></span><strong id="workspaceTitle">요청 / 분석</strong></div>
   <div class="topbar-actions">
-    <button class="btn btn-secondary request-action" onclick="openBulkModal()"><span data-icon="Layers"></span>일괄 테스트</button>
-    <button class="btn btn-secondary report-action" onclick="generateReport()"><span data-icon="FileChartColumn"></span>리포트 생성</button>
     <button class="icon-button" id="themeToggle" aria-label="어두운 테마" title="어두운 테마"><span data-icon="Moon"></span></button>
   </div>
 </div>
@@ -206,7 +209,7 @@
     <div class="view-area">
 
       <!-- ═══ VIEW: 요청/분석 ═══ -->
-      <div class="view" data-view="request">
+      <div class="view active" data-view="request">
 
         <!-- 요청 탭 -->
         <div class="request-panel" id="requestPanel">
@@ -316,6 +319,8 @@
         </div>
       </div><!-- /view:request -->
 
+      <div class="view" data-view="bulk" id="bulkWorkspace"></div>
+
       <!-- ═══ VIEW: 일괄 테스트 결과 ═══ -->
       <div class="view" data-view="results">
         <div class="results-view">
@@ -370,8 +375,9 @@
       <!-- ═══ VIEW: 검증 리포트 ═══ -->
       <div class="view" data-view="report">
         <div class="panel-header">
-          <span>📄 보안 검증 리포트</span>
-          <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px" onclick="window.print()">🖨️ 인쇄</button>
+          <span>보안 검증 리포트</span>
+          <div class="report-commands"><button class="btn btn-primary" id="reportGenerateBtn" type="button" onclick="generateReport()" disabled><span data-icon="FileChartColumn"></span>리포트 생성</button>
+          <button class="btn btn-secondary" type="button" onclick="window.print()">인쇄</button></div>
         </div>
         <div class="report-view" id="reportContent">
           <div class="empty-state">
@@ -382,7 +388,67 @@
       </div><!-- /view:report -->
 
       <!-- ═══ VIEW: 자율 검증 ═══ -->
-      <div class="view active" data-view="agent">
+      <div class="view" data-view="assets">
+        <section class="asset-page">
+          <h1>Asset</h1>
+          <div class="sm-toolbar">
+            <input id="assetRunSearch" class="form-input" aria-label="작업 검색" placeholder="작업 이름 또는 ID 검색">
+            <select id="assetRun" aria-label="검증 작업"></select>
+            <label><input id="assetArchived" type="checkbox"> 보관된 작업</label>
+            <button id="assetPrev" class="icon-button" title="이전 작업 목록" aria-label="이전 작업 목록"><span data-icon="ChevronLeft"></span></button>
+            <button id="assetNext" class="icon-button" title="다음 작업 목록" aria-label="다음 작업 목록"><span data-icon="ChevronRight"></span></button>
+            <button id="assetRefresh" class="icon-button" title="새로고침" aria-label="새로고침"><span data-icon="RefreshCw"></span></button>
+            <button id="assetOpen" class="btn" disabled>검증 작업 열기</button>
+          </div>
+          <div class="sm-toolbar">
+            <input id="assetSearch" class="form-input" aria-label="자산 검색" placeholder="도메인, 경로, 파라미터 검색">
+            <select id="assetState" aria-label="관측 상태"><option value="">모든 상태</option value="discovered">발견 · 미요청</option><option value="observed">관측 · 미판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select>
+            <span id="assetCount" class="aw-muted" role="status"></span>
+            <button id="assetItemPrev" class="icon-button" title="이전 자산" aria-label="이전 자산"><span data-icon="ChevronLeft"></span></button>
+            <button id="assetItemNext" class="icon-button" title="다음 자산" aria-label="다음 자산"><span data-icon="ChevronRight"></span></button>
+          </div>
+          <p id="assetStack" class="aw-muted"></p>
+          <div class="asset-layout"><div id="assetGraph" class="asset-graph" aria-label="도메인 및 URL 구조"></div><aside id="assetDetail" class="sm-detail"></aside></div>
+        </section>
+      </div>
+      <div class="view" data-view="findings">
+        <section class="lookup-page" aria-label="전체 발견">
+          <h1>발견</h1>
+          <div class="lookup-toolbar">
+            <input id="globalFindingSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 유형 검색" aria-label="발견 검색">
+            <select id="globalFindingVerdict" aria-label="판정"><option value="">모든 판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select>
+            <select id="globalFindingStatus" aria-label="처리 상태"><option value="">모든 처리 상태</option><option value="open">미처리</option><option value="triaged">분류됨</option><option value="resolved">해결</option><option value="false_positive">오탐</option><option value="ignored">무시</option></select>
+            <label><input id="globalFindingArchived" type="checkbox"> 보관 작업</label>
+          </div>
+          <p id="globalFindingCount" class="aw-muted" role="status"></p>
+          <div id="globalFindingRows" class="lookup-rows"></div>
+          <div class="lookup-pages"><button id="globalFindingPrev" class="btn btn-secondary" type="button">이전</button><button id="globalFindingNext" class="btn btn-secondary" type="button">다음</button></div>
+        </section>
+      </div>
+      <div class="view" data-view="traffic">
+        <section class="lookup-page" aria-label="전체 트래픽">
+          <h1>트래픽</h1>
+          <div class="lookup-toolbar">
+            <input id="globalTrafficSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 메서드 검색" aria-label="트래픽 검색">
+            <select id="globalTrafficSource" aria-label="출처"><option value="">모든 출처</option><option value="agent">자율 검증</option><option value="browser">브라우저</option></select>
+            <label><input id="globalTrafficArchived" type="checkbox"> 보관 작업</label>
+          </div>
+          <p id="globalTrafficCount" class="aw-muted" role="status"></p>
+          <div id="globalTrafficRows" class="lookup-rows"></div>
+          <div class="lookup-pages"><button id="globalTrafficPrev" class="btn btn-secondary" type="button">이전</button><button id="globalTrafficNext" class="btn btn-secondary" type="button">다음</button></div>
+        </section>
+      </div>
+      <div class="view" data-view="settings">
+        <section class="lookup-page" aria-label="설정 및 감사">
+          <h1>설정 · 감사</h1>
+          <div id="opsReadiness" class="lookup-row" role="status">준비 상태 확인 중…</div>
+          <div class="lookup-actions"><button id="opsEgressAudit" class="btn btn-secondary" type="button">반출 감사 열기</button><button id="opsRefresh" class="btn btn-secondary" type="button">새로고침</button></div>
+          <h2>최근 작업 진단</h2><p id="opsCount" class="aw-muted" role="status"></p>
+          <div id="opsRows" class="lookup-rows"></div>
+          <div class="lookup-pages"><button id="opsPrev" class="btn btn-secondary" type="button">이전</button><button id="opsNext" class="btn btn-secondary" type="button">다음</button></div>
+        </section>
+      </div>
+      <div class="view" data-view="agent">
         <div class="aw-workspace">
           <div class="aw-heading">
             <div><div class="aw-eyebrow">WORKSPACE</div><h1>자율 검증</h1></div>
@@ -390,6 +456,7 @@
           </div>
           <div class="aw-policy-row">
             <div id="egressPolicyBanner" class="aw-policy" role="status">반출 정책 확인 중</div>
+            <div id="agentBrowserState" class="aw-policy" role="status">브라우저 준비 상태 확인 중</div>
             <label class="aw-workspace-id"><span data-icon="LockKeyhole"></span>
               <input id="agentUser" type="text" maxlength="64" placeholder="작업공간 이름(선택)" aria-label="작업공간 이름" title="작업 소유권 범위가 켜진 서버에서 내 작업만 보이게 합니다(협업 구분용)."></label>
             <button class="aw-link" id="egressAuditBtn" type="button"><span data-icon="Activity"></span>반출 감사</button>
@@ -397,23 +464,27 @@
           <div id="agentListView">
             <div class="aw-metrics" id="agentMetrics" aria-label="작업 현황"></div>
             <div class="aw-toolbar">
-              <label class="aw-search"><span data-icon="Search"></span><input id="agentSearch" type="search" maxlength="200" placeholder="작업 목표 또는 ID 검색" aria-label="검증 작업 검색"></label>
-              <select id="agentFilter" aria-label="작업 상태 필터"><option value="">모든 상태</option><option value="running">실행 중</option><option value="paused">일시정지</option><option value="interrupted">중단됨</option><option value="completed">종료</option><option value="limited">한도 도달</option></select>
-              <input id="agentCategory" maxlength="40" placeholder="분류 필터" aria-label="작업 분류 필터">
-              <span id="agentCount" class="aw-muted" role="status"></span>
-              <button class="btn btn-secondary" id="agentBatchArchive" type="button" disabled>선택 보관</button>
+              <div class="aw-toolbar-filters">
+                <label class="aw-search"><span data-icon="Search"></span><input id="agentSearch" type="search" maxlength="200" placeholder="작업 목표 또는 ID 검색" aria-label="검증 작업 검색"></label>
+                <select id="agentFilter" aria-label="작업 상태 필터"><option value="">모든 상태</option><option value="running">실행 중</option><option value="paused">일시정지</option><option value="interrupted">중단됨</option><option value="completed">종료</option><option value="limited">한도 도달</option></select>
+                <input id="agentCategory" maxlength="40" placeholder="분류 필터" aria-label="작업 분류 필터">
+                <span id="agentCount" class="aw-muted" role="status"></span>
+              </div>
+              <div class="aw-toolbar-actions"><button class="btn btn-secondary" id="agentBatchArchive" type="button" disabled>선택 보관</button>
               <button class="btn btn-secondary" id="agentBatchStop" type="button" disabled>선택 중단</button>
               <span id="agentBatchStatus" class="aw-muted" role="status"></span>
-              <button class="icon-button" id="agentArchivedToggle" aria-label="보관함 보기" aria-pressed="false" title="보관함 보기"><span data-icon="Layers"></span></button>
-              <button class="icon-button" id="agentArchiveImportButton" aria-label="보관 패키지 가져오기" title="보관 패키지 가져오기"><span data-icon="Upload"></span></button><input id="agentArchiveFile" type="file" accept=".zip,application/zip" hidden>
-              <button class="icon-button" id="agentTemplatesBtn" aria-label="검증 템플릿" title="검증 템플릿"><span data-icon="Clipboard"></span></button>
-              <button class="icon-button" id="agentDeletionsBtn" aria-label="삭제 기록" title="삭제 기록"><span data-icon="Trash2"></span></button>
-              <button class="icon-button" id="agentIncidentsBtn" aria-label="사내 이벤트 재검증" title="사내 이벤트 재검증"><span data-icon="CircleAlert"></span></button>
-              <button class="icon-button" id="agentRefresh" aria-label="작업 새로고침" title="작업 새로고침"><span data-icon="RefreshCw"></span></button>
+              <details class="aw-tools-menu" id="agentToolsMenu"><summary><span data-icon="Settings2"></span>도구</summary><div class="aw-tools-items">
+                <button id="agentArchivedToggle" aria-label="보관함 보기" aria-pressed="false" type="button"><span data-icon="Layers"></span>보관함</button>
+                <button id="agentArchiveImportButton" type="button"><span data-icon="Upload"></span>보관 패키지 가져오기</button><input id="agentArchiveFile" type="file" accept=".zip,application/zip" hidden>
+                <button id="agentTemplatesBtn" type="button"><span data-icon="Clipboard"></span>검증 템플릿</button>
+                <button id="agentDeletionsBtn" type="button"><span data-icon="Trash2"></span>삭제 기록</button>
+                <button id="agentIncidentsBtn" type="button"><span data-icon="CircleAlert"></span>사내 이벤트 재검증</button>
+              </div></details>
+              <button class="icon-button" id="agentRefresh" aria-label="작업 새로고침" title="작업 새로고침"><span data-icon="RefreshCw"></span></button></div>
             </div>
             <div id="agentBatchResults" class="aw-muted" role="status" hidden></div>
             <div class="aw-table-scroll">
-              <table class="aw-table"><caption class="sr-only">자율 검증 작업 목록</caption><thead><tr><th>작업</th><th>상태</th><th>생성 시각</th><th>작업 ID</th><th><span class="sr-only">작업 명령</span></th></tr></thead><tbody id="agentList"></tbody></table>
+              <table class="aw-table"><caption class="sr-only">자율 검증 작업 목록</caption><thead><tr><th><span class="sr-only">선택</span></th><th>작업</th><th>상태</th><th>생성 시각</th><th>작업 ID</th><th><span class="sr-only">작업 명령</span></th></tr></thead><tbody id="agentList"></tbody></table>
             </div>
             <div class="aw-pagination"><span id="agentPageInfo" class="aw-muted"></span><div><button class="icon-button" id="agentPrev" aria-label="이전 페이지" title="이전 페이지"><span data-icon="ChevronLeft"></span></button><button class="icon-button" id="agentNext" aria-label="다음 페이지" title="다음 페이지"><span data-icon="ChevronRight"></span></button></div></div>
           </div>
@@ -425,14 +496,16 @@
             <div id="agentSummary" class="aw-run-stats"></div>
             <div id="agentResults" class="aw-results" aria-label="검증 결과"></div>
             <section id="agentConclusion" class="aw-conclusion" aria-label="검증 결론" aria-live="polite" hidden></section>
-            <div class="aw-section-title aw-detail-tabs"><h3>실행 기록</h3>
+            <div class="aw-section-title aw-detail-tabs"><h3>검증 상세</h3>
               <div class="aw-view-toggle" role="tablist" aria-label="상세 보기 방식">
-                <button id="awTabTimeline" role="tab" aria-selected="true" aria-controls="agentEvents">타임라인</button>
-                <button id="awTabHistory" role="tab" aria-selected="false" aria-controls="agentHistory" tabindex="-1">기록 탐색</button>
-                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
+                <button id="awTabFindings" role="tab" aria-selected="true" aria-controls="agentFindings">발견</button>
                 <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
-                <button id="awTabFindings" role="tab" aria-selected="false" aria-controls="agentFindings" tabindex="-1">발견</button>
+                <button id="awTabExplore" role="tab" aria-selected="false" aria-controls="agentExplore" tabindex="-1">탐색 · 입력</button>
+                <button id="awTabTraffic" role="tab" aria-selected="false" aria-controls="agentTraffic" tabindex="-1">트래픽</button>
                 <button id="awTabCoverage" role="tab" aria-selected="false" aria-controls="agentCoverage" tabindex="-1">커버리지</button>
+                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
+                <button id="awTabTimeline" role="tab" aria-selected="false" aria-controls="agentEvents" tabindex="-1">단계별 기록</button>
+                <button id="awTabHistory" role="tab" aria-selected="false" aria-controls="agentHistory" tabindex="-1">원본 기록</button>
               </div>
               <span class="aw-muted" id="agentEventCount"></span>
             </div>
@@ -446,14 +519,23 @@
               <div id="ahEvents" class="aw-events"></div>
               <button id="ahMore" class="aw-link" type="button" hidden><span data-icon="ChevronDown"></span>다음 이벤트</button>
             </section>
+            <section id="agentExplore" class="lookup-page" role="tabpanel" aria-labelledby="awTabExplore" hidden>
+              <h3>발견한 입력과 검사 상태</h3><div id="agentExploreForms" class="lookup-rows"></div>
+            </section>
+            <section id="agentTraffic" class="lookup-page" role="tabpanel" aria-labelledby="awTabTraffic" hidden>
+              <h3>이 작업의 트래픽</h3><p id="agentTrafficCount" class="aw-muted" role="status"></p>
+              <div id="agentTrafficRows" class="lookup-rows"></div>
+              <div class="lookup-pages"><button id="agentTrafficPrev" class="btn btn-secondary" type="button">이전</button><button id="agentTrafficNext" class="btn btn-secondary" type="button">다음</button></div>
+            </section>
             <div id="agentGraph" class="aw-graph" role="tabpanel" aria-labelledby="awTabGraph" hidden>
               <div class="aw-graph-toolbar" role="group" aria-label="그래프 보기 제어">
-                <span class="aw-muted aw-graph-legend">Run→Action→Request→Observation→Verification · 로컬 렌더(외부 통신 없음)</span>
+                <span class="aw-muted aw-graph-legend">실행 흐름</span>
                 <span class="aw-muted" id="agentGraphWarn" hidden></span>
                 <button class="icon-button" id="awGraphZoomIn" aria-label="확대" title="확대"><span data-icon="Plus"></span></button>
                 <button class="icon-button" id="awGraphZoomOut" aria-label="축소" title="축소"><span data-icon="Search"></span></button>
                 <button class="icon-button" id="awGraphFit" aria-label="전체 맞춤" title="전체 맞춤"><span data-icon="Crosshair"></span></button>
               </div>
+              <div id="agentGraphSummary" class="aw-graph-summary" aria-label="검사별 실행 요약"></div>
               <div class="aw-graph-stage"><svg id="agentGraphSvg" role="img" aria-label="탐색 그래프"></svg></div>
               <aside id="agentGraphDetail" class="aw-graph-detail" hidden aria-live="polite" aria-label="노드 상세"></aside>
             </div>
@@ -472,6 +554,7 @@
                 </div>
               </div>
               <p id="smCount" class="aw-muted sm-count" role="status"></p>
+              <p id="smStack" class="aw-muted sm-count"></p>
               <div class="sm-layout">
                 <nav id="smContent" class="sm-content" aria-label="기록된 URL 경로"></nav>
                 <aside id="smDetail" class="sm-detail" aria-label="경로 상세"></aside>
@@ -539,12 +622,14 @@
                 </div>
                 <div class="aw-options">
                   <label><span>쓰기 메서드 허용<small>POST · PUT · PATCH · DELETE</small></span><input class="aw-toggle" id="agentWrite" type="checkbox"></label>
-                  <label><span>응답-블라인드 계획 모드<small>실험적</small></span><input class="aw-toggle" id="agentPlanMode" type="checkbox"></label>
+                  <label><span>응답-블라인드 계획 모드<small>고정 실행</small></span><input class="aw-toggle" id="agentPlanMode" type="checkbox"></label>
                   <label><span>응답 발췌 외부 전송<small id="agentShareNote">반출 정책 확인 중</small></span><input class="aw-toggle" id="agentShare" type="checkbox"></label>
                 </div>
                 <details class="aw-policy-details" id="agentLocalPolicyDetails">
                   <summary>로컬 실행 범위 제약</summary>
                   <p class="aw-muted">비워두면 해당 제약을 적용하지 않습니다. 경로는 /로 시작하는 접두사를 줄마다 입력하세요. 매 요청 직전에 검사합니다.</p>
+                  <label for="agentProtectedMarker">로그인 후 보호 콘텐츠 표식 (선택)</label>
+                  <input id="agentProtectedMarker" type="text" maxlength="200" autocomplete="off" placeholder="로그인 후에만 보이는 8자 이상 텍스트">
                   <label for="agentAllowedPaths">허용 경로</label>
                   <textarea id="agentAllowedPaths" rows="2" placeholder="/api/public"></textarea>
                   <label for="agentDeniedPaths">금지 경로</label>
@@ -710,17 +795,16 @@
 </div>
 
 <div class="modal-overlay hidden" id="bulkModal">
-  <div class="modal" style="width:720px">
+  <div class="modal">
     <div class="modal-header">
       <h2>일괄 테스트</h2>
-      <button class="btn btn-secondary" onclick="closeBulkModal()">✕ 닫기</button>
     </div>
 
     <!-- 모달 내부 탭 -->
     <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg-tertiary)">
-      <div class="modal-tab active" data-mtab="single" onclick="switchModalTab('single')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">단일 타겟</div>
-      <div class="modal-tab" data-mtab="multi" onclick="switchModalTab('multi')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">🎯 다중 타겟</div>
-      <div class="modal-tab" data-mtab="portscan" onclick="switchModalTab('portscan')" style="padding:10px 20px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-muted);border-bottom:2px solid transparent">🔌 포트 스캔</div>
+      <button type="button" class="modal-tab active" data-mtab="single" onclick="switchModalTab('single')">단일 대상</button>
+      <button type="button" class="modal-tab" data-mtab="multi" onclick="switchModalTab('multi')">다중 대상</button>
+      <button type="button" class="modal-tab" data-mtab="portscan" onclick="switchModalTab('portscan')">포트 스캔</button>
     </div>
 
     <!-- ── 단일 타겟 탭 ── -->
@@ -766,8 +850,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
-        <button class="btn btn-danger" onclick="runBulkTest()">테스트 시작</button>
+        <button class="btn btn-primary" onclick="runBulkTest()">테스트 시작</button>
       </div>
     </div>
 
@@ -853,8 +936,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
-        <button class="btn btn-danger" onclick="runMultiTargetTest()">🎯 다중 테스트 시작</button>
+        <button class="btn btn-primary" onclick="runMultiTargetTest()">다중 테스트 시작</button>
       </div>
     </div>
 
@@ -900,10 +982,9 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeBulkModal()">취소</button>
         <button class="btn btn-secondary" onclick="runTlsScan()"
-                title="첫 호스트의 TLS 전송계층 점검(버전·cipher·인증서·Heartbleed). 외부 도구 없이 수행. 인가된 대상에만 사용.">🔒 TLS 점검</button>
-        <button class="btn btn-primary" onclick="runPortScan()">🔌 포트 스캔 시작</button>
+                title="첫 호스트의 TLS 전송계층 점검(버전·cipher·인증서·Heartbleed). 외부 도구 없이 수행. 인가된 대상에만 사용.">TLS 점검</button>
+        <button class="btn btn-primary" onclick="runPortScan()">포트 스캔 시작</button>
       </div>
     </div>
 
@@ -1081,5 +1162,7 @@
 <script src="/static/js/agent_findings.js"></script>
 <script src="/static/js/agent_coverage.js"></script>
 <script src="/static/js/workspace.js"></script>
+<script src="/static/js/assets.js"></script>
+<script src="/static/js/global_lookup.js"></script>
 </body>
 </html>

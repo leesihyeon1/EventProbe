@@ -1,5 +1,6 @@
 """Task/category regressions using synthetic targets and no external services."""
 import asyncio
+import sqlite3
 
 import httpx
 import pytest
@@ -116,3 +117,44 @@ def test_suspicious_confirmation_is_not_discarded(tmp_path, monkeypatch):
 def test_confirmation_preserves_original_input(seed, location):
     action = Action(kind='confirm', hypothesis='synthetic', category='sqli', location=location, param='user')
     assert injection_base_value(seed, action) == 'admin'
+
+
+@pytest.mark.parametrize('parameterized', [False, True])
+def test_repeated_sql_probe_recovers_with_local_differential_fixture(tmp_path, parameterized):
+    database = sqlite3.connect(':memory:')
+    database.execute('CREATE TABLE users (name TEXT, details TEXT)')
+    database.execute('INSERT INTO users VALUES (?, ?)', ('alpha', 'A' * 120))
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        value = request.url.params.get('user', '')
+        try:
+            if parameterized:
+                rows = database.execute('SELECT details FROM users WHERE name=?', (value,)).fetchall()
+            else:
+                rows = database.execute(f"SELECT details FROM users WHERE name='{value}'").fetchall()
+        except sqlite3.Error:
+            return httpx.Response(500, text='query failed')
+        return httpx.Response(200, text='\n'.join(row[0] for row in rows))
+
+    async def planner(ctx):
+        return {'kind': 'probe', 'hypothesis': 'synthetic', 'category': 'sqli',
+                'param': 'user', 'payload': "'", 'basis': [ctx['observations'][-1]['id']]}
+
+    async def scenario():
+        manager = AgentManager(Store(tmp_path / 'runs.db'), planner, httpx.MockTransport(respond))
+        rid = manager.create(RunSpec(goal='SQL injection', request={'url': 'https://app.test/?user=alpha'}))
+        await manager.tasks[rid]
+        return manager.snapshot(rid)
+
+    try:
+        run = asyncio.run(scenario())
+    finally:
+        database.close()
+    assert run['data']['requests'] <= 24
+    assert len(requests) == run['data']['requests']
+    assert any(e['kind'] == 'planner_recovery' for e in run['events'])
+    assert any(e['kind'] == 'action' and e['data']['kind'] == 'confirm' for e in run['events'])
+    assert run['conclusion']['verdict'] == ('inconclusive' if parameterized else 'suspicious')
+    assert run['conclusion']['counts']['confirmed'] == 0

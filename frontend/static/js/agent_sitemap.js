@@ -16,9 +16,11 @@ function buildSiteMapModel(run) {
   const events=[...new Map((run.events || []).map(e=>[e.id,e])).values()];
   const ensure=request=>{
     const a=siteMapAddress(request || {}); if(!a) return null;
-    if(!rows.has(a.key)) rows.set(a.key,{...a, seed:false, registered:false, scopeKnown:!!seed, outside:!!seed && a.origin!==seed.origin,
-      sources:[], requests:[], observations:[], errors:[], verifications:[], actors:Object.create(null), failed:false, truncated:false});
-    return rows.get(a.key);
+    if(!rows.has(a.key)) rows.set(a.key,{...a, fields:[],seed:false, registered:false, scopeKnown:!!seed, outside:!!seed && a.origin!==seed.origin,
+      sources:[], requests:[], observations:[], errors:[], verifications:[], actors:Object.create(null), failed:false, truncated:false,browser:false});
+    const row=rows.get(a.key);
+    row.fields=[...new Set([...row.fields,...(request.body_fields||[])])].sort();
+    return row;
   };
   for(const [id,request] of Object.entries(endpoints)) {
     const row=ensure(request); if(row){row.registered=true;row.seed ||= id==='seed';}
@@ -63,6 +65,10 @@ function buildSiteMapModel(run) {
       const source=observations.get(d.source_observation_id);
       if(row && source) row.sources.push({eventId:source.eventId || d.source_observation_id,path:source.row.path});
     }
+    if(e.kind==='browser_discovery') {
+      const row=ensure(endpoints[d.endpoint_id]);
+      if(row) row.browser=true;
+    }
     if(e.kind==='verification') {
       const refs=[...new Set(d.evidence_ids || [])], valid=refs.map(id=>observations.get(id)).filter(Boolean);
       const status=refs.length && refs.length===valid.length && ['confirmed','suspicious','inconclusive'].includes(d.status) ? d.status : 'inconclusive';
@@ -76,10 +82,15 @@ function buildSiteMapModel(run) {
       }
     }
   }
+  for(const candidate of run.recon?.form_candidates || []) {
+    const address=siteMapAddress(endpoints[candidate.endpoint_id] || {});
+    const row=address && rows.get(address.key);
+    if(row) (row.formCandidates ||= []).push(candidate);
+  }
   const result=[...rows.values()].sort((a,b)=>a.origin.localeCompare(b.origin)||a.path.localeCompare(b.path)||a.method.localeCompare(b.method)||a.key.localeCompare(b.key));
   for(const row of result) {
     row.state=['confirmed','suspicious','inconclusive'].find(s=>row.verifications.some(v=>v.status===s)) ||
-      (row.observations.length?'observed':row.requests.length?'requested':row.seed?'registered':'discovered');
+      (row.observations.length?'observed':row.requests.length?'requested':row.browser?'discovered':row.seed?'registered':'discovered');
   }
   return {rows:result, limited:events.some(e=>e.kind==='discovery_limit')};
 }
@@ -92,7 +103,7 @@ function filterSiteMapRows(rows,search,method,state) {
 }
 function resetSiteMap() {
   siteMapState={runId:null,model:null,signature:'',selected:null,view:siteMapState.view,open:new Map()};
-  agentEl('smContent').replaceChildren();agentEl('smDetail').replaceChildren();agentEl('smCount').textContent='';
+  agentEl('smContent').replaceChildren();agentEl('smDetail').replaceChildren();agentEl('smCount').textContent='';agentEl('smStack').textContent='';
   delete agentEl('smDetail').dataset.signature;
   agentEl('smSearch').value='';agentEl('smMethod').value='';agentEl('smState').value='';
 }
@@ -103,9 +114,14 @@ function initSiteMap() {
 }
 function renderAgentSiteMap(run) {
   if(siteMapState.runId!==run.id){resetSiteMap();siteMapState.runId=run.id;}
-  const model=buildSiteMapModel(run), signature=JSON.stringify(model);
+  const model=buildSiteMapModel(run), signature=JSON.stringify([model,run.recon || null]);
   if(signature===siteMapState.signature) return;
   siteMapState.signature=signature;siteMapState.model=model;
+  const recon=run.recon || {};
+  const labels=[`관측 ${recon.observed_endpoint_count ?? 0}/${recon.endpoint_count ?? model.rows.length}`];
+  if(recon.technologies?.length) labels.push(`기술 ${recon.technologies.join(', ')}`);
+  if(recon.server_headers?.length) labels.push(`서버 ${recon.server_headers.slice(0,3).join(', ')}`);
+  agentEl('smStack').textContent=run.recon?labels.join(' · '):'';
   const method=agentEl('smMethod'), selected=method.value;
   method.replaceChildren(uiNode('option','','모든 메서드'));method.firstChild.value='';
   for(const name of [...new Set(model.rows.map(r=>r.method))].sort()){const option=uiNode('option','',name);option.value=name;method.append(option);}
@@ -187,9 +203,15 @@ function renderSiteMapDetail(row) {
   if(!row){panel.append(uiNode('p','sm-empty','선택된 경로 없음'));return;}
   panel.append(uiNode('h4','',row.method+' '+row.path),uiNode('p','sm-origin',row.origin),siteMapBadge(row));
   const facts=uiNode('dl','sm-facts');
-  for(const [label,value] of [['쿼리 키',row.query.join(', ')||'없음'],['출처',row.seed?'시작 요청':row.sources.length?'응답에서 발견':row.registered?'출처 미기록':'요청 기록'],['요청 / 응답',`${row.requests.length} / ${row.observations.length}`],['범위',!row.scopeKnown?'시작 요청 미기록':row.outside?'시작 요청과 다른 출처':'시작 요청과 동일 출처']]) facts.append(uiNode('dt','',label),uiNode('dd','',value));
+  for(const [label,value] of [['쿼리 키',row.query.join(', ')||'없음'],['본문 필드',row.fields.join(', ')||'없음'],['출처',row.seed?'시작 요청':row.browser?'브라우저 통신에서 발견':row.sources.length?'응답에서 발견':row.registered?'출처 미기록':'요청 기록'],['요청 / 응답',`${row.requests.length} / ${row.observations.length}`],['범위',!row.scopeKnown?'시작 요청 미기록':row.outside?'시작 요청과 다른 출처':'시작 요청과 동일 출처']]) facts.append(uiNode('dt','',label),uiNode('dd','',value));
   if(row.lastObserved) facts.append(uiNode('dt','','최근 관측'),uiNode('dd','',new Date(row.lastObserved*1000).toLocaleString('ko-KR')));
   panel.append(facts);
+  if(row.formCandidates?.length) {
+    const labels={pending:'검사 대기',testing:'검사 중',interrupted:'검사 중단',skipped_budget:'예산 부족으로 미검사',untested:'미검사',confirmed:'확증',suspicious:'의심',inconclusive:'미확정'};
+    panel.append(uiNode('h5','','폼 검사 상태'));
+    for(const candidate of row.formCandidates) panel.append(uiNode('p','sm-actor',
+      `${candidate.login?'로그인 폼':'POST 폼'} · ${labels[candidate.status]||candidate.status} · ${candidate.source==='rendered_dom'?'브라우저 DOM':candidate.source==='html'?'HTML 응답':'등록된 요청'}`));
+  }
   if(row.truncated) panel.append(uiNode('p','sm-flag','일부 응답이 잘림'));
   if(row.failed) panel.append(uiNode('p','sm-flag','요청 오류 기록 있음'));
   if(Object.keys(row.actors).length) {

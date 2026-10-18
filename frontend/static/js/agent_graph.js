@@ -306,11 +306,12 @@ function renderAgentGraph(run) {
       && svg.querySelector('#gViewport')) {
     return;
   }
+  _renderGraphSummary(run.events || [], model);
   graphView.runId = run.id;
   graphView.nodeCount = model.nodes.size;
   graphView.eventCount = evCount;
 
-  svg.setAttribute('viewBox', '0 0 ' + Math.max(1, model.width) + ' ' + Math.max(1, model.height));
+  _syncGraphViewBox(svg);
   svg.replaceChildren();
 
   // defs: 간선 종류별 화살표 마커(로컬 fragment url(#..) 만)
@@ -347,11 +348,55 @@ function renderAgentGraph(run) {
     graphView.selectedId = null;
     const panel = agentEl('agentGraphDetail');
     if (panel) { panel.hidden = true; panel.replaceChildren(); }
-    _fitGraph();
+    if ((svg.getBoundingClientRect?.().width || 900) < 600) _focusGraphStart();
+    else _fitGraph();
   }
   if (graphView.selectedId && model.nodes.has(graphView.selectedId)) selectGraphNode(graphView.selectedId, true);
   const warn = agentEl('agentGraphWarn');
   if (warn) { warn.hidden = !model.warnings.length; warn.textContent = model.warnings.length ? ('미해결 링크 ' + model.warnings.length + '개는 생략됨') : ''; }
+}
+
+function _renderGraphSummary(events, model) {
+  const bar = agentEl('agentGraphSummary');
+  if (!bar) return;
+  const byStep = new Map();
+  for (const ev of events) {
+    const data = ev.data || {};
+    if (ev.kind === 'action' && data.kind !== 'finish') {
+      byStep.set(ev.step_id, {id: ev.id, action: data, statuses: [], verdict: ''});
+    } else if (ev.kind === 'observation' && byStep.has(ev.step_id)) {
+      byStep.get(ev.step_id).statuses.push(data.response?.status);
+    } else if (ev.kind === 'verification' && byStep.has(ev.step_id)) {
+      byStep.get(ev.step_id).verdict = data.status || 'inconclusive';
+    }
+  }
+  const rows = [];
+  for (const step of byStep.values()) {
+    if (!model.nodes.has(step.id)) continue;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.title = '검사 단계 선택';
+    const label = document.createElement('span');
+    label.textContent = (step.action.category || step.action.kind || '검사').toUpperCase();
+    const counts = new Map();
+    for (const status of step.statuses) if (status) counts.set(status, (counts.get(status) || 0) + 1);
+    const codes = document.createElement('span');
+    codes.className = 'aw-graph-step-status';
+    codes.textContent = [...counts].map(([status, count]) => `HTTP ${status}${count > 1 ? ' ×' + count : ''}`).join(', ') || '요청 없음';
+    const verdict = document.createElement('span');
+    verdict.className = 'aw-graph-step-status';
+    verdict.dataset.status = step.verdict;
+    verdict.textContent = step.verdict || '관측';
+    button.append(label, codes, verdict);
+    button.onclick = () => selectGraphNode(step.id);
+    rows.push(button);
+  }
+  bar.replaceChildren(...rows);
+}
+
+function _syncGraphViewBox(svg) {
+  const rect = svg.getBoundingClientRect?.();
+  svg.setAttribute('viewBox', `0 0 ${Math.max(1, rect?.width || 900)} ${Math.max(1, rect?.height || 520)}`);
 }
 
 const _EDGE_MARKER = { basis: 'basis', actual_flow: 'actual', planned: 'plan', plan_entry: 'plan', realized: 'plan', meta: 'meta' };
@@ -398,14 +443,25 @@ function _applyGraphTransform() {
 }
 function _fitGraph() {
   const svg = agentEl('agentGraphSvg'); if (!svg || !_graphModel) return;
+  _syncGraphViewBox(svg);
   const rect = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { width: 900, height: 520 };
   const w = rect.width || 900, h = rect.height || 520;
-  const k = Math.min(1.4, Math.max(0.25, Math.min(w / (_graphModel.width || w), h / (_graphModel.height || h))));
-  graphView.k = k; graphView.tx = (w - (_graphModel.width || w) * k) / 2; graphView.ty = 12;
+  const k = Math.min(1.4, Math.max(0.05, Math.min(w / (_graphModel.width || w), h / (_graphModel.height || h))));
+  graphView.k = k; graphView.tx = (w - (_graphModel.width || w) * k) / 2;
+  graphView.ty = (h - (_graphModel.height || h) * k) / 2;
+  _applyGraphTransform();
+}
+function _focusGraphStart() {
+  const svg = agentEl('agentGraphSvg'); if (!svg || !_graphModel) return;
+  _syncGraphViewBox(svg);
+  const run = [..._graphModel.nodes.values()].find(n => n.type === 'run');
+  graphView.k = 0.85;
+  graphView.tx = 12 - (run?.x || 0) * graphView.k;
+  graphView.ty = 20 - (run?.y || 0) * graphView.k;
   _applyGraphTransform();
 }
 function _zoomGraph(factor, cx, cy) {
-  const k2 = Math.min(2.5, Math.max(0.25, graphView.k * factor));
+  const k2 = Math.min(2.5, Math.max(0.05, graphView.k * factor));
   if (cx != null) { graphView.tx = cx - (cx - graphView.tx) * (k2 / graphView.k); graphView.ty = cy - (cy - graphView.ty) * (k2 / graphView.k); }
   graphView.k = k2; _applyGraphTransform();
 }
@@ -413,6 +469,12 @@ let _graphBound = null;
 function _bindGraphInteractions(svg) {
   if (_graphBound === svg) return;      // 재렌더마다 리스너 중복 방지
   _graphBound = svg;
+  if (window.addEventListener) window.addEventListener('resize', () => {
+    if (svg.isConnected && !svg.closest('[hidden]')) {
+      if (svg.getBoundingClientRect().width < 600) _focusGraphStart();
+      else _fitGraph();
+    }
+  });
   let drag = null;
   svg.addEventListener('wheel', (e) => {
     e.preventDefault();

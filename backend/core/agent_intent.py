@@ -3,6 +3,7 @@ import re
 
 
 _CATEGORIES = {
+    'auth': r'인증\s*우회|로그인\s*우회|auth(?:entication)?\s*bypass|login\s*bypass',
     'sqli': r'(?<![a-z])sql(?:i|\s*injection)?(?![a-z])|에스큐엘',
     'nosql': r'(?<![a-z])nosql(?![a-z])',
     'xss': r'(?<![a-z])xss(?![a-z])|크로스\s*사이트\s*스크립',

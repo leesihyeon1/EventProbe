@@ -801,6 +801,7 @@ async function loadSidebar() {
 
   // 커스텀 페이로드 병합
   loadCustomPayloads();
+  if (state.activeView === 'bulk') initBulkWorkspace();
   const aiCat = state.aiVariants.length
     ? [{ id: 'ai_variants', name: 'AI 우회 변형', icon: '🤖', _custom: true, group: 'custom', payloads: state.aiVariants }]
     : [];
@@ -3739,8 +3740,10 @@ function riskKo(risk) {
 
 /* ── Bulk Test Modal 탭 전환 ── */
 function switchModalTab(tab) {
+  if (!['single','multi','portscan'].includes(tab)) return;
   document.querySelectorAll('.modal-tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.mtab === tab)
+    { t.classList.toggle('active', t.dataset.mtab === tab);
+      t.setAttribute('aria-selected', String(t.dataset.mtab === tab)); }
   );
   document.querySelectorAll('.modal-tab-content').forEach(c => {
     const on = c.id === `mtab-${tab}`;
@@ -3750,8 +3753,13 @@ function switchModalTab(tab) {
 }
 
 /* ── Bulk Test Modal ── */
-function openBulkModal() {
-  if (!state.payloads) { toast('페이로드를 먼저 로드하세요', 'error'); return; }
+function initBulkWorkspace() {
+  const page=document.getElementById('bulkWorkspace'), bulk=document.getElementById('bulkModal');
+  if(bulk.parentElement!==page) { page.append(bulk); bulk.classList.remove('hidden'); }
+  if (!state.payloads) return;
+
+  if (bulk.dataset.ready) return;
+  bulk.dataset.ready='true';
 
   const opts = state.payloads.categories.map(c =>
     `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
@@ -3761,7 +3769,7 @@ function openBulkModal() {
 
   // URL 자동 채우기
   const currentUrl = document.getElementById('urlInput').value.trim();
-  if (currentUrl) {
+  if (currentUrl && !document.getElementById('bulkUrl').value) {
     document.getElementById('bulkUrl').value    = currentUrl;
     document.getElementById('multiUrls').value  = currentUrl;
     document.getElementById('scanHosts').value   =
@@ -3772,11 +3780,12 @@ function openBulkModal() {
   loadMultiPayloadList(document.getElementById('multiCategory').value);
   switchMultiPayloadMode('custom');   // 다중 타겟은 기본 '직접 입력'(공격 구문 자동 삽입 방지)
   switchModalTab('single');
-  document.getElementById('bulkModal').classList.remove('hidden');
 }
 
+function openBulkModal() { switchView('bulk'); }
+
 function closeBulkModal() {
-  document.getElementById('bulkModal').classList.add('hidden');
+  if(state.activeView==='bulk') switchView('request');
 }
 
 function loadBulkPayloadList(catId) {
@@ -3886,7 +3895,6 @@ async function runMultiTargetTest() {
 
   requestBody.custom_alert_rules = getCustomAlertRules();   // 단일 전송과 같은 룰셋
 
-  closeBulkModal();
   showLoadingOverlay(`${urls.length}개 대상 테스트 중...`);
 
   try {
@@ -4056,7 +4064,6 @@ async function runTlsScan() {
   const host = hostsRaw.split('\n').map(h => h.trim()).filter(Boolean)[0];
   const timeout = parseFloat(document.getElementById('scanTimeout').value) || 8;
 
-  closeBulkModal();
   showLoadingOverlay(`${host} TLS 점검 중…`);
   try {
     const res = await fetch('/api/tls-scan', {
@@ -4119,7 +4126,6 @@ async function runPortScan() {
   const ports    = portsRaw ? parsePorts(portsRaw) : [];
   const timeout  = parseFloat(document.getElementById('scanTimeout').value) || 2;
 
-  closeBulkModal();
   showLoadingOverlay(`${hosts.length}개 호스트 포트 스캔 중...`);
 
   try {
@@ -4244,7 +4250,6 @@ async function runBulkTest() {
 
   if (!checkedIds.length) { toast('페이로드를 선택하세요', 'error'); return; }
 
-  closeBulkModal();
   showLoadingOverlay(`0 / ${checkedIds.length} 테스트 중...`);
 
   try {
@@ -4457,14 +4462,20 @@ function renderProgressBar(label, value, total, color) {
 
 /* ── View Switching ── */
 function switchView(view) {
-  if (!['request', 'results', 'agent', 'report'].includes(view)) return;
+  if (!['request', 'results', 'agent', 'report', 'assets', 'findings', 'traffic', 'settings', 'bulk'].includes(view)) return;
   state.activeView = view;
+  const reportButton = document.getElementById('reportGenerateBtn');
+  if (reportButton) reportButton.disabled = !state.bulkResults;
   document.body.dataset.view = view;
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === view));
   document.querySelectorAll('.topbar-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   if (window.syncWorkspace) window.syncWorkspace(view);
   // 자율 검증 뷰로 전환하면 목록·반출 정책을 (재)로드한다(agent.js 에서 정의).
   if (view === 'agent' && window.openAgentView) window.openAgentView();
+  if (view === 'assets') openAssets();
+  if (view === 'findings' || view === 'traffic') openGlobalLookup(view);
+  if (view === 'settings') openOps();
+  if (view === 'bulk') initBulkWorkspace();
 }
 
 /* ══════════════════════════════════════════════════════════════════

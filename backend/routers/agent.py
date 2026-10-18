@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Literal
 
@@ -10,9 +11,15 @@ from core.agent_findings import build_report_html
 from core.agent_evidence_export import build_finding_evidence_zip
 from core.agent_archive import MAX_ARCHIVE_BYTES
 from core.agent_models import RunSpec, IncidentEvent
+from core import agent_browser_recon
 from core.plan import plan_fingerprint
 
 router = APIRouter(prefix='/api/agent', tags=['context-agent'])
+
+
+@router.get('/browser/readiness')
+async def browser_readiness():
+    return await asyncio.to_thread(agent_browser_recon.readiness)
 
 
 class ResumeRequest(BaseModel):

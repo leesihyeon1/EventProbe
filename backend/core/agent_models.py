@@ -46,7 +46,7 @@ class VerificationGoal(Contract):
     """A local completion condition; goal text is never added to model context."""
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,32}$')
     title: str = Field(min_length=1, max_length=200)
-    category: Literal['sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql', 'access']
+    category: Literal['sqli', 'auth', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql', 'access']
     completion: Literal['tested', 'confirmed'] = 'tested'
     endpoint_id: str = Field(default='', max_length=40)
     actor_id: str = Field(default='', max_length=32)
@@ -61,7 +61,7 @@ class IncidentEvent(Contract):
     observed_at: float | None = None                         # field observation time (epoch seconds)
     asset_id: str = Field(default='', max_length=120)         # common asset correlation id
     traffic_id: str = Field(default='', max_length=120)       # request/flow correlation id
-    category: Literal['sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql', 'access']
+    category: Literal['sqli', 'auth', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql', 'access']
     title: str = Field(min_length=1, max_length=200)          # local-only description
     summary: str = Field(default='', max_length=2000)         # local-only description
     request: AgentRequest | None = None                      # optional skeleton to re-verify
@@ -81,6 +81,7 @@ class RunSpec(Contract):
     goal: str = Field(min_length=1, max_length=2000)
     goals: list[VerificationGoal] = Field(default_factory=list, max_length=20)
     request: AgentRequest
+    protected_marker: str = Field(default='', max_length=200)
     target_scope: Literal['request_only', 'same_origin'] = 'same_origin'
     actors: list[Actor] = Field(default_factory=lambda: [Actor(id='current')], min_length=1, max_length=8)
     objects: list[ObjectPolicy] = Field(default_factory=list, max_length=20)
@@ -94,7 +95,7 @@ class RunSpec(Contract):
     allowed_path_prefixes: list[str] = Field(default_factory=list, max_length=40)
     denied_path_prefixes: list[str] = Field(default_factory=list, max_length=40)
     allowed_methods: list[Literal['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']] = Field(default_factory=list, max_length=6)
-    allowed_categories: list[Literal['sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql']] = Field(default_factory=list, max_length=8)
+    allowed_categories: list[Literal['sqli', 'auth', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql']] = Field(default_factory=list, max_length=9)
     share_response_context: bool = False
     # 'iterative'(기본): 매 단계 planner 호출(응답 되먹임). 'plan': 응답-블라인드 — 비식별 입력으로
     # 계획을 1회 생성하고 실행 중 분기는 로컬에서 처리(리뷰 Stage 3).
@@ -107,6 +108,8 @@ class RunSpec(Contract):
 
     @model_validator(mode='after')
     def check_scope(self):
+        if self.protected_marker and len(self.protected_marker) < 8:
+            raise ValueError('보호 콘텐츠 표식은 8자 이상이어야 합니다.')
         if self.approved_plan is not None:
             self.mode = 'plan'   # 승인된 계획은 응답-블라인드 실행에만 의미가 있다
             if self.approved_plan_expires_at is None:
@@ -156,9 +159,17 @@ class Action(Contract):
     expected: str = Field(default='', max_length=500)
     endpoint_id: str = 'seed'
     actor_id: str = 'current'
-    category: Literal['', 'sqli', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql'] = ''
+    category: Literal['', 'sqli', 'auth', 'xss', 'ssti', 'lfi', 'ssrf', 'cmdi', 'redirect', 'nosql'] = ''
+    confirmation_profile: Literal['full', 'sql_string', 'sql_numeric', 'sql_comment', 'sql_login'] = 'full'
     location: Literal['param', 'body', 'header'] = 'param'
     param: str = Field(default='', max_length=100)
     payload: str = Field(default='', max_length=4000)
     object_id: str = ''
     basis: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode='after')
+    def check_confirmation_profile(self):
+        if self.confirmation_profile != 'full' and (self.kind != 'confirm' or
+            (self.category != 'sqli' and not (self.category == 'auth' and self.confirmation_profile == 'sql_login'))):
+            raise ValueError('SQL 대조 프로필은 SQL confirm 행동에만 사용할 수 있습니다.')
+        return self

@@ -1,6 +1,28 @@
 """Bounded metadata for local graph, sitemap, and coverage views."""
 
+import json
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+
+def request_field_keys(request):
+    if not isinstance(request, dict):
+        return []
+    body = request.get('body')
+    if not isinstance(body, str) or len(body) > 65536:
+        return []
+    headers = request.get('headers') or {}
+    content_type = str(headers.get('Content-Type', headers.get('content-type', ''))).lower() if isinstance(headers, dict) else ''
+    try:
+        if 'json' in content_type:
+            parsed = json.loads(body)
+            keys = parsed.keys() if isinstance(parsed, dict) else []
+        elif 'application/x-www-form-urlencoded' in content_type:
+            keys = [key for key, _ in parse_qsl(body, keep_blank_values=True)]
+        else:
+            return []
+        return sorted({key[:100] for key in keys if isinstance(key, str) and key})[:100]
+    except (ValueError, TypeError):
+        return []
 
 
 def map_request(request):
@@ -17,6 +39,7 @@ def map_request(request):
                                    urlencode([(key, '') for key in keys]), ''))
         params = request.get('params') or {}
         result['params'] = {key: '' for key in params} if isinstance(params, dict) else {}
+        result['body_fields'] = request_field_keys(request)
     except (TypeError, ValueError):
         pass
     return result
@@ -28,7 +51,8 @@ def map_event(event):
     data = event.get('data') or {}
     out = {key: event[key] for key in ('id', 'created', 'kind', 'step_id')}
     if kind == 'action':
-        fields = ('kind', 'category', 'endpoint_id', 'actor_id', 'basis')
+        fields = ('kind', 'category', 'endpoint_id', 'actor_id', 'basis',
+                  'confirmation_profile', 'param')
         out['data'] = {key: data[key] for key in fields if key in data}
     elif kind == 'request_started':
         out['data'] = {'request': map_request(data.get('request')),
@@ -45,6 +69,15 @@ def map_event(event):
         out['data'] = {key: data[key] for key in ('status', 'evidence_ids', 'category') if key in data}
     elif kind == 'discovery':
         out['data'] = {key: data[key] for key in ('endpoint_id', 'source_observation_id') if key in data}
+    elif kind == 'browser_discovery':
+        out['data'] = {key: data[key] for key in ('endpoint_id', 'request_id', 'resource_type') if key in data}
+    elif kind == 'browser_request':
+        out['data'] = {'request': map_request(data.get('request')),
+                       'resource_type': data.get('resource_type')}
+    elif kind == 'browser_response':
+        out['data'] = {key: data[key] for key in ('request_id', 'status') if key in data}
+    elif kind == 'verification_skipped':
+        out['data'] = {key: data[key] for key in ('endpoint_id', 'category', 'code') if key in data}
     elif kind == 'request_error':
         out['data'] = {'request_id': data.get('request_id'), 'reason': '요청 실패'}
     elif kind == 'plan':

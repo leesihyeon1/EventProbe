@@ -11,6 +11,54 @@ from routers.agent import _guard, _principal
 router = APIRouter(prefix='/api/agent/history', tags=['agent-history'])
 
 
+@router.get('/assets')
+def global_assets(request: Request, search: str = Query('', max_length=200),
+                  archived: bool = False, offset: int = Query(0, ge=0),
+                  limit: int = Query(50, ge=1, le=100)):
+    """Read-only, owner-scoped asset index; response and query values never leave storage."""
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.asset_page(search=search, archived=archived,
+                                          owner=owner, offset=offset, limit=limit)
+
+
+@router.get('/traffic')
+def global_traffic(request: Request, search: str = Query('', max_length=200),
+                   run_id: str = Query('', max_length=64), asset_id: str = Query('', max_length=64),
+                   method: str = Query('', max_length=16), source: str = Query('', max_length=16),
+                   archived: bool = False, offset: int = Query(0, ge=0),
+                   limit: int = Query(50, ge=1, le=100)):
+    if source and source not in ('agent', 'browser'):
+        raise HTTPException(422, '지원하지 않는 출처입니다.')
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.lookup_page(
+        'traffic', search=search, run_id=run_id, asset_id=asset_id, method=method,
+        source=source, archived=archived, owner=owner, offset=offset, limit=limit)
+
+
+@router.get('/findings')
+def global_findings(request: Request, search: str = Query('', max_length=200),
+                    run_id: str = Query('', max_length=64), asset_id: str = Query('', max_length=64),
+                    verdict: str = Query('', max_length=20), status: str = Query('', max_length=20),
+                    archived: bool = False, offset: int = Query(0, ge=0),
+                    limit: int = Query(50, ge=1, le=100)):
+    if verdict and verdict not in ('confirmed', 'suspicious', 'inconclusive'):
+        raise HTTPException(422, '지원하지 않는 판정입니다.')
+    if status and status not in ('open', 'triaged', 'resolved', 'false_positive', 'ignored'):
+        raise HTTPException(422, '지원하지 않는 상태입니다.')
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.lookup_page(
+        'finding', search=search, run_id=run_id, asset_id=asset_id,
+        verdict=verdict, status=status, archived=archived, owner=owner,
+        offset=offset, limit=limit)
+
+
+@router.get('/diagnostics')
+def run_diagnostics(request: Request, offset: int = Query(0, ge=0),
+                    limit: int = Query(20, ge=1, le=100)):
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.diagnostic_page(owner=owner, offset=offset, limit=limit)
+
+
 @router.get('/runs/{run_id}/status')
 def run_status(run_id: str, request: Request):
     """A small poll payload; no event bodies, target URLs, or credentials."""
@@ -34,7 +82,7 @@ def run_status(run_id: str, request: Request):
                      **{key: status[key] for key in
                         ('has_approved_plan', 'plan_checkpoint', 'name', 'category',
                          'steps', 'requests', 'ai_calls', 'elapsed', 'endpoints_count',
-                         'reason', 'retest_of')}}}
+                         'reason', 'retest_of', 'archived')}}}
 
 
 @router.get('/runs/{run_id}/findings')
@@ -62,7 +110,7 @@ def run_map(run_id: str, request: Request):
     status = run_status(run_id, request)
     status['data']['endpoints'] = view['data']['endpoints']
     status['data']['spec']['request'] = view['data']['spec_request']
-    return {**status, 'events': view['events'], 'conclusion': view['conclusion'],
+    return {**status, 'events': view['events'], 'conclusion': view['conclusion'], 'recon': view['recon'],
             'compact': True, 'view': 'map'}
 
 

@@ -65,7 +65,7 @@ function addGoalRow(g = {}) {
     for (const [id, label] of values) { const option = document.createElement('option'); option.value = id; option.textContent = label; el.append(option); }
     el.value = value || values[0][0]; return el;
   };
-  options.append(select('goal-category', ['sqli','xss','ssti','lfi','ssrf','cmdi','redirect','nosql','access'].map(x=>[x,x]), g.category),
+  options.append(select('goal-category', ['sqli','auth','xss','ssti','lfi','ssrf','cmdi','redirect','nosql','access'].map(x=>[x,x]), g.category),
     select('goal-completion', [['tested','증거 있는 검사'],['confirmed','취약성 확증']], g.completion),
     _mkInput('goal-actor', '계정 ID(선택)', g.actor_id));
   const endpoint = _mkInput('goal-endpoint', '엔드포인트 ID(선택 · seed)', g.endpoint_id);
@@ -177,12 +177,25 @@ function initAgentView() {
 // 자율 검증 탭으로 전환할 때(switchView 훅) 호출된다.
 async function openAgentView() {
   initAgentView();
-  await Promise.all([loadEgressPolicy(), loadAgentList()]);
+  await Promise.all([loadEgressPolicy(), loadAgentList(), loadBrowserReadiness()]);
   const hashId = (location.hash.match(/^#agent\/(\w+)/) || [])[1];
   if (hashId && hashId !== agentRunId) selectRun(hashId);
   else if (agentRunId) pollAgent();
 }
 window.openAgentView = openAgentView;
+
+async function loadBrowserReadiness() {
+  const node=agentEl('agentBrowserState');
+  const labels={playwright_unavailable:'Playwright 미설치',browser_missing:'브라우저 실행 파일 없음',
+    browser_launch_failed:'브라우저 실행 실패',browser_timeout:'브라우저 시간 초과',
+    websocket_guard_unavailable:'웹소켓 차단 기능 없음'};
+  try {
+    const result=await agentApi('/browser/readiness');
+    node.dataset.mode=result.ready?'ready':'error';
+    node.textContent=result.ready?`브라우저 준비됨 · ${result.engine} ${result.version} · 동일 출처 GET 통신 수집`:
+      `브라우저 사용 불가 · ${labels[result.code]||result.code}`;
+  } catch (_) {node.dataset.mode='error';node.textContent='브라우저 준비 상태 확인 실패';}
+}
 
 // 이전 진입점 호환 — 모달 대신 뷰로 전환한다.
 function openAgent() { switchView('agent'); }
@@ -808,7 +821,7 @@ function selectRun(id) {
   if(typeof timelineState!=='undefined') timelineState.runId=null;
   if(typeof historyState!=='undefined') historyState.runId=null;
   showAgentDetail();
-  try { history.replaceState(null, '', '#agent/' + id); } catch (e) {}
+  try { history.pushState(null, '', agentDetailRoute(id)); } catch (e) {}
   const ev = agentEl('agentEvents');
   if (ev) { ev.replaceChildren(); ev.dataset.run = ''; }
   pollAgent();
@@ -847,6 +860,7 @@ function _collectSpec() {
   const csv = id => (agentEl(id)?.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   return {
     goal: agentEl('agentGoal').value,
+    protected_marker: agentEl('agentProtectedMarker')?.value || '',
     goals: collectGoals(),
     request: { method: form.method, url: form.url, params: form.params, body: form.body || '', headers },
     target_scope: domain ? 'same_origin' : (agentEl('agentTargetScope')?.value || 'request_only'),
@@ -1118,7 +1132,7 @@ async function pollAgent() {
       else loadAgentList();
       return;
     }
-    if(['graph','sitemap','coverage'].includes(mode)) {
+    if(['graph','sitemap','explore','traffic','coverage'].includes(mode)) {
       if(_awRun?.id===id) {
         const status=await agentApi('/history/runs/'+encodeURIComponent(id)+'/status');
         if(id!==agentRunId || mode!==agentDetailMode) return;

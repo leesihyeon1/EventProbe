@@ -8,6 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.agent_archive import build_archive, read_archive
+from core.agent_assets import reindex_run
+from core.agent_indexes import (FINDING_KINDS, TRAFFIC_KINDS, index_traffic_event,
+                                reindex_findings, reindex_run as reindex_lookup_run)
 
 
 def uid():
@@ -56,6 +59,28 @@ class Store:
                     name TEXT NOT NULL, category TEXT NOT NULL, spec TEXT NOT NULL,
                     owner TEXT NOT NULL, PRIMARY KEY(template_id,version));
                 CREATE TABLE IF NOT EXISTS store_migrations (name TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS assets (
+                    id TEXT PRIMARY KEY, origin TEXT NOT NULL, method TEXT NOT NULL,
+                    path TEXT NOT NULL, query_keys TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS asset_refs (
+                    run_id TEXT NOT NULL, endpoint_id TEXT NOT NULL, asset_id TEXT NOT NULL,
+                    field_keys TEXT NOT NULL, PRIMARY KEY(run_id,endpoint_id));
+                CREATE INDEX IF NOT EXISTS asset_refs_asset ON asset_refs(asset_id,run_id);
+                CREATE TABLE IF NOT EXISTS traffic_index (
+                    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created REAL NOT NULL,
+                    source TEXT NOT NULL, method TEXT NOT NULL, origin TEXT NOT NULL,
+                    path TEXT NOT NULL, status INTEGER, asset_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS traffic_index_run ON traffic_index(run_id,created DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS traffic_index_asset ON traffic_index(asset_id,created DESC,id DESC);
+                CREATE TABLE IF NOT EXISTS finding_index (
+                    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created REAL NOT NULL,
+                    updated REAL NOT NULL, category TEXT NOT NULL, verdict TEXT NOT NULL,
+                    status TEXT NOT NULL, severity TEXT NOT NULL, method TEXT NOT NULL,
+                    origin TEXT NOT NULL, path TEXT NOT NULL, asset_id TEXT NOT NULL,
+                    evidence_count INTEGER NOT NULL, incomplete_evidence INTEGER NOT NULL);
+                CREATE INDEX IF NOT EXISTS finding_index_run ON finding_index(run_id,updated DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS finding_index_asset ON finding_index(asset_id,updated DESC,id DESC);
                 CREATE TABLE IF NOT EXISTS incidents (
                     id TEXT PRIMARY KEY, created REAL NOT NULL, source TEXT NOT NULL,
                     asset_id TEXT NOT NULL, traffic_id TEXT NOT NULL, category TEXT NOT NULL,
@@ -73,6 +98,17 @@ class Store:
             db.execute('INSERT OR IGNORE INTO template_revisions '
                        '(template_id,version,created,name,category,spec,owner) '
                        'SELECT id,1,created,name,category,spec,owner FROM templates')
+            if db.execute("SELECT 1 FROM store_migrations WHERE name='asset_index_v1'").fetchone() is None:
+                for row in db.execute('SELECT id,data FROM runs').fetchall():
+                    try:
+                        reindex_run(db, row['id'], json.loads(row['data']))
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+                db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('asset_index_v1')")
+            if db.execute("SELECT 1 FROM store_migrations WHERE name='lookup_index_v1'").fetchone() is None:
+                for row in db.execute('SELECT id FROM runs').fetchall():
+                    reindex_lookup_run(db, row['id'])
+                db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('lookup_index_v1')")
             if db.execute("SELECT 1 FROM store_migrations WHERE name='template_headers_v1'").fetchone() is None:
                 for table in ('templates', 'template_revisions'):
                     for row in db.execute(f'SELECT rowid,spec FROM {table}').fetchall():
@@ -101,6 +137,7 @@ class Store:
         with self.connect() as db:
             db.execute('INSERT INTO runs VALUES (?,?,?,?,?)',
                        (run_id, time.time(), time.time(), 'paused', json.dumps(data, ensure_ascii=False)))
+            reindex_run(db, run_id, data)
         return run_id
 
     def get(self, run_id):
@@ -134,6 +171,7 @@ class Store:
                 "json_extract(data,'$.plan_checkpoint') AS plan_checkpoint,"
                 "COALESCE(json_extract(data,'$.name'),'') AS name,"
                 "COALESCE(json_extract(data,'$.category'),'') AS category,"
+                "COALESCE(json_extract(data,'$.archived'),0) AS archived,"
                 "COALESCE(json_extract(data,'$.steps'),0) AS steps,"
                 "COALESCE(json_extract(data,'$.requests'),0) AS requests,"
                 "COALESCE(json_extract(data,'$.ai_calls'),0) AS ai_calls,"
@@ -151,6 +189,7 @@ class Store:
         result = dict(row)
         result['plan_checkpoint'] = json.loads(result['plan_checkpoint']) if result['plan_checkpoint'] else None
         result['has_approved_plan'] = bool(result['has_approved_plan'])
+        result['archived'] = bool(result['archived'])
         result['endpoints_count'] = endpoints_count
         return result
 
@@ -184,6 +223,8 @@ class Store:
             db.executemany('INSERT INTO events VALUES (?,?,?,?,?,?)',
                            [(event['id'], run['id'], event['created'], event['kind'], event['step_id'],
                              json.dumps(event['data'], ensure_ascii=False)) for event in events])
+            reindex_run(db, run['id'], data)
+            reindex_lookup_run(db, run['id'])
         return {'id': run['id'], 'state': run['state'], 'archived': True,
                 'event_count': len(events)}
 
@@ -192,6 +233,7 @@ class Store:
         with self.connect() as db:
             db.execute('UPDATE runs SET updated=?,state=?,data=? WHERE id=?',
                        (time.time(), state, json.dumps(data, ensure_ascii=False), run_id))
+            reindex_run(db, run_id, data)
 
     def set_run_metadata(self, run_id, name, category):
         """Edit display fields atomically without overwriting evidence or an active run."""
@@ -253,6 +295,144 @@ class Store:
                         'archived': bool(data.get('archived'))})
         return out
 
+    def asset_page(self, search='', archived=False, owner=None, limit=50, offset=0):
+        """Page distinct assets, then fetch only matching run provenance."""
+        scope = "COALESCE(json_extract(r.data,'$.archived'),0)=?"
+        scope_params = [int(bool(archived))]
+        if owner is not None:
+            scope += " AND COALESCE(json_extract(r.data,'$.owner'),'') IN ('',?)"
+            scope_params.append(owner)
+        where = ('EXISTS (SELECT 1 FROM asset_refs ar JOIN runs r ON r.id=ar.run_id '
+                 f'WHERE ar.asset_id=a.id AND {scope})')
+        params = list(scope_params)
+        if search:
+            where += (' AND (instr(lower(a.origin),lower(?))>0 OR '
+                      'instr(lower(a.path),lower(?))>0 OR '
+                      'instr(lower(a.method),lower(?))>0 OR '
+                      'instr(lower(a.query_keys),lower(?))>0)')
+            params.extend([search] * 4)
+        with self.connect() as db:
+            total = db.execute(f'SELECT COUNT(*) FROM assets a WHERE {where}', params).fetchone()[0]
+            page = db.execute('SELECT a.* FROM assets a WHERE ' + where +
+                              ' ORDER BY a.origin,a.path,a.method,a.id LIMIT ? OFFSET ?',
+                              (*params, limit, offset)).fetchall()
+            result = []
+            for asset in page:
+                refs = db.execute(
+                    'SELECT ar.endpoint_id,ar.field_keys,r.id AS run_id,r.created,r.updated,r.state,'
+                    "COALESCE(json_extract(r.data,'$.name'),'') AS name "
+                    'FROM asset_refs ar JOIN runs r ON r.id=ar.run_id '
+                    f'WHERE ar.asset_id=? AND {scope} ORDER BY r.created DESC,r.id DESC',
+                    (asset['id'], *scope_params),
+                ).fetchall()
+                runs = {}
+                fields = set()
+                for ref in refs:
+                    fields.update(json.loads(ref['field_keys']))
+                    runs.setdefault(ref['run_id'], {'id': ref['run_id'], 'name': ref['name'],
+                                                    'state': ref['state'], 'created': ref['created']})
+                result.append({'id': asset['id'], 'origin': asset['origin'],
+                               'method': asset['method'], 'path': asset['path'],
+                               'query': json.loads(asset['query_keys']), 'fields': sorted(fields),
+                               'run_count': len(runs), 'runs': list(runs.values())[:20],
+                               'first_seen': min(ref['created'] for ref in refs),
+                               'last_seen': max(ref['updated'] for ref in refs)})
+        return {'assets': result, 'total': total, 'offset': offset, 'limit': limit,
+                'has_more': offset + len(result) < total}
+
+    def lookup_page(self, kind, *, search='', run_id='', asset_id='', archived=False,
+                    owner=None, method='', source='', verdict='', status='',
+                    limit=50, offset=0):
+        """Server-side search over value-free traffic/finding projections."""
+        if kind not in ('traffic', 'finding'):
+            raise ValueError('Unknown lookup kind')
+        table = 'traffic_index' if kind == 'traffic' else 'finding_index'
+        alias = 'x'
+        clauses = ["COALESCE(json_extract(r.data,'$.archived'),0)=?"]
+        params = [int(bool(archived))]
+        if owner is not None:
+            clauses.append("COALESCE(json_extract(r.data,'$.owner'),'') IN ('',?)")
+            params.append(owner)
+        if run_id:
+            clauses.append('x.run_id=?')
+            params.append(run_id)
+        if asset_id:
+            clauses.append('x.asset_id=?')
+            params.append(asset_id)
+        if method:
+            clauses.append('x.method=?')
+            params.append(method.upper())
+        if kind == 'traffic' and source:
+            clauses.append('x.source=?')
+            params.append(source)
+        if kind == 'finding' and verdict:
+            clauses.append('x.verdict=?')
+            params.append(verdict)
+        if kind == 'finding' and status:
+            clauses.append('x.status=?')
+            params.append(status)
+        if search:
+            columns = ['x.origin', 'x.path', 'x.method']
+            if kind == 'finding':
+                columns.append('x.category')
+            clauses.append('(' + ' OR '.join(f'instr(lower({col}),lower(?))>0'
+                                              for col in columns) + ')')
+            params.extend([search] * len(columns))
+        where = ' AND '.join(clauses)
+        order = 'x.created' if kind == 'traffic' else 'x.updated'
+        with self.connect() as db:
+            total = db.execute(f'SELECT COUNT(*) FROM {table} x JOIN runs r ON r.id=x.run_id '
+                               f'WHERE {where}', params).fetchone()[0]
+            rows = db.execute(f'SELECT x.* FROM {table} x JOIN runs r ON r.id=x.run_id '
+                              f'WHERE {where} ORDER BY {order} DESC,x.id DESC LIMIT ? OFFSET ?',
+                              (*params, limit, offset)).fetchall()
+        items = [dict(row) for row in rows]
+        if kind == 'finding':
+            for item in items:
+                item['incomplete_evidence'] = bool(item['incomplete_evidence'])
+        return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
+                'has_more': offset + len(items) < total}
+
+    def diagnostic_page(self, *, owner=None, limit=20, offset=0):
+        """Durable per-run stop and tool metadata; no requests or evidence bodies."""
+        where = "COALESCE(json_extract(data,'$.archived'),0)=0"
+        params = []
+        if owner is not None:
+            where += " AND COALESCE(json_extract(data,'$.owner'),'') IN ('',?)"
+            params.append(owner)
+        with self.connect() as db:
+            total = db.execute(f'SELECT COUNT(*) FROM runs WHERE {where}', params).fetchone()[0]
+            rows = db.execute(
+                'SELECT id,created,updated,state,'
+                "COALESCE(json_extract(data,'$.name'),'') AS name,"
+                "COALESCE(json_extract(data,'$.reason'),'') AS reason,"
+                "COALESCE(json_extract(data,'$.spec.policy_version'),1) AS policy_version,"
+                "COALESCE(json_extract(data,'$.ai_calls'),0) AS ai_calls,"
+                "json_extract(data,'$.planner_attempts') AS planner_attempts,"
+                "json_extract(data,'$.procedure_sha256.agent') AS procedure_sha256 "
+                f'FROM runs WHERE {where} ORDER BY updated DESC,id DESC LIMIT ? OFFSET ?',
+                (*params, limit, offset),
+            ).fetchall()
+            items = []
+            for row in rows:
+                item = dict(row)
+                attempts = json.loads(item.pop('planner_attempts') or '[]')
+                item['model'] = next((str(a.get('model')) for a in reversed(attempts)
+                                      if a.get('model')), '')
+                item['planner_failures'] = sum(a.get('status') == 'rejected' for a in attempts)
+                item['planner_elapsed_ms'] = sum(a.get('elapsed_ms') or 0 for a in attempts)
+                item['token_count'] = None  # Provider usage was not captured for this run.
+                browser = db.execute(
+                    "SELECT json_extract(data,'$.code') AS code,"
+                    "json_extract(data,'$.status') AS status FROM events "
+                    "WHERE run_id=? AND kind='browser_recon' ORDER BY created DESC,rowid DESC LIMIT 1",
+                    (item['id'],),
+                ).fetchone()
+                item['browser_status'] = (browser['code'] or browser['status']) if browser else None
+                items.append(item)
+        return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
+                'has_more': offset + len(items) < total}
+
     def _audit_deletion(self, db, run_id, row, events, reason):
         """삭제 감사 레코드를 남긴다(리뷰 P4: 증거 삭제/감사). deletions 테이블은 삭제·보존 정리의
         대상이 아니므로 run/증거가 사라져도 '무엇을·언제·왜 지웠는지'는 남는다. 응답 원문·URL 은
@@ -272,7 +452,12 @@ class Store:
                 n = db.execute('SELECT COUNT(*) AS c FROM events WHERE run_id=?', (run_id,)).fetchone()['c']
                 self._audit_deletion(db, run_id, row, n, reason)
             db.execute('DELETE FROM events WHERE run_id=?', (run_id,))
+            db.execute('DELETE FROM traffic_index WHERE run_id=?', (run_id,))
+            db.execute('DELETE FROM finding_index WHERE run_id=?', (run_id,))
+            db.execute('DELETE FROM asset_refs WHERE run_id=?', (run_id,))
             cur = db.execute('DELETE FROM runs WHERE id=?', (run_id,))
+            db.execute('DELETE FROM assets WHERE NOT EXISTS '
+                       '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id)')
         return cur.rowcount > 0
 
     def deletions(self, limit=100):
@@ -404,7 +589,12 @@ class Store:
             if ids:
                 marks = ','.join('?' * len(ids))
                 db.execute(f'DELETE FROM events WHERE run_id IN ({marks})', ids)
+                db.execute(f'DELETE FROM traffic_index WHERE run_id IN ({marks})', ids)
+                db.execute(f'DELETE FROM finding_index WHERE run_id IN ({marks})', ids)
+                db.execute(f'DELETE FROM asset_refs WHERE run_id IN ({marks})', ids)
                 db.execute(f'DELETE FROM runs WHERE id IN ({marks})', ids)
+                db.execute('DELETE FROM assets WHERE NOT EXISTS '
+                           '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id)')
         return len(ids)
 
     def create_incident(self, incident, owner=''):
@@ -500,9 +690,15 @@ class Store:
 
     def event(self, run_id, kind, data, step_id='', event_id=None):
         event_id = event_id or uid()
+        created = time.time()
         with self.connect() as db:
-            db.execute('INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)',
-                       (event_id, run_id, time.time(), kind, step_id, json.dumps(data, ensure_ascii=False)))
+            inserted = db.execute('INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)',
+                                  (event_id, run_id, created, kind, step_id,
+                                   json.dumps(data, ensure_ascii=False))).rowcount
+            if inserted and kind in TRAFFIC_KINDS:
+                index_traffic_event(db, event_id, run_id, created, kind, data)
+            if inserted and kind in FINDING_KINDS:
+                reindex_findings(db, run_id)
         return event_id
 
     def events(self, run_id):

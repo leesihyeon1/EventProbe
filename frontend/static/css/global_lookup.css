@@ -1,0 +1,16 @@
+.lookup-page { max-width:1200px; min-height:100%; margin:auto; padding:28px 32px; }
+.lookup-page h1 { margin:0 0 20px; font-size:23px; }
+.lookup-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+.lookup-toolbar input[type=search] { min-width:min(320px,100%); flex:1; }
+.lookup-toolbar select,.lookup-toolbar label { min-height:34px; }
+.lookup-toolbar label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.lookup-rows { display:grid; gap:8px; margin-top:14px; }
+.lookup-row { border:1px solid var(--border); border-radius:var(--radius); padding:14px; background:var(--bg-primary); min-width:0; }
+.lookup-row-top,.lookup-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+.lookup-row-top strong { overflow-wrap:anywhere; }
+.lookup-actions { justify-content:flex-start; margin-top:8px; }
+.lookup-evidence summary { cursor:pointer; color:var(--accent); }
+.lookup-body { max-height:340px; max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--bg-tertiary); padding:12px; border-radius:var(--radius); }
+.lookup-pages { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+.lookup-fields { margin:8px 0 0; padding-left:20px; display:flex; flex-wrap:wrap; gap:4px 22px; }
+@media(max-width:800px) { .lookup-page { padding:18px 14px; } .lookup-toolbar>* { max-width:100%; } }

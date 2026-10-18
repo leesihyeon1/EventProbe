@@ -2,7 +2,7 @@
 let workspaceRuns = [], workspacePage = 0;
 const workspaceSelectedIds = new Set();
 const workspacePageSize = 10;
-const WORKSPACE_TITLES = {agent:'자율 검증', request:'요청 / 분석', results:'일괄 테스트 결과', report:'검증 리포트'};
+const WORKSPACE_TITLES = {agent:'자율 검증', assets:'Asset', findings:'발견', traffic:'트래픽', settings:'설정 · 감사', bulk:'일괄 테스트', request:'요청 / 분석', results:'일괄 테스트 결과', report:'검증 리포트'};
 function uiNode(tag, cls, text) {
   const el = document.createElement(tag); if (cls) el.className = cls;
   if (text !== undefined) el.textContent = text; return el;
@@ -13,14 +13,17 @@ function uiCommand(icon, label, action, cls='icon-button') {
 }
 function syncWorkspace(view) {
   agentEl('workspaceTitle').textContent = WORKSPACE_TITLES[view];
-  document.querySelectorAll('.workspace-links button').forEach(b => {
+  document.querySelectorAll('.workspace-links button[data-view]').forEach(b => {
     b.title=WORKSPACE_TITLES[b.dataset.view];
     if (b.dataset.view===view) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
   });
   document.body.classList.remove('mobile-nav-open'); updateNavToggle();
-  const hash = view==='agent' && agentRunId ? '#agent/'+agentRunId : '#'+view;
-  if (location.hash!==hash) history.replaceState(null,'',hash);
+  const hash = view==='agent' && agentRunId ? agentDetailRoute(agentRunId) : '#'+view;
+  if (location.hash!==hash) history.pushState(null,'',hash);
   if (view!=='agent') clearTimeout(agentTimer);
+}
+function agentDetailRoute(id) {
+  return '#agent/'+id+(agentDetailMode==='findings'?'':'/'+agentDetailMode);
 }
 function updateNavToggle() {
   const expanded=matchMedia('(max-width:800px)').matches ? document.body.classList.contains('mobile-nav-open') : !document.body.classList.contains('nav-collapsed');
@@ -35,7 +38,7 @@ function applyWorkspaceTheme(theme) {
 function showAgentList() {
   agentRunId=null; clearTimeout(agentTimer);
   agentEl('agentListView').hidden=false; agentEl('agentDetailView').hidden=true;
-  history.replaceState(null,'','#agent'); loadAgentList();
+  if(location.hash!=='#agent')history.pushState(null,'','#agent'); loadAgentList();
 }
 function showAgentDetail() {
   _awRun=null;
@@ -72,8 +75,8 @@ function syncAgentSource() {
   agentEl('agentTargetScope').disabled=domain;
   resetPlanPreview();
 }
-let agentDetailMode='history', _awRun=null;
-const DETAIL_VIEWS={timeline:['agentEvents','awTabTimeline'],history:['agentHistory','awTabHistory'],graph:['agentGraph','awTabGraph'],sitemap:['agentSiteMap','awTabSiteMap'],findings:['agentFindings','awTabFindings'],coverage:['agentCoverage','awTabCoverage']};
+let agentDetailMode='findings', _awRun=null;
+const DETAIL_VIEWS={findings:['agentFindings','awTabFindings'],sitemap:['agentSiteMap','awTabSiteMap'],explore:['agentExplore','awTabExplore'],traffic:['agentTraffic','awTabTraffic'],coverage:['agentCoverage','awTabCoverage'],graph:['agentGraph','awTabGraph'],timeline:['agentEvents','awTabTimeline'],history:['agentHistory','awTabHistory']};
 function syncDetailMode() {
   for(const [mode,[panel,tab]] of Object.entries(DETAIL_VIEWS)) {
     const selected=agentDetailMode===mode;
@@ -83,6 +86,8 @@ function syncDetailMode() {
   }
   if(_awRun && agentDetailMode==='graph') renderAgentGraph(_awRun);
   if(_awRun && agentDetailMode==='sitemap') renderAgentSiteMap(_awRun);
+  if(_awRun && agentDetailMode==='explore') renderAgentExplore(_awRun);
+  if(_awRun && agentDetailMode==='traffic') loadRunTraffic(_awRun.id,_awRun.data?.archived);
   if(_awRun && agentDetailMode==='findings') renderAgentFindings(_awRun);
   if(_awRun && agentDetailMode==='coverage') renderAgentCoverage(_awRun);
   if(_awRun && agentDetailMode==='history') loadHistoryPage();
@@ -90,14 +95,17 @@ function syncDetailMode() {
   if(timelineMore) timelineMore.hidden=agentDetailMode!=='timeline' ||
     !(typeof timelineState!=='undefined' && timelineState.hasMore);
   if(_awRun?.view==='timeline' && agentDetailMode==='timeline') loadTimelinePage();
-  if(agentDetailMode==='history') agentEl('agentConclusion').hidden=true;
-  else if(_awRun) renderAgentConclusion(_awRun.conclusion);
+  if(_awRun) renderAgentConclusion(_awRun.conclusion);
 }
 function setDetailMode(mode) {
   const previous=agentDetailMode;
-  agentDetailMode = Object.hasOwn(DETAIL_VIEWS,mode) ? mode : 'history';
+  agentDetailMode = Object.hasOwn(DETAIL_VIEWS,mode) ? mode : 'findings';
+  if(agentRunId && previous!==agentDetailMode && typeof location!=='undefined' && typeof history!=='undefined') {
+    const hash=agentDetailRoute(agentRunId);
+    if(location.hash!==hash)history.pushState(null,'',hash);
+  }
   try { localStorage.setItem('ep-detail-view', agentDetailMode); } catch(e) {}
-  const mapModes=['graph','sitemap','coverage'];
+  const mapModes=['graph','sitemap','explore','traffic','coverage'];
   const desired=mapModes.includes(agentDetailMode)?'map':agentDetailMode;
   const refresh=agentDetailMode!=='history' &&
     ((_awRun?.compact && _awRun.view!==desired) ||
@@ -132,6 +140,9 @@ function initAgentWorkspace() {
   agentEl('agentSearch').oninput=()=>{workspacePage=0;loadAgentList();};
   agentEl('agentFilter').onchange=()=>{workspacePage=0;saveAgentFilters();loadAgentList();};
   agentEl('agentCategory').oninput=()=>{workspacePage=0;saveAgentFilters();loadAgentList();};
+  agentEl('agentToolsMenu').ontoggle=()=>{
+    if(agentEl('agentToolsMenu').open) document.querySelectorAll('.aw-row-menu[open]').forEach(menu=>menu.open=false);
+  };
   agentEl('agentPrev').onclick=()=>{workspacePage--;loadAgentList();};
   agentEl('agentNext').onclick=()=>{workspacePage++;loadAgentList();};
   const modes=Object.keys(DETAIL_VIEWS);
@@ -158,7 +169,7 @@ function filteredAgentRuns(runs, search, stateFilter, categoryFilter='') {
     (!categoryFilter||r.category===categoryFilter) && (!q||`${r.name||''} ${r.goal} ${r.id}`.toLowerCase().includes(q)));
 }
 function emptyAgentRow(message, icon='FileSearch') {
-  const row=uiNode('tr'),cell=uiNode('td','aw-empty'); cell.colSpan=5;
+  const row=uiNode('tr'),cell=uiNode('td','aw-empty'); cell.colSpan=6;
   cell.append(epIcon(icon),uiNode('p','',message));row.append(cell);return row;
 }
 function renderAgentListError(message) {
@@ -184,12 +195,12 @@ function renderAgentList(result) {
   const start=workspacePage*workspacePageSize;
   for (const run of (server?filtered:filtered.slice(start,start+workspacePageSize))) {
     const row=uiNode('tr');row.dataset.run=run.id;
-    const task=uiNode('td'),title=uiNode('button','aw-task-title',run.name||run.goal||'목표 없음');title.type='button';title.title=run.goal;title.onclick=()=>selectRun(run.id);
+    const selection=uiNode('td','aw-select-cell'),task=uiNode('td'),title=uiNode('button','aw-task-title',run.name||run.goal||'목표 없음');title.type='button';title.title=run.goal;title.onclick=()=>selectRun(run.id);
     const check=uiNode('input');check.type='checkbox';check.setAttribute('aria-label',`작업 ${run.id.slice(0,8)} 선택`);
     check.onchange=()=>{if(check.checked)workspaceSelectedIds.add(run.id);else workspaceSelectedIds.delete(run.id);
       archiveBulk.disabled=!workspaceSelectedIds.size;
       stopBulk.disabled=_showArchived||!workspaceRuns.some(item=>workspaceSelectedIds.has(item.id)&&item.state==='running');};
-    task.append(check,title);
+    selection.append(check);task.append(title);
     if(run.category) task.append(uiNode('span','aw-plan-chip',run.category));
     const status=uiNode('td'),badge=uiNode('span','aw-badge',AGENT_STATE_LABELS[run.state]||run.state);badge.dataset.state=run.state;status.append(badge);
     const created=uiNode('td'),date=new Date(run.created*1000),time=uiNode('time','',date.toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}));time.dateTime=date.toISOString();created.append(time);
@@ -197,10 +208,19 @@ function renderAgentList(result) {
     const actions=uiNode('td'),buttons=uiNode('div','aw-row-actions');
     const archive=uiNode('button','aw-link',_showArchived?'복원':'보관');archive.type='button';
     archive.onclick=()=>_showArchived?unarchiveRun(run.id):archiveRun(run.id);
-    buttons.append(uiCommand('ArrowRight','작업 열기',()=>selectRun(run.id)),
-      uiCommand('Pencil','이름·분류 수정',()=>editRunMetadata(run),'icon-button'),
-      archive,uiCommand('Trash2','작업 및 증거 삭제',()=>deleteRun(run.id),'icon-button danger'));actions.append(buttons);
-    row.append(task,status,created,id,actions);list.append(row);
+    const menu=uiNode('details','aw-row-menu'),summary=uiNode('summary');
+    summary.setAttribute('aria-label','작업 관리');summary.title='작업 관리';summary.append(epIcon('Settings2'));
+    const options=uiNode('div','aw-row-menu-items');
+    const edit=uiCommand('Pencil','이름·분류 수정',()=>editRunMetadata(run),'aw-link');
+    edit.append(document.createTextNode('이름·분류 수정'));
+    const remove=uiCommand('Trash2','작업 및 증거 삭제',()=>deleteRun(run.id),'aw-link danger');
+    remove.append(document.createTextNode('작업 및 증거 삭제'));
+    options.append(edit,archive,remove);
+    menu.ontoggle=()=>{if(menu.open) {agentEl('agentToolsMenu').open=false;
+      document.querySelectorAll('.aw-row-menu[open]').forEach(other=>{if(other!==menu) other.open=false;});}};
+    menu.append(summary,options);
+    buttons.append(uiCommand('ArrowRight','작업 열기',()=>selectRun(run.id)),menu);actions.append(buttons);
+    row.append(selection,task,status,created,id,actions);list.append(row);
   }
   if (!filtered.length) list.append(emptyAgentRow(scopeTotal?'검색 결과가 없습니다.':'아직 검증 작업이 없습니다.'));
   agentEl('agentCount').textContent=`${total}개`;
@@ -218,10 +238,12 @@ function renderWorkspaceEvent(event) {
   types.plan_step_approval=['단계 승인 기록','CircleCheck'];
   types.plan_step_denied=['단계 거절 기록','CircleAlert'];
   types.discovery=['경로 발견','FileSearch'];types.discovery_limit=['경로 수집 한도','CircleAlert'];
+  types.browser_recon=['브라우저 탐색','Monitor'];types.planner_recovery=['검사 절차 선택','Crosshair'];
   const [label,icon]=types[event.kind]||[event.kind,'CircleDashed'];
   const summary=uiNode('summary'),heading=uiNode('span','aw-event-title');
-  const retryLabels={category_out_of_scope:'요청한 검사 유형 이탈',duplicate_action:'이전 행동 반복',missing_evidence_basis:'관측 근거 누락',invalid_action_schema:'행동 형식 오류',provider_temporary:'AI 연결 일시 오류',insufficient_request_budget:'검사 요청 예산 부족'};
-  const text=event.kind==='action'?`${d.kind} · ${d.hypothesis}`:event.kind==='observation'?`${d.request?.method||''} ${d.request?.url||''} · HTTP ${d.response?.status}`:event.kind==='verification'?`${d.status} · 증거 ${(d.evidence_ids||[]).length}개`:event.kind==='planner_retry'?`${retryLabels[d.code]||d.code} · ${d.attempt}/${d.max_attempts}`:d.text||d.reason||d.message||d.outcome||d.action_id||label;
+  const retryLabels={category_out_of_scope:'요청한 검사 유형 이탈',duplicate_action:'이전 행동 반복',missing_evidence_basis:'관측 근거 누락',invalid_evidence_basis:'현재 작업에 없는 증거 참조',invalid_action_schema:'행동 형식 오류',provider_temporary:'AI 연결 일시 오류',insufficient_request_budget:'검사 요청 예산 부족'};
+  const browserLabels={skipped_budget:'요청 또는 시간 예산 부족으로 건너뜀',unavailable:'브라우저 사용 불가',playwright_unavailable:'Playwright 미설치',browser_missing:'브라우저 실행 파일 없음',browser_launch_failed:'브라우저 실행 실패',browser_timeout:'탐색 시간 초과',websocket_guard_unavailable:'웹소켓 차단 기능 없음'};
+  const text=event.kind==='action'?`${d.kind} · ${d.hypothesis}`:event.kind==='observation'?`${d.request?.method||''} ${d.request?.url||''} · HTTP ${d.response?.status}`:event.kind==='verification'?`${d.status} · 증거 ${(d.evidence_ids||[]).length}개`:event.kind==='planner_retry'?`${retryLabels[d.code]||d.code} · ${d.attempt}/${d.max_attempts}`:event.kind==='browser_recon'?`${browserLabels[d.code]||browserLabels[d.status]||'탐색 완료'}${d.code&&browserLabels[d.code]&&d.status==='unavailable'?' · 브라우저 설치 상태 확인':''}`:event.kind==='planner_recovery'?(d.code==='observed_login_form'?'발견한 로그인 폼 검사 선택':d.code==='suspicious_probe'?'의심 결과 재검증 선택':'기존 검사 재검증 선택'):d.text||d.reason||d.message||d.outcome||d.action_id||label;
   heading.append(uiNode('span','aw-event-kind',label),document.createTextNode(text));summary.append(epIcon(icon),heading);card.append(summary);
   const body=uiNode('div','aw-event-body');
   if (event.kind==='observation') {
@@ -322,9 +344,15 @@ function renderAgentWorkspace(run) {
   syncDetailMode();
 }
 function restoreWorkspaceRoute() {
-  const match=location.hash.match(/^#(agent|request|results|report)(?:\/([a-zA-Z0-9_-]+))?$/);
-  if(match?.[1]==='agent') {agentRunId=match[2]||null;if(!agentRunId){agentEl('agentListView').hidden=false;agentEl('agentDetailView').hidden=true;}else showAgentDetail();}
-  switchView(match?.[1]||'agent');
+  const match=location.hash.match(/^#(agent|request|results|report|assets|findings|traffic|settings|bulk)(?:\/([a-zA-Z0-9_-]+))?(?:\/([a-z]+))?$/);
+  if(match?.[1]==='agent') {
+    const incoming=match[2]||null;
+    agentDetailMode=Object.hasOwn(DETAIL_VIEWS,match[3])?match[3]:'findings';
+    if(incoming!==agentRunId){agentRunId=incoming;if(agentRunId)showAgentDetail();}
+    if(!agentRunId){agentEl('agentListView').hidden=false;agentEl('agentDetailView').hidden=true;}
+    syncDetailMode();
+  }
+  switchView(match?.[1]||'request');
 }
 window.addEventListener('DOMContentLoaded',()=>{
   hydrateIcons();

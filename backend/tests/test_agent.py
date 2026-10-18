@@ -148,9 +148,10 @@ def test_outside_and_unknown_fields_are_rejected():
 
 def test_hallucinated_evidence_pauses(tmp_path):
     _, run = run_agent(tmp_path, lambda r: httpx.Response(200, text='OK'),
-        [{'kind': 'finish', 'hypothesis': '완료', 'basis': ['other-run-evidence']}])
+        [{'kind': 'finish', 'hypothesis': '완료', 'basis': ['other-run-evidence']} for _ in range(3)])
     assert run['state'] == 'paused'
     assert run['data']['requests'] == 1
+    assert sum(e['kind'] == 'planner_retry' for e in run['events']) == 3
 
 
 def test_cancel_and_resume_retains_evidence_and_budget(tmp_path):

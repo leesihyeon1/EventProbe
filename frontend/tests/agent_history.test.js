@@ -78,9 +78,10 @@ test('timeline pages metadata and opens only selected raw event',async()=>{
   context.initHistory();
   await context.loadTimelinePage();
   assert.equal(get('agentEvents').children.length,1);
+  assert.equal(get('agentEvents').children[0].children[0].textContent,'작업 전체 기록');
   assert.equal(get('agentEventCount').textContent,'1개 이벤트 표시');
   assert(!JSON.stringify(get('agentEvents').children).includes('PRIVATE_RESPONSE'));
-  const row=get('agentEvents').children[0];row.open=true;
+  const row=get('agentEvents').children[0]._rows.children[0];row.open=true;
   await row.ontoggle();
   assert.equal(row.replacement.textContent,'PRIVATE_RESPONSE');
   assert.equal(calls.length,2);

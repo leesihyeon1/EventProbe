@@ -217,4 +217,39 @@ test('compact graph opens one raw event only after node selection', async () => 
   assert.equal(calls.length,1);
 });
 
+test('fit uses viewport coordinates and keeps a tall graph inside the stage', () => {
+  const local = loadCtx();
+  const svg = new El('svg');
+  svg.getBoundingClientRect = () => ({width: 900, height: 520});
+  const viewport = new El('g');
+  svg.querySelector = selector => selector === '#gViewport' ? viewport : null;
+  local.agentEl = id => id === 'agentGraphSvg' ? svg : new El();
+  local.model = {width: 1600, height: 2100};
+  vm.runInContext('_graphModel=model;_fitGraph()', local);
+  const view = vm.runInContext('({...graphView})', local);
+  assert.equal(svg.getAttribute('viewBox'), '0 0 900 520');
+  assert(view.tx >= 0 && view.tx + local.model.width * view.k <= 900);
+  assert(view.ty >= 0 && view.ty + local.model.height * view.k <= 520);
+  assert(view.k < 0.25, 'fit must not clip tall runs at a fixed zoom floor');
+});
+
+test('step summary pairs HTTP errors with the local verdict without calling a target', () => {
+  const local = loadCtx();
+  const summary = new El('div');
+  local.agentEl = id => id === 'agentGraphSummary' ? summary : new El();
+  const events = [
+    ev('a1', 'action', 's1', {kind: 'probe', category: 'sqli'}),
+    ev('o1', 'observation', 's1', {response: {status: 500}}),
+    ev('o2', 'observation', 's1', {response: {status: 500}}),
+    ev('v1', 'verification', 's1', {status: 'suspicious'}),
+  ];
+  local.events = events;
+  local.model = build(events);
+  vm.runInContext('_renderGraphSummary(events,model)', local);
+  assert.equal(summary.children.length, 1);
+  assert(allText(summary).includes('SQLI'));
+  assert(allText(summary).includes('HTTP 500 ×2'));
+  assert(allText(summary).includes('suspicious'));
+});
+
 function allText(node){return [node.textContent,...node.children.flatMap(allText)].join(' ');}

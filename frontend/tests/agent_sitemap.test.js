@@ -21,6 +21,19 @@ test('groups values, retains method, origin, trailing slash and query keys',()=>
   assert(!JSON.stringify(rows).includes('secret'));
   assert.equal(rows.filter(r=>r.outside).length,1);
 });
+test('POST form field names are grouped without body values',()=>{
+  const request={...req('https://example.test/Login.asp','POST'),body_fields:['tfUName','tfUPass']};
+  const rows=build([], {seed:req('https://example.test/'),login:request}).rows;
+  const login=rows.find(row=>row.path==='/Login.asp');
+  assert.deepEqual(plain(login.fields),['tfUName','tfUPass']);
+  assert(!JSON.stringify(login).includes('PRIVATE_PASSWORD'));
+});
+test('form candidate status stays linked to its registered POST endpoint',()=>{
+  const post={...req('https://example.test/Login.asp','POST'),body_fields:['tfUName','tfUPass']};
+  const model=ctx.buildSiteMapModel({...run([],{seed:req(),login:post}),recon:{form_candidates:[
+    {endpoint_id:'login',login:true,status:'untested',source:'rendered_dom',fields:['tfUName','tfUPass']}]}});
+  assert.equal(model.rows.find(row=>row.path==='/Login.asp').formCandidates[0].status,'untested');
+});
 test('rejects non-HTTP URLs, credentials and invalid URLs',()=>{
   for(const url of ['javascript:alert(1)','file:///test','https://user:pass@example.test','not a URL']) assert.equal(ctx.siteMapAddress(req(url)),null);
 });
@@ -38,6 +51,15 @@ test('discovery links only real source evidence; old records do not invent prove
   assert.equal(m.rows.find(r=>r.path==='/next').state,'discovered');
   assert.equal(m.rows.find(r=>r.path==='/old').sources.length,0);
   assert.equal(m.rows.find(r=>r.seed).state,'observed');
+});
+test('browser discovery is visible without claiming verification',()=>{
+  const m=build([ev('b','browser_discovery',{endpoint_id:'api',resource_type:'fetch'})],
+    {seed:req(),api:req('https://example.test/api/search?token=PRIVATE_VALUE')});
+  const row=m.rows.find(r=>r.path==='/api/search');
+  assert.equal(row.browser,true);
+  assert.equal(row.state,'discovered');
+  assert.equal(row.verifications.length,0);
+  assert(!JSON.stringify(m).includes('PRIVATE_VALUE'));
 });
 test('HTTP success is not confirmation, missing proof downgrades a verdict',()=>{
   assert.equal(build([obs('o')]).rows[0].state,'observed');

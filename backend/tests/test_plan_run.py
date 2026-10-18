@@ -127,7 +127,8 @@ def _single_step(tmp_path, kind):
     manager = AgentManager(Store(tmp_path / "s.db"))
     data = {"endpoints": {"seed": spec.request.model_dump()}}
 
-    async def fetch(req, actor, *args):
+    async def fetch(req, actor, *args, isolate=False, source=None):
+        assert isolate == (kind == 'confirm')
         calls.append((req["url"], actor))
         return {"id": str(len(calls)), "response": {"status": 200, "headers": {"content-type": "application/json"},
                 "body": '{"id":1}', "truncated": False}, "analysis": {"findings": []}}
