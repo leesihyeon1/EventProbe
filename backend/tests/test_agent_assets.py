@@ -55,6 +55,11 @@ def test_global_assets_group_runs_scope_and_redact(tmp_path, monkeypatch):
                       headers={'x-eventprobe-user': 'alice'}).json()['total'] == 1
     assert client.get(url, params={'search': 'missing'},
                       headers={'x-eventprobe-user': 'alice'}).json()['total'] == 0
+    focused = client.get(url, params={'asset_id': asset['id']},
+                         headers={'x-eventprobe-user': 'alice'}).json()
+    assert focused['total'] == 1 and focused['assets'][0]['id'] == asset['id']
+    assert client.get(url, params={'asset_id': '0' * 64},
+                      headers={'x-eventprobe-user': 'alice'}).json()['total'] == 0
     assert client.get(url, params={'limit': 101}).status_code == 422
 
     store.set_archived(one, True)
@@ -92,3 +97,45 @@ def test_map_request_exposes_only_form_field_names():
     assert projected['body_fields'] == ['tfUName', 'tfUPass']
     for value in ('PRIVATE_QUERY', 'PRIVATE_USER', 'PRIVATE_PASSWORD', 'PRIVATE_HEADER'):
         assert value not in json.dumps(projected)
+
+
+def test_asset_period_uses_scoped_traffic_timestamps(tmp_path, monkeypatch):
+    store = Store(tmp_path / 'asset-period.sqlite3')
+    request = {'method': 'GET', 'url': 'https://example.test/agent'}
+    run_id = store.create({'owner': 'alice', 'spec': {'goal': 'period'},
+                           'endpoints': {'seed': request}})
+    store.event(run_id, 'observation', {'request': request, 'response': {'status': 200}}, 's1')
+    store.record_manual_traffic({'method': 'GET', 'url': 'https://example.test/manual'},
+                                200, owner='alice')
+    store.record_manual_traffic({'method': 'GET', 'url': 'https://example.test/bob'},
+                                200, owner='bob')
+    with store.connect() as db:
+        db.execute('UPDATE traffic_index SET created=100 WHERE run_id=?', (run_id,))
+        db.execute("UPDATE manual_traffic SET created=200 WHERE owner='alice'")
+        db.execute("UPDATE manual_traffic SET created=300 WHERE owner='bob'")
+
+    class Manager:
+        def __init__(self):
+            self.store = store
+
+    monkeypatch.setattr(agent_history, 'get_manager', Manager)
+    monkeypatch.setattr(agent_history, 'owner_scope_enabled', lambda: True)
+    app = FastAPI()
+    app.include_router(agent_history.router)
+    client = TestClient(app)
+    url = '/api/agent/history/assets'
+    headers = {'x-eventprobe-user': 'alice'}
+    response = client.get(url, params={'since': 100, 'before': 200}, headers=headers)
+    assert response.status_code == 200
+    assert [asset['path'] for asset in response.json()['assets']] == ['/agent']
+    response = client.get(url, params={'since': 200, 'before': 301}, headers=headers)
+    assert [asset['path'] for asset in response.json()['assets']] == ['/manual']
+    assert client.get(url, params={'since': 300, 'before': 301},
+                      headers=headers).json()['total'] == 0
+    store.set_archived(run_id, True)
+    assert client.get(url, params={'since': 100, 'before': 200, 'archived': True},
+                      headers=headers).json()['total'] == 1
+    assert client.get(url, params={'since': 200, 'before': 301, 'archived': True},
+                      headers=headers).json()['total'] == 0
+    assert client.get(url, params={'since': 200, 'before': 200},
+                      headers=headers).status_code == 422

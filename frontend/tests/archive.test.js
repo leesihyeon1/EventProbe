@@ -138,6 +138,22 @@ test('timeline first load and unchanged poll never fetch full event bodies',asyn
   assert.equal(ctx._awRun.view,'timeline');
 });
 
+test('overview loads the compact conclusion without opening event pages',async()=>{
+  const {ctx,calls}=setup();
+  vm.runInContext('agentRunId="r1"',ctx);
+  ctx.agentDetailMode='overview';ctx._awRun=null;ctx._agentViewActive=()=>true;
+  ctx.renderAgentRunHeader=()=>{};ctx.renderAgentConclusion=()=>{};
+  ctx.loadTimelinePage=()=>{throw new Error('overview must not load event pages');};
+  ctx.loadAgentList=()=>{};
+  ctx.agentApi=async path=>{
+    calls.push({path});
+    return {id:'r1',state:'running',updated:123,event_count:2000,has_pending_oob:false};
+  };
+  await ctx.pollAgent();await ctx.pollAgent();
+  assert.deepEqual(calls.map(c=>c.path),['/history/runs/r1/conclusion','/history/runs/r1/status']);
+  assert.equal(ctx._awRun.view,'overview');
+});
+
 test('new evidence refreshes conclusion and cursor timeline without a full snapshot',async()=>{
   const {ctx,calls}=setup();
   vm.runInContext('agentRunId="r1"',ctx);

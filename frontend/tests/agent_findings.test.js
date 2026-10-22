@@ -148,6 +148,23 @@ test('a non-vuln finding offers no retest, and declining the confirm sends nothi
   assert(!calls.some(c=>c.path==='/runs/run1/findings/f1/retest'));  // declined → no request
 });
 
+test('comparison history reads locally and keeps absent verdict unclassified',async()=>{
+  const {context,get,calls}=setup();
+  context.renderAgentFindings(run());
+  const button=allNodes(get('fdDetail')).find(n=>n.tagName==='button'&&n.textContent==='재검증 이력 보기');
+  assert(button);
+  context._updated={original:{verdict:'confirmed'},items:[{run_id:'child1',created:1700000000,
+    state:'paused',same_request_shape:true,finding:null}]};
+  await button.onclick();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].path,'/history/runs/run1/findings/f1/retests');
+  assert.equal(calls[0].data,undefined);
+  assert(allNodes(get('fdDetail')).some(n=>/판정 기록 없음/.test(n.textContent)));
+  assert(allNodes(get('fdDetail')).some(n=>/요청 구조 일치/.test(n.textContent)));
+  const open=allNodes(get('fdDetail')).find(n=>n.tagName==='button'&&n.textContent==='재검증 실행 열기');
+  open.onclick();assert.equal(context._selected,'child1');
+});
+
 test('report button opens the local report endpoint for the current run only',()=>{
   const {context,get,opens}=setup();
   context.initFindings();

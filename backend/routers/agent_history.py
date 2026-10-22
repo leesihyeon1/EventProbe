@@ -13,26 +13,38 @@ router = APIRouter(prefix='/api/agent/history', tags=['agent-history'])
 
 @router.get('/assets')
 def global_assets(request: Request, search: str = Query('', max_length=200),
+                  asset_id: str = Query('', max_length=64),
+                  since: float | None = Query(None, ge=0),
+                  before: float | None = Query(None, ge=0),
                   archived: bool = False, offset: int = Query(0, ge=0),
                   limit: int = Query(50, ge=1, le=100)):
     """Read-only, owner-scoped asset index; response and query values never leave storage."""
+    if since is not None and before is not None and before <= since:
+        raise HTTPException(422, '종료 시각은 시작 시각보다 늦어야 합니다.')
     owner = _principal(request) if owner_scope_enabled() else None
-    return get_manager().store.asset_page(search=search, archived=archived,
-                                          owner=owner, offset=offset, limit=limit)
+    return get_manager().store.asset_page(search=search, asset_id=asset_id, archived=archived,
+                                          since=since, before=before, owner=owner,
+                                          offset=offset, limit=limit)
 
 
 @router.get('/traffic')
 def global_traffic(request: Request, search: str = Query('', max_length=200),
                    run_id: str = Query('', max_length=64), asset_id: str = Query('', max_length=64),
                    method: str = Query('', max_length=16), source: str = Query('', max_length=16),
+                   status_code: int | None = Query(None, ge=100, le=599),
+                   since: float | None = Query(None, ge=0),
+                   before: float | None = Query(None, ge=0),
                    archived: bool = False, offset: int = Query(0, ge=0),
                    limit: int = Query(50, ge=1, le=100)):
-    if source and source not in ('agent', 'browser'):
+    if source and source not in ('agent', 'browser', 'manual', 'bulk', 'raw', 'multi'):
         raise HTTPException(422, '지원하지 않는 출처입니다.')
+    if since is not None and before is not None and before <= since:
+        raise HTTPException(422, '종료 시각은 시작 시각보다 늦어야 합니다.')
     owner = _principal(request) if owner_scope_enabled() else None
     return get_manager().store.lookup_page(
         'traffic', search=search, run_id=run_id, asset_id=asset_id, method=method,
-        source=source, archived=archived, owner=owner, offset=offset, limit=limit)
+        source=source, status_code=status_code, since=since, before=before,
+        archived=archived, owner=owner, offset=offset, limit=limit)
 
 
 @router.get('/findings')
@@ -50,6 +62,40 @@ def global_findings(request: Request, search: str = Query('', max_length=200),
         'finding', search=search, run_id=run_id, asset_id=asset_id,
         verdict=verdict, status=status, archived=archived, owner=owner,
         offset=offset, limit=limit)
+
+
+@router.get('/findings/groups')
+def finding_groups(request: Request, search: str = Query('', max_length=200),
+                   asset_id: str = Query('', max_length=64),
+                   verdict: str = Query('', max_length=20), status: str = Query('', max_length=20),
+                   archived: bool = False, offset: int = Query(0, ge=0),
+                   limit: int = Query(50, ge=1, le=100)):
+    if verdict and verdict not in ('confirmed', 'suspicious', 'inconclusive'):
+        raise HTTPException(422, '지원하지 않는 판정입니다.')
+    if status and status not in ('open', 'triaged', 'resolved', 'false_positive', 'ignored'):
+        raise HTTPException(422, '지원하지 않는 상태입니다.')
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.finding_group_page(
+        search=search, asset_id=asset_id, verdict=verdict, status=status, archived=archived,
+        owner=owner, offset=offset, limit=limit)
+
+
+@router.get('/findings/groups/members')
+def finding_group_members(request: Request, asset_id: str = Query(..., min_length=64, max_length=64),
+                          category: str = Query(..., max_length=100),
+                          actor_id: str = Query('', max_length=100),
+                          input_shape_id: str = Query(..., min_length=64, max_length=64),
+                          verdict: str = Query('', max_length=20),
+                          status: str = Query('', max_length=20), archived: bool = False,
+                          offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    if verdict and verdict not in ('confirmed', 'suspicious', 'inconclusive'):
+        raise HTTPException(422, '지원하지 않는 판정입니다.')
+    if status and status not in ('open', 'triaged', 'resolved', 'false_positive', 'ignored'):
+        raise HTTPException(422, '지원하지 않는 상태입니다.')
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.finding_group_members(
+        asset_id, category, actor_id, input_shape_id, verdict=verdict, status=status,
+        archived=archived, owner=owner, offset=offset, limit=limit)
 
 
 @router.get('/diagnostics')
@@ -96,6 +142,17 @@ def run_findings(run_id: str, request: Request):
         raise HTTPException(404, '작업을 찾을 수 없습니다.')
     status = run_status(run_id, request)
     return {**status, **view, 'compact': True}
+
+
+@router.get('/runs/{run_id}/findings/{finding_id}/retests')
+def finding_retests(run_id: str, finding_id: str, request: Request):
+    manager = get_manager()
+    _guard(manager, run_id, request)
+    owner = _principal(request) if owner_scope_enabled() else None
+    try:
+        return manager.store.retest_comparisons(run_id, finding_id, owner=owner)
+    except KeyError:
+        raise HTTPException(404, '발견을 찾을 수 없습니다.')
 
 
 @router.get('/runs/{run_id}/map')

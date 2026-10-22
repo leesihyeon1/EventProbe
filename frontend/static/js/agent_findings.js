@@ -119,6 +119,33 @@ function renderFindingDetail(f) {
     retest.onclick=()=>retestFinding(f);
     panel.append(retest);
   }
+  const comparison=uiNode('div','fd-retest-history');
+  const compareButton=uiNode('button','aw-link','재검증 이력 보기');compareButton.type='button';
+  compareButton.onclick=async()=>{
+    const runId=findingsState.runId,findingId=f.id;
+    compareButton.disabled=true;comparison.replaceChildren(uiNode('p','aw-muted','이력 불러오는 중…'));
+    try {
+      const result=await agentApi(`/history/runs/${encodeURIComponent(runId)}/findings/${encodeURIComponent(findingId)}/retests`);
+      if(findingsState.runId!==runId||findingsState.selected!==findingId)return;
+      comparison.replaceChildren();
+      if(!result.items?.length)comparison.append(uiNode('p','aw-muted','연결된 재검증 실행이 없습니다.'));
+      for(const item of result.items||[]) {
+        const row=uiNode('div','fd-retest-row');
+        const verdict=item.finding?(FD_VERDICT[item.finding.verdict]||item.finding.verdict):'판정 기록 없음';
+        const shape=item.same_request_shape===true?'요청 구조 일치':item.same_request_shape===false?'요청 구조 변경':'요청 구조 미확인';
+        row.append(uiNode('p','aw-muted',`${new Date(item.created*1000).toLocaleString('ko-KR')} · ${item.state} · ${shape}`),
+          uiNode('p','',`${FD_VERDICT[result.original?.verdict]||result.original?.verdict||'원본 판정 없음'} → ${verdict}${item.finding?.incomplete_evidence?' · 증거 일부 누락':''}`));
+        if(item.same_request_shape===false&&item.request_shape)row.append(
+          uiNode('p','aw-muted',`${result.original?.method||''} ${result.original?.origin||''}${result.original?.path||''} → ${item.request_shape.method} ${item.request_shape.origin}${item.request_shape.path}`));
+        const open=uiNode('button','aw-link','재검증 실행 열기');open.type='button';
+        open.onclick=()=>selectRun(item.run_id);row.append(open);comparison.append(row);
+      }
+    } catch(error) {
+      if(findingsState.runId===runId&&findingsState.selected===findingId)
+        comparison.replaceChildren(uiNode('p','aw-muted',error.message||'이력 조회 실패'));
+    } finally {compareButton.disabled=false;}
+  };
+  panel.append(compareButton,comparison);
   const noteWrap=uiNode('div','fd-note');
   const area=uiNode('textarea');area.value=f.note||'';area.placeholder='메모 (로컬 저장)';area.setAttribute('aria-label','발견 메모');
   const save=uiNode('button','aw-link','메모 저장');save.type='button';save.onclick=()=>patchFinding(f.id,{note:area.value});

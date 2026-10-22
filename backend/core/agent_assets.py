@@ -33,4 +33,5 @@ def reindex_run(db, run_id, data):
                    (run_id, str(endpoint_id), shape[0],
                     json.dumps(request_field_keys(request), ensure_ascii=False)))
     db.execute('DELETE FROM assets WHERE NOT EXISTS '
-               '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id)')
+               '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id) '
+               'AND NOT EXISTS (SELECT 1 FROM manual_traffic WHERE manual_traffic.asset_id=assets.id)')

@@ -18,7 +18,9 @@ function syncWorkspace(view) {
     if (b.dataset.view===view) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
   });
   document.body.classList.remove('mobile-nav-open'); updateNavToggle();
-  const hash = view==='agent' && agentRunId ? agentDetailRoute(agentRunId) : '#'+view;
+  const hash = view==='agent' && agentRunId ? agentDetailRoute(agentRunId) :
+    (['findings','traffic'].includes(view)&&typeof globalLookupRoute==='function'?globalLookupRoute(view):
+    view==='assets'&&typeof assetRoute==='function'?assetRoute():'#'+view);
   if (location.hash!==hash) history.pushState(null,'',hash);
   if (view!=='agent') clearTimeout(agentTimer);
 }
@@ -76,14 +78,32 @@ function syncAgentSource() {
   resetPlanPreview();
 }
 let agentDetailMode='findings', _awRun=null;
-const DETAIL_VIEWS={findings:['agentFindings','awTabFindings'],sitemap:['agentSiteMap','awTabSiteMap'],explore:['agentExplore','awTabExplore'],traffic:['agentTraffic','awTabTraffic'],coverage:['agentCoverage','awTabCoverage'],graph:['agentGraph','awTabGraph'],timeline:['agentEvents','awTabTimeline'],history:['agentHistory','awTabHistory']};
+const DETAIL_VIEWS={overview:['agentOverviewPanel','awTabOverview'],findings:['agentFindings','awTabFindings'],sitemap:['agentSiteMap','awTabSiteMap'],explore:['agentExplore','awTabExplore'],traffic:['agentTraffic','awTabTraffic'],coverage:['agentCoverage','awTabCoverage'],graph:['agentGraph','awTabGraph'],timeline:['agentEvents','awTabTimeline'],history:['agentHistory','awTabHistory']};
+const MAIN_DETAIL_TABS={overview:'awTabOverview',recon:'awTabRecon',findings:'awTabFindings',traffic:'awTabTraffic',coverage:'awTabCoverage',record:'awTabRecord'};
+let lastReconMode='explore',lastRecordMode='timeline';
+function mainDetailMode(mode) {
+  return ['explore','sitemap'].includes(mode)?'recon':
+    ['timeline','graph','history'].includes(mode)?'record':mode;
+}
 function syncDetailMode() {
+  if(['explore','sitemap'].includes(agentDetailMode))lastReconMode=agentDetailMode;
+  if(['timeline','graph','history'].includes(agentDetailMode))lastRecordMode=agentDetailMode;
   for(const [mode,[panel,tab]] of Object.entries(DETAIL_VIEWS)) {
     const selected=agentDetailMode===mode;
     agentEl(panel).hidden=!selected;
     agentEl(tab).setAttribute('aria-selected',String(selected));
     agentEl(tab).tabIndex=selected?0:-1;
   }
+  const main=mainDetailMode(agentDetailMode);
+  for(const [mode,tab] of Object.entries(MAIN_DETAIL_TABS)) {
+    const selected=mode===main;
+    agentEl(tab).setAttribute('aria-selected',String(selected));
+    agentEl(tab).tabIndex=selected?0:-1;
+  }
+  agentEl('agentReconControls').hidden=main!=='recon';
+  agentEl('agentRecordControls').hidden=main!=='record';
+  agentEl('awTabRecon').setAttribute('aria-controls',agentDetailMode==='sitemap'?'agentSiteMap':'agentExplore');
+  agentEl('awTabRecord').setAttribute('aria-controls',agentDetailMode==='graph'?'agentGraph':agentDetailMode==='history'?'agentHistory':'agentEvents');
   if(_awRun && agentDetailMode==='graph') renderAgentGraph(_awRun);
   if(_awRun && agentDetailMode==='sitemap') renderAgentSiteMap(_awRun);
   if(_awRun && agentDetailMode==='explore') renderAgentExplore(_awRun);
@@ -108,7 +128,8 @@ function setDetailMode(mode) {
   const mapModes=['graph','sitemap','explore','traffic','coverage'];
   const desired=mapModes.includes(agentDetailMode)?'map':agentDetailMode;
   const refresh=agentDetailMode!=='history' &&
-    ((_awRun?.compact && _awRun.view!==desired) ||
+    ((agentDetailMode==='overview' && _awRun && _awRun.view!=='overview') ||
+     (_awRun?.compact && _awRun.view!==desired) ||
      (previous==='history' && !_awRun));
   if(refresh) _awRun=null;
   syncDetailMode();
@@ -145,15 +166,18 @@ function initAgentWorkspace() {
   };
   agentEl('agentPrev').onclick=()=>{workspacePage--;loadAgentList();};
   agentEl('agentNext').onclick=()=>{workspacePage++;loadAgentList();};
-  const modes=Object.keys(DETAIL_VIEWS);
-  modes.forEach((mode,index)=>{
-    const tab=agentEl(DETAIL_VIEWS[mode][1]);tab.onclick=()=>setDetailMode(mode);
+  const wireTabs=(modes,tabId,select)=>modes.forEach((mode,index)=>{
+    const tab=agentEl(tabId(mode));tab.onclick=()=>select(mode);
     tab.onkeydown=e=>{
       const next=e.key==='ArrowRight'?(index+1)%modes.length:e.key==='ArrowLeft'?(index+modes.length-1)%modes.length:e.key==='Home'?0:e.key==='End'?modes.length-1:null;
-      if(next===null) return;
-      e.preventDefault();setDetailMode(modes[next]);agentEl(DETAIL_VIEWS[modes[next]][1]).focus();
+      if(next===null)return;
+      e.preventDefault();select(modes[next]);agentEl(tabId(modes[next])).focus();
     };
   });
+  wireTabs(Object.keys(MAIN_DETAIL_TABS),mode=>MAIN_DETAIL_TABS[mode],mode=>
+    setDetailMode(mode==='recon'?lastReconMode:mode==='record'?lastRecordMode:mode));
+  wireTabs(['explore','sitemap'],mode=>DETAIL_VIEWS[mode][1],setDetailMode);
+  wireTabs(['timeline','graph','history'],mode=>DETAIL_VIEWS[mode][1],setDetailMode);
   initSiteMap();
   initFindings();
   initHistory();
@@ -242,7 +266,7 @@ function renderWorkspaceEvent(event) {
   const [label,icon]=types[event.kind]||[event.kind,'CircleDashed'];
   const summary=uiNode('summary'),heading=uiNode('span','aw-event-title');
   const retryLabels={category_out_of_scope:'요청한 검사 유형 이탈',duplicate_action:'이전 행동 반복',missing_evidence_basis:'관측 근거 누락',invalid_evidence_basis:'현재 작업에 없는 증거 참조',invalid_action_schema:'행동 형식 오류',provider_temporary:'AI 연결 일시 오류',insufficient_request_budget:'검사 요청 예산 부족'};
-  const browserLabels={skipped_budget:'요청 또는 시간 예산 부족으로 건너뜀',unavailable:'브라우저 사용 불가',playwright_unavailable:'Playwright 미설치',browser_missing:'브라우저 실행 파일 없음',browser_launch_failed:'브라우저 실행 실패',browser_timeout:'탐색 시간 초과',websocket_guard_unavailable:'웹소켓 차단 기능 없음'};
+  const browserLabels={started:'브라우저 탐색 시작 · 결과 미확인',completed:'브라우저 탐색 완료',skipped_budget:'요청 또는 시간 예산 부족으로 건너뜀',unavailable:'브라우저 사용 불가',playwright_unavailable:'Playwright 미설치',browser_missing:'브라우저 실행 파일 없음',browser_launch_failed:'브라우저 실행 실패',browser_timeout:'탐색 시간 초과',websocket_guard_unavailable:'웹소켓 차단 기능 없음'};
   const text=event.kind==='action'?`${d.kind} · ${d.hypothesis}`:event.kind==='observation'?`${d.request?.method||''} ${d.request?.url||''} · HTTP ${d.response?.status}`:event.kind==='verification'?`${d.status} · 증거 ${(d.evidence_ids||[]).length}개`:event.kind==='planner_retry'?`${retryLabels[d.code]||d.code} · ${d.attempt}/${d.max_attempts}`:event.kind==='browser_recon'?`${browserLabels[d.code]||browserLabels[d.status]||'탐색 완료'}${d.code&&browserLabels[d.code]&&d.status==='unavailable'?' · 브라우저 설치 상태 확인':''}`:event.kind==='planner_recovery'?(d.code==='observed_login_form'?'발견한 로그인 폼 검사 선택':d.code==='suspicious_probe'?'의심 결과 재검증 선택':'기존 검사 재검증 선택'):d.text||d.reason||d.message||d.outcome||d.action_id||label;
   heading.append(uiNode('span','aw-event-kind',label),document.createTextNode(text));summary.append(epIcon(icon),heading);card.append(summary);
   const body=uiNode('div','aw-event-body');
@@ -256,7 +280,13 @@ function renderWorkspaceEvent(event) {
 function renderAgentConclusion(conclusion) {
   const panel=agentEl('agentConclusion');
   panel.hidden=!conclusion;
+  const results=agentEl('agentResults');results.replaceChildren();
   if(!conclusion) return;
+  for(const [key,label,icon] of [['confirmed','확증','CircleCheck'],['suspicious','의심','CircleAlert'],['inconclusive','미확정','CircleDashed']]) {
+    const item=uiNode('span');item.dataset.verdict=key;
+    item.append(epIcon(icon),document.createTextNode(`${label} ${conclusion.counts?.[key]||0}`));
+    results.append(item);
+  }
   const signature=JSON.stringify(conclusion);
   if(panel.dataset.signature===signature) return;
   panel.dataset.signature=signature;
@@ -334,8 +364,14 @@ function renderAgentRunHeader(run) {
 function renderAgentWorkspace(run) {
   renderAgentConclusion(run.conclusion);
   renderAgentRunHeader(run);
-  const results=agentEl('agentResults');results.replaceChildren();
-  for(const [key,label,icon] of [['confirmed','확증','CircleCheck'],['suspicious','의심','CircleAlert'],['inconclusive','미확정','CircleDashed']]) {const n=run.events.filter(e=>e.kind==='verification'&&e.data.status===key).length;const s=uiNode('span');s.dataset.verdict=key;s.append(epIcon(icon),document.createTextNode(`${label} ${n}`));results.append(s);}
+  if(!run.conclusion) {
+    const results=agentEl('agentResults');
+    for(const [key,label,icon] of [['confirmed','확증','CircleCheck'],['suspicious','의심','CircleAlert'],['inconclusive','미확정','CircleDashed']]) {
+      const n=run.events.filter(e=>e.kind==='verification'&&e.data.status===key).length;
+      const item=uiNode('span');item.dataset.verdict=key;
+      item.append(epIcon(icon),document.createTextNode(`${label} ${n}`));results.append(item);
+    }
+  }
   const container=agentEl('agentEvents');if(container.dataset.run!==run.id){container.replaceChildren();container.dataset.run=run.id;}
   const existing=new Set([...container.children].map(el=>el.dataset.event));
   for(const event of run.events) if(!existing.has(event.id)) container.append(renderWorkspaceEvent(event));
@@ -344,7 +380,14 @@ function renderAgentWorkspace(run) {
   syncDetailMode();
 }
 function restoreWorkspaceRoute() {
-  const match=location.hash.match(/^#(agent|request|results|report|assets|findings|traffic|settings|bulk)(?:\/([a-zA-Z0-9_-]+))?(?:\/([a-z]+))?$/);
+  const [route,rawQuery='']=location.hash.split('?',2);
+  const match=route.match(/^#(agent|request|results|report|assets|findings|traffic|settings|bulk)(?:\/([a-zA-Z0-9_-]+))?(?:\/([a-z]+))?$/);
+  if(match?.[1]==='assets'&&typeof restoreAssetFilters==='function')restoreAssetFilters(rawQuery);
+  if(match?.[1]==='traffic'&&typeof restoreTrafficFilters==='function')restoreTrafficFilters(rawQuery);
+  if(match?.[1]==='findings'&&typeof restoreFindingFilters==='function')restoreFindingFilters(rawQuery);
+  if(match?.[1]==='assets'&&typeof setAssetFocus==='function')setAssetFocus(match[2]||'');
+  if(['findings','traffic'].includes(match?.[1])&&typeof setGlobalLookupAssetFilter==='function')
+    setGlobalLookupAssetFilter(match[1],match[2]||'');
   if(match?.[1]==='agent') {
     const incoming=match[2]||null;
     agentDetailMode=Object.hasOwn(DETAIL_VIEWS,match[3])?match[3]:'findings';

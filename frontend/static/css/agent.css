@@ -182,6 +182,17 @@
 .aw-view-toggle button { border:0; background:var(--bg-primary); color:var(--text-secondary); font-size:12px; padding:5px 12px; cursor:pointer; }
 .aw-view-toggle button + button { border-left:1px solid var(--border); }
 .aw-view-toggle button[aria-selected="true"] { background:var(--bg-hover); color:var(--text-primary); font-weight:600; }
+.aw-detail-tabs { min-width:0; }
+.aw-detail-tabs .aw-view-toggle { min-width:0; max-width:100%; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+.aw-detail-tabs .aw-view-toggle button { flex:none; white-space:nowrap; }
+.aw-sub-tabs { display:flex; margin:0 0 18px; }
+.aw-sub-tabs[hidden] { display:none; }
+.aw-sub-tabs .aw-view-toggle { margin-left:0; max-width:100%; overflow-x:auto; }
+.aw-sub-tabs .aw-view-toggle button { flex:none; white-space:nowrap; }
+@media(max-width:800px) {
+  .aw-detail-tabs { flex-wrap:wrap; }
+  .aw-detail-tabs .aw-view-toggle { flex-basis:100%; order:2; margin-left:0; }
+}
 .aw-section-title .aw-muted { margin-left:0; }
 
 .aw-conclusion { padding:20px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); margin-bottom:20px; }

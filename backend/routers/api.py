@@ -4,7 +4,7 @@ import asyncio
 import socket
 import re
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 from typing import Optional
 import sys, os, secrets
@@ -877,7 +877,6 @@ def _relabel_xss_stored(finding: dict, stored: bool) -> None:
 
 
 # ── 단일 요청 전송 ──────────────────────────────────────────
-@router.post("/request")
 async def send_request(req: SingleRequest):
     try:
         sent_headers = merge_headers(req.headers, req.default_headers, req.use_defaults)
@@ -1077,6 +1076,30 @@ async def send_request(req: SingleRequest):
         }
 
 
+def _record_traffic(request: Request, item: dict, status: int, source: str) -> None:
+    """Keep only route and status metadata; logging must not alter the send result."""
+    _record_traffic_batch(request, [(item, status, source)])
+
+
+def _record_traffic_batch(request: Request, entries) -> None:
+    """Store completed request shapes in one local transaction."""
+    import logging
+    try:
+        from core.agent import get_manager
+        from routers.agent import _principal
+        get_manager().store.record_manual_traffic_batch(entries, owner=_principal(request))
+    except Exception:
+        logging.getLogger(__name__).exception('Traffic metadata persistence failed')
+
+
+@router.post("/request")
+async def send_request_endpoint(req: SingleRequest, request: Request):
+    result = await send_request(req)
+    _record_traffic(request, {'url': req.url, 'method': req.method,
+                              'params': req.params}, result.get('status_code'), 'manual')
+    return result
+
+
 # ── Raw 패킷 전송(SOAR 등 외부 연동) ─────────────────────────
 class RawRequest(BaseModel):
     """raw HTTP 요청 패킷을 그대로 받아 파싱·전송·판정. SOAR incident 버튼 연동용.
@@ -1098,7 +1121,6 @@ class RawRequest(BaseModel):
     wire: bool = False                    # 요청줄·헤더 순서·중복을 보존해 소켓으로 전송
 
 
-@router.post("/request/raw")
 async def send_request_raw(req: RawRequest):
     """raw 패킷을 파싱해 SingleRequest 로 변환한 뒤 기존 전송·판정 흐름을 재사용."""
     if not (req.raw or "").strip():
@@ -1147,6 +1169,16 @@ async def send_request_raw(req: RawRequest):
         "http_version": parsed.get("http_version") or "HTTP/1.1",
         "header_count": len(parsed["headers"]), "has_body": bool(parsed["body"]),
     }
+    return result
+
+
+@router.post("/request/raw")
+async def send_request_raw_endpoint(req: RawRequest, request: Request):
+    result = await send_request_raw(req)
+    parsed = result.get('parsed_request') or {}
+    if parsed.get('url') and 'status_code' in result:
+        _record_traffic(request, {'url': parsed['url'], 'method': parsed['method']},
+                        result['status_code'], 'raw')
     return result
 
 
@@ -1794,7 +1826,7 @@ async def discover_apis(req: DiscoverRequest):
 
 
 @router.post("/bulk-test")
-async def bulk_test(req: BulkRequest):
+async def bulk_test(req: BulkRequest, request: Request):
     data = load_payloads()
     # 카테고리에서 선택된 페이로드 추출
     payloads_to_test = []
@@ -1897,11 +1929,16 @@ async def bulk_test(req: BulkRequest):
                 })
 
     summary = generate_summary(results)
+    traffic_params = dict(req.params)
+    if req.inject_in == 'params' and req.target_param:
+        traffic_params[req.target_param] = ''
+    _record_traffic_batch(request, [
+        ({'url': req.url, 'method': req.method, 'params': traffic_params},
+         result.get('status_code'), 'bulk') for result in results])
     return {"results": results, "summary": summary}
 
 
 # ── 다중 타겟 일괄 테스트 ───────────────────────────────────
-@router.post("/multi-target-test")
 async def multi_target_test(req: MultiTargetRequest):
     if not req.urls:
         raise HTTPException(status_code=400, detail="대상 URL이 없습니다")
@@ -2001,6 +2038,25 @@ async def multi_target_test(req: MultiTargetRequest):
     } for url in urls]
 
     return {"targets": target_results, "target_count": len(target_results)}
+
+
+@router.post("/multi-target-test")
+async def multi_target_test_endpoint(req: MultiTargetRequest, request: Request):
+    result = await multi_target_test(req)
+    entries = []
+    seen_urls = set()
+    for target in result['targets']:
+        if target['url'] in seen_urls:
+            continue  # The result contract repeats the same grouped list for duplicate URL inputs.
+        seen_urls.add(target['url'])
+        for item in target['results']:
+            params = dict(req.params)
+            if req.inject_in == 'params' and req.target_param and item.get('payload'):
+                params[req.target_param] = ''
+            entries.append(({'url': target['url'], 'method': req.method, 'params': params},
+                            item.get('status_code'), 'multi'))
+    _record_traffic_batch(request, entries)
+    return result
 
 
 # ── 포트 스캔 ────────────────────────────────────────────────

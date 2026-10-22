@@ -1,16 +1,51 @@
 /* Read-only projection of persisted maps. All requests stay on the local API. */
-const assets={page:0,itemPage:0,sequence:0,run:null,model:null,selected:null,initialized:false,global:false,total:0};
+const assets={page:0,itemPage:0,sequence:0,run:null,model:null,selected:null,initialized:false,global:false,total:0,focusId:''};
+function setAssetFocus(id) {
+  const next=/^[a-f0-9]{64}$/i.test(id||'')?id.toLowerCase():'';
+  if(assets.focusId!==next){assets.focusId=next;assets.itemPage=0;assets.selected=next||null;}
+  if(next&&assets.initialized){agentEl('assetRun').value='';agentEl('assetSearch').value='';}
+}
+function assetRoute() {
+  const base='#assets'+(assets.focusId?'/'+assets.focusId:'');
+  if(typeof agentEl!=='function')return base;
+  const query=new URLSearchParams();
+  for(const [name,key] of [['From','from'],['Through','through']]) {
+    const value=agentEl('asset'+name).value;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(value))query.set(key,value);
+  }
+  if(agentEl('assetArchived').checked)query.set('archived','1');
+  return base+(query.size?'?'+query:'');
+}
+function restoreAssetFilters(rawQuery) {
+  const query=new URLSearchParams(rawQuery||'');
+  for(const [name,key] of [['From','from'],['Through','through']]) {
+    const value=query.get(key)||'';
+    agentEl('asset'+name).value=/^\d{4}-\d{2}-\d{2}$/.test(value)?value:'';
+  }
+  agentEl('assetArchived').checked=query.get('archived')==='1';
+  assets.itemPage=0;
+}
+function assetDayStart(value) {
+  const [year,month,day]=value.split('-').map(Number);
+  const date=new Date(year,month-1,day);
+  return date.getFullYear()===year&&date.getMonth()===month-1&&date.getDate()===day
+    ?date:null;
+}
 async function openAssets() {
   if(!assets.initialized) {
     assets.initialized=true;
     let debounce;
     agentEl('assetRunSearch').oninput=()=>{clearTimeout(debounce);debounce=setTimeout(()=>{assets.page=0;loadAssetRuns();},250);};
-    agentEl('assetArchived').onchange=()=>{assets.page=0;assets.itemPage=0;loadAssetRuns();};
+    agentEl('assetArchived').onchange=()=>{assets.page=0;assets.itemPage=0;syncWorkspace('assets');loadAssetRuns();};
+    for(const name of ['From','Through'])agentEl('asset'+name).onchange=()=>{
+      assets.itemPage=0;syncWorkspace('assets');if(assets.global)loadAssetMap();
+    };
     agentEl('assetPrev').onclick=()=>{assets.page--;loadAssetRuns();};
     agentEl('assetNext').onclick=()=>{assets.page++;loadAssetRuns();};
     agentEl('assetRefresh').onclick=loadAssetRuns;
-    agentEl('assetRun').onchange=loadAssetMap;
-    agentEl('assetSearch').oninput=()=>{if(assets.global){clearTimeout(assets.searchTimer);assets.searchTimer=setTimeout(()=>{assets.itemPage=0;loadAssetMap();},250);}else drawAssets();};
+    agentEl('assetRun').onchange=()=>{setAssetFocus('');syncWorkspace('assets');loadAssetMap();};
+    agentEl('assetSearch').oninput=()=>{if(assets.focusId){setAssetFocus('');syncWorkspace('assets');}if(assets.global){clearTimeout(assets.searchTimer);assets.searchTimer=setTimeout(()=>{assets.itemPage=0;loadAssetMap();},250);}else drawAssets();};
+    agentEl('assetClearFocus').onclick=()=>{setAssetFocus('');syncWorkspace('assets');loadAssetMap();};
     agentEl('assetState').onchange=drawAssets;
     agentEl('assetItemPrev').onclick=()=>{assets.itemPage--;loadAssetMap();};
     agentEl('assetItemNext').onclick=()=>{assets.itemPage++;loadAssetMap();};
@@ -45,18 +80,30 @@ async function loadAssetMap() {
   const id=agentEl('assetRun').value, token=++assets.sequence;
   clearAssets('자산 불러오는 중…');
   assets.global=!id;
+  agentEl('assetFocus').hidden=!assets.focusId;
+  agentEl('assetFocusLabel').textContent=assets.focusId?`선택 자산 ${assets.focusId.slice(0,12)}…`:'';
   agentEl('assetState').disabled=!id;
+  agentEl('assetFrom').disabled=!!id;
+  agentEl('assetThrough').disabled=!!id;
   agentEl('assetState').title=id?'관측 상태':'상태는 작업별 사이트맵에서 확인';
   if(!id)agentEl('assetState').value='';
   try {
     if(!id) {
       const query=new URLSearchParams({offset:assets.itemPage*50,limit:50,search:agentEl('assetSearch').value,archived:agentEl('assetArchived').checked?'true':'false'});
+      if(assets.focusId)query.set('asset_id',assets.focusId);
+      const from=agentEl('assetFrom').value,through=agentEl('assetThrough').value;
+      const start=from?assetDayStart(from):null,end=through?assetDayStart(through):null;
+      if((from&&!start)||(through&&!end)||(start&&end&&end<start)) {
+        clearAssets('요청 관측 날짜 범위를 확인해 주세요.');return;
+      }
+      if(start)query.set('since',String(start.getTime()/1000));
+      if(end){end.setDate(end.getDate()+1);query.set('before',String(end.getTime()/1000));}
       const result=await agentApi('/history/assets?'+query);
       if(token!==assets.sequence)return;
       assets.total=result.total;
       assets.model={rows:result.assets.map(a=>({...a,key:a.id,seed:false,browser:false,
         state:'registered',requests:[],observations:[],sources:[],actors:{},failed:false,outside:false})),limited:false};
-      agentEl('assetStack').textContent='여러 작업에서 수집한 경로 · 작업을 선택하면 관측 및 판정 상태 표시';
+      agentEl('assetStack').textContent='작업과 수동 요청에서 수집한 경로 · 작업을 선택하면 관측 및 판정 상태 표시';
       drawAssets();return;
     }
     const run=await agentApi('/history/runs/'+encodeURIComponent(id)+'/map');
@@ -110,8 +157,15 @@ function showAssetDetail(row) {
   panel.append(uiNode('h4','',row.method+' '+row.path),uiNode('p','sm-origin',row.origin),siteMapBadge(row));
   if(assets.global) {
     const facts=uiNode('dl','sm-facts');
-    for(const [key,value] of [['작업',`${row.run_count}개`],['쿼리 키',row.query.join(', ')||'없음'],['본문 필드',row.fields.join(', ')||'없음'],['최초 작업',new Date(row.first_seen*1000).toLocaleString('ko-KR')],['최근 갱신',new Date(row.last_seen*1000).toLocaleString('ko-KR')]])facts.append(uiNode('dt','',key),uiNode('dd','',value));
+    for(const [key,value] of [['작업',`${row.run_count}개`],['수동 요청',`${row.manual_count||0}개`],['쿼리 키',row.query_known===false?'과거 기록에서 확인 불가':row.query.join(', ')||'없음'],['본문 필드',row.fields.join(', ')||'없음'],['최초 연결',new Date(row.first_seen*1000).toLocaleString('ko-KR')],['최근 연결 갱신',new Date(row.last_seen*1000).toLocaleString('ko-KR')]])facts.append(uiNode('dt','',key),uiNode('dd','',value));
     panel.append(facts,uiNode('h5','','관련 작업'));
+    const links=uiNode('div','lookup-actions');
+    for(const [kind,label] of [['traffic','관련 트래픽'],['findings','관련 발견']]) {
+      const button=uiNode('button','aw-link',label);button.type='button';
+      button.onclick=()=>{setGlobalLookupAssetFilter(kind,row.id);switchView(kind);};
+      links.append(button);
+    }
+    panel.append(links);
     for(const run of row.runs){const button=uiCommand('ArrowRight',run.name||run.id.slice(0,8),()=>{switchView('agent');selectRun(run.id);},'aw-link');button.append(document.createTextNode(run.name||run.id.slice(0,8)));panel.append(button);}
     agentEl('assetOpen').disabled=!row.runs.length;return;
   }

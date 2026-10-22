@@ -402,6 +402,9 @@
           </div>
           <div class="sm-toolbar">
             <input id="assetSearch" class="form-input" aria-label="자산 검색" placeholder="도메인, 경로, 파라미터 검색">
+            <label>요청 시작일 <input id="assetFrom" class="form-input" type="date" aria-label="자산 요청 시작일 포함"></label>
+            <label>요청 종료일 <input id="assetThrough" class="form-input" type="date" aria-label="자산 요청 종료일 포함"></label>
+            <span id="assetFocus" class="lookup-actions" hidden><span id="assetFocusLabel"></span><button id="assetClearFocus" class="aw-link" type="button">자산 필터 해제</button></span>
             <select id="assetState" aria-label="관측 상태"><option value="">모든 상태</option value="discovered">발견 · 미요청</option><option value="observed">관측 · 미판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select>
             <span id="assetCount" class="aw-muted" role="status"></span>
             <button id="assetItemPrev" class="icon-button" title="이전 자산" aria-label="이전 자산"><span data-icon="ChevronLeft"></span></button>
@@ -418,7 +421,9 @@
             <input id="globalFindingSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 유형 검색" aria-label="발견 검색">
             <select id="globalFindingVerdict" aria-label="판정"><option value="">모든 판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select>
             <select id="globalFindingStatus" aria-label="처리 상태"><option value="">모든 처리 상태</option><option value="open">미처리</option><option value="triaged">분류됨</option><option value="resolved">해결</option><option value="false_positive">오탐</option><option value="ignored">무시</option></select>
+            <label><input id="globalFindingGroup" type="checkbox"> 요청 구조별 묶음</label>
             <label><input id="globalFindingArchived" type="checkbox"> 보관 작업</label>
+            <span id="globalFindingAssetFilter" class="lookup-actions" hidden><span id="globalFindingAssetLabel"></span><button id="globalFindingClearAsset" class="aw-link" type="button">자산 필터 해제</button></span>
           </div>
           <p id="globalFindingCount" class="aw-muted" role="status"></p>
           <div id="globalFindingRows" class="lookup-rows"></div>
@@ -430,10 +435,16 @@
           <h1>트래픽</h1>
           <div class="lookup-toolbar">
             <input id="globalTrafficSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 메서드 검색" aria-label="트래픽 검색">
-            <select id="globalTrafficSource" aria-label="출처"><option value="">모든 출처</option><option value="agent">자율 검증</option><option value="browser">브라우저</option></select>
+            <select id="globalTrafficSource" aria-label="출처"><option value="">모든 출처</option><option value="agent">자율 검증</option><option value="browser">브라우저</option><option value="manual">수동 요청</option><option value="bulk">일괄 테스트</option><option value="raw">원문 패킷</option><option value="multi">다중 대상</option></select>
+            <select id="globalTrafficMethod" aria-label="HTTP 메서드"><option value="">모든 메서드</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select>
+            <input id="globalTrafficStatus" class="form-input" type="number" min="100" max="599" inputmode="numeric" placeholder="HTTP 상태" aria-label="HTTP 상태 코드">
+            <label>시작일 <input id="globalTrafficFrom" class="form-input" type="date" aria-label="시작일 포함"></label>
+            <label>종료일 <input id="globalTrafficThrough" class="form-input" type="date" aria-label="종료일 포함"></label>
             <label><input id="globalTrafficArchived" type="checkbox"> 보관 작업</label>
+            <span id="globalTrafficAssetFilter" class="lookup-actions" hidden><span id="globalTrafficAssetLabel"></span><button id="globalTrafficClearAsset" class="aw-link" type="button">자산 필터 해제</button></span>
           </div>
           <p id="globalTrafficCount" class="aw-muted" role="status"></p>
+          <section id="globalTrafficCompare" class="lookup-compare" aria-label="트래픽 메타데이터 비교" hidden></section>
           <div id="globalTrafficRows" class="lookup-rows"></div>
           <div class="lookup-pages"><button id="globalTrafficPrev" class="btn btn-secondary" type="button">이전</button><button id="globalTrafficNext" class="btn btn-secondary" type="button">다음</button></div>
         </section>
@@ -493,21 +504,34 @@
             <div class="aw-detail-heading"><div><span id="agentRunBadge" class="aw-badge"></span><h2 id="agentRunTitle"></h2><p id="agentStatus" role="status"></p></div>
               <div class="aw-commands"><button class="btn btn-secondary" id="agentStop" disabled><span data-icon="Pause"></span>중단</button><button class="btn btn-secondary" id="agentHoldPlan" disabled title="진행 중인 계획을 이유와 함께 보류하고 요청을 중단합니다">계획 보류</button><button class="btn btn-secondary" id="agentApproveStep" disabled title="검토 대기 단계의 로컬 승인 기록. 재개는 별도로 수행합니다">단계 승인</button><button class="btn btn-secondary" id="agentDenyStep" disabled title="검토 대기 단계를 거절하고 이 작업의 재개를 막습니다">단계 거절</button><button class="btn btn-secondary" id="agentSkipPlan" disabled title="중단된 계획의 현재 단계를 감사 기록과 함께 건너뜁니다">단계 건너뛰기</button><button class="btn btn-secondary" id="agentRevokePlan" disabled title="승인된 계획을 철회하고 진행 중인 요청을 중단합니다">계획 승인 철회</button><button class="btn btn-secondary" id="agentResume" disabled><span data-icon="Play"></span>재개</button><button class="icon-button" id="agentExport" disabled aria-label="기록 다운로드" title="기록 다운로드"><span data-icon="Download"></span></button><button class="btn btn-secondary" id="agentArchiveDownload" disabled title="응답 원문을 포함한 로컬 보관 패키지 다운로드">보관 패키지</button></div>
             </div>
-            <div id="agentSummary" class="aw-run-stats"></div>
-            <div id="agentResults" class="aw-results" aria-label="검증 결과"></div>
-            <section id="agentConclusion" class="aw-conclusion" aria-label="검증 결론" aria-live="polite" hidden></section>
             <div class="aw-section-title aw-detail-tabs"><h3>검증 상세</h3>
-              <div class="aw-view-toggle" role="tablist" aria-label="상세 보기 방식">
+              <div class="aw-view-toggle" role="tablist" aria-label="작업 상세 항목">
+                <button id="awTabOverview" role="tab" aria-selected="false" aria-controls="agentOverviewPanel" tabindex="-1">개요 · 계획</button>
+                <button id="awTabRecon" role="tab" aria-selected="false" aria-controls="agentExplore" tabindex="-1">탐색 · 입력</button>
                 <button id="awTabFindings" role="tab" aria-selected="true" aria-controls="agentFindings">발견</button>
-                <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
-                <button id="awTabExplore" role="tab" aria-selected="false" aria-controls="agentExplore" tabindex="-1">탐색 · 입력</button>
                 <button id="awTabTraffic" role="tab" aria-selected="false" aria-controls="agentTraffic" tabindex="-1">트래픽</button>
                 <button id="awTabCoverage" role="tab" aria-selected="false" aria-controls="agentCoverage" tabindex="-1">커버리지</button>
-                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
-                <button id="awTabTimeline" role="tab" aria-selected="false" aria-controls="agentEvents" tabindex="-1">단계별 기록</button>
-                <button id="awTabHistory" role="tab" aria-selected="false" aria-controls="agentHistory" tabindex="-1">원본 기록</button>
+                <button id="awTabRecord" role="tab" aria-selected="false" aria-controls="agentEvents" tabindex="-1">실행 기록</button>
               </div>
               <span class="aw-muted" id="agentEventCount"></span>
+            </div>
+            <section id="agentOverviewPanel" role="tabpanel" aria-labelledby="awTabOverview" hidden>
+              <div id="agentSummary" class="aw-run-stats"></div>
+              <div id="agentResults" class="aw-results" aria-label="검증 결과"></div>
+              <section id="agentConclusion" class="aw-conclusion" aria-label="검증 결론" aria-live="polite" hidden></section>
+            </section>
+            <div id="agentReconControls" class="aw-sub-tabs" role="tablist" aria-label="탐색 보기" hidden>
+              <div class="aw-view-toggle">
+                <button id="awTabExplore" role="tab" aria-selected="false" aria-controls="agentExplore" tabindex="-1">입력·폼</button>
+                <button id="awTabSiteMap" role="tab" aria-selected="false" aria-controls="agentSiteMap" tabindex="-1">사이트맵</button>
+              </div>
+            </div>
+            <div id="agentRecordControls" class="aw-sub-tabs" role="tablist" aria-label="실행 기록 보기" hidden>
+              <div class="aw-view-toggle">
+                <button id="awTabTimeline" role="tab" aria-selected="false" aria-controls="agentEvents" tabindex="-1">단계별 기록</button>
+                <button id="awTabGraph" role="tab" aria-selected="false" aria-controls="agentGraph" tabindex="-1">탐색 그래프</button>
+                <button id="awTabHistory" role="tab" aria-selected="false" aria-controls="agentHistory" tabindex="-1">원본 기록</button>
+              </div>
             </div>
             <div id="agentEvents" class="aw-events" role="tabpanel" aria-labelledby="awTabTimeline"></div>
             <button id="timelineMore" class="aw-link" type="button" hidden><span data-icon="ChevronDown"></span>다음 이벤트</button>

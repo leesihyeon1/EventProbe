@@ -1086,13 +1086,13 @@ async function pollAgent() {
       else loadAgentList();
       return;
     }
-    if(mode==='timeline') {
-      if(_awRun?.id===id && _awRun.view==='timeline') {
+    if(mode==='timeline' || mode==='overview') {
+      if(_awRun?.id===id && _awRun.view===mode) {
         const status=await agentApi('/history/runs/'+encodeURIComponent(id)+'/status');
         if(id!==agentRunId || mode!==agentDetailMode) return;
         if(status.updated===_awRun.updated && status.event_count===_awRun.event_count
             && status.state===_awRun.state) {
-          if(typeof timelineState==='undefined' || timelineState.runId!==id || !timelineState.hasMore)
+          if(mode==='timeline' && (typeof timelineState==='undefined' || timelineState.runId!==id || !timelineState.hasMore))
             await loadTimelinePage();
           if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
           else loadAgentList();
@@ -1101,10 +1101,10 @@ async function pollAgent() {
       }
       const view=await agentApi('/history/runs/'+encodeURIComponent(id)+'/conclusion');
       if(id!==agentRunId || mode!==agentDetailMode) return;
-      _awRun={...view,events:[],compact:true,view:'timeline'};
+      _awRun={...view,events:[],compact:true,view:mode};
       renderAgentRunHeader(_awRun);
       renderAgentConclusion(view.conclusion);
-      if(typeof timelineState==='undefined' || timelineState.runId!==id || !timelineState.hasMore)
+      if(mode==='timeline' && (typeof timelineState==='undefined' || timelineState.runId!==id || !timelineState.hasMore))
         await loadTimelinePage();
       if(view.state==='running' || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
       else loadAgentList();

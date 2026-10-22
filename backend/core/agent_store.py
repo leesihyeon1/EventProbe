@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.agent_archive import build_archive, read_archive
-from core.agent_assets import reindex_run
+from core.agent_assets import asset_shape, reindex_run
 from core.agent_indexes import (FINDING_KINDS, TRAFFIC_KINDS, index_traffic_event,
                                 reindex_findings, reindex_run as reindex_lookup_run)
 
@@ -46,6 +46,10 @@ class Store:
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created REAL NOT NULL,
                     kind TEXT NOT NULL, step_id TEXT NOT NULL, data TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS events_run ON events(run_id, created);
+                CREATE INDEX IF NOT EXISTS events_browser_recon_recent
+                    ON events(run_id, created DESC) WHERE kind='browser_recon';
+                CREATE INDEX IF NOT EXISTS events_request_error_run
+                    ON events(run_id) WHERE kind='request_error';
                 CREATE TABLE IF NOT EXISTS deletions (
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, deleted REAL NOT NULL,
                     reason TEXT NOT NULL, state TEXT NOT NULL, events INTEGER NOT NULL,
@@ -73,12 +77,20 @@ class Store:
                     request_id TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS traffic_index_run ON traffic_index(run_id,created DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS traffic_index_asset ON traffic_index(asset_id,created DESC,id DESC);
+                CREATE TABLE IF NOT EXISTS manual_traffic (
+                    id TEXT PRIMARY KEY, created REAL NOT NULL, source TEXT NOT NULL,
+                    method TEXT NOT NULL, origin TEXT NOT NULL, path TEXT NOT NULL,
+                    status INTEGER, asset_id TEXT NOT NULL, owner TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS manual_traffic_recent ON manual_traffic(created DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS manual_traffic_owner ON manual_traffic(owner,created DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS manual_traffic_asset ON manual_traffic(asset_id,owner,created);
                 CREATE TABLE IF NOT EXISTS finding_index (
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, created REAL NOT NULL,
                     updated REAL NOT NULL, category TEXT NOT NULL, verdict TEXT NOT NULL,
                     status TEXT NOT NULL, severity TEXT NOT NULL, method TEXT NOT NULL,
                     origin TEXT NOT NULL, path TEXT NOT NULL, asset_id TEXT NOT NULL,
-                    evidence_count INTEGER NOT NULL, incomplete_evidence INTEGER NOT NULL);
+                    evidence_count INTEGER NOT NULL, incomplete_evidence INTEGER NOT NULL,
+                    actor_id TEXT NOT NULL DEFAULT '', input_shape_id TEXT NOT NULL DEFAULT '');
                 CREATE INDEX IF NOT EXISTS finding_index_run ON finding_index(run_id,updated DESC,id DESC);
                 CREATE INDEX IF NOT EXISTS finding_index_asset ON finding_index(asset_id,updated DESC,id DESC);
                 CREATE TABLE IF NOT EXISTS incidents (
@@ -105,10 +117,26 @@ class Store:
                     except (ValueError, TypeError, AttributeError):
                         continue
                 db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('asset_index_v1')")
+            if 'actor_id' not in {row['name'] for row in db.execute('PRAGMA table_info(finding_index)')}:
+                db.execute("ALTER TABLE finding_index ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''")
+            if 'input_shape_id' not in {row['name'] for row in db.execute('PRAGMA table_info(finding_index)')}:
+                db.execute("ALTER TABLE finding_index ADD COLUMN input_shape_id TEXT NOT NULL DEFAULT ''")
+            db.execute('CREATE INDEX IF NOT EXISTS finding_index_group_shape '
+                       'ON finding_index(asset_id,category,actor_id,input_shape_id,updated DESC)')
             if db.execute("SELECT 1 FROM store_migrations WHERE name='lookup_index_v1'").fetchone() is None:
                 for row in db.execute('SELECT id FROM runs').fetchall():
                     reindex_lookup_run(db, row['id'])
                 db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('lookup_index_v1')")
+            if db.execute("SELECT 1 FROM store_migrations WHERE name='finding_group_v1'").fetchone() is None:
+                for row in db.execute('SELECT id FROM runs').fetchall():
+                    reindex_findings(db, row['id'])
+                db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('finding_group_v1')")
+            if db.execute("SELECT 1 FROM store_migrations WHERE name='manual_asset_v1'").fetchone() is None:
+                # Older traffic rows retain only the address structure, not query keys.
+                db.execute("INSERT OR IGNORE INTO assets (id,origin,method,path,query_keys) "
+                           "SELECT asset_id,origin,method,path,'null' FROM manual_traffic "
+                           "WHERE asset_id<>'' GROUP BY asset_id")
+                db.execute("INSERT INTO store_migrations VALUES ('manual_asset_v1')")
             if db.execute("SELECT 1 FROM store_migrations WHERE name='template_headers_v1'").fetchone() is None:
                 for table in ('templates', 'template_revisions'):
                     for row in db.execute(f'SELECT rowid,spec FROM {table}').fetchall():
@@ -295,22 +323,57 @@ class Store:
                         'archived': bool(data.get('archived'))})
         return out
 
-    def asset_page(self, search='', archived=False, owner=None, limit=50, offset=0):
-        """Page distinct assets, then fetch only matching run provenance."""
+    def asset_page(self, search='', asset_id='', archived=False, owner=None,
+                   since=None, before=None, limit=50, offset=0):
+        """Page distinct assets, then fetch matching run and manual provenance."""
         scope = "COALESCE(json_extract(r.data,'$.archived'),0)=?"
         scope_params = [int(bool(archived))]
         if owner is not None:
             scope += " AND COALESCE(json_extract(r.data,'$.owner'),'') IN ('',?)"
             scope_params.append(owner)
-        where = ('EXISTS (SELECT 1 FROM asset_refs ar JOIN runs r ON r.id=ar.run_id '
-                 f'WHERE ar.asset_id=a.id AND {scope})')
-        params = list(scope_params)
+        manual_owner = ''
+        manual_params = []
+        if owner is not None:
+            manual_owner = ' AND m.owner=?'
+            manual_params.append(owner)
+        manual_visible = ('0' if archived else
+                          'EXISTS (SELECT 1 FROM manual_traffic m WHERE '
+                          f'm.asset_id=a.id{manual_owner})')
+        where = ('(EXISTS (SELECT 1 FROM asset_refs ar JOIN runs r ON r.id=ar.run_id '
+                 f'WHERE ar.asset_id=a.id AND {scope}) OR '
+                 f'{manual_visible})')
+        params = [*scope_params, *(manual_params if not archived else [])]
+        if asset_id:
+            where += ' AND a.id=?'
+            params.append(asset_id)
         if search:
             where += (' AND (instr(lower(a.origin),lower(?))>0 OR '
                       'instr(lower(a.path),lower(?))>0 OR '
                       'instr(lower(a.method),lower(?))>0 OR '
                       'instr(lower(a.query_keys),lower(?))>0)')
             params.extend([search] * 4)
+        if since is not None or before is not None:
+            agent_time = ['t.asset_id=a.id', scope]
+            agent_time_params = [*scope_params]
+            manual_time = ['m.asset_id=a.id']
+            manual_time_params = []
+            if owner is not None:
+                manual_time.append('m.owner=?')
+                manual_time_params.append(owner)
+            for bound, operator in ((since, '>='), (before, '<')):
+                if bound is not None:
+                    agent_time.append(f't.created{operator}?')
+                    manual_time.append(f'm.created{operator}?')
+                    agent_time_params.append(bound)
+                    manual_time_params.append(bound)
+            agent_exists = ('EXISTS (SELECT 1 FROM traffic_index t JOIN runs r ON r.id=t.run_id '
+                            'WHERE ' + ' AND '.join(agent_time) + ')')
+            manual_exists = ('EXISTS (SELECT 1 FROM manual_traffic m WHERE '
+                             + ' AND '.join(manual_time) + ')')
+            where += ' AND (' + agent_exists + ('' if archived else ' OR ' + manual_exists) + ')'
+            params.extend(agent_time_params)
+            if not archived:
+                params.extend(manual_time_params)
         with self.connect() as db:
             total = db.execute(f'SELECT COUNT(*) FROM assets a WHERE {where}', params).fetchone()[0]
             page = db.execute('SELECT a.* FROM assets a WHERE ' + where +
@@ -325,28 +388,47 @@ class Store:
                     f'WHERE ar.asset_id=? AND {scope} ORDER BY r.created DESC,r.id DESC',
                     (asset['id'], *scope_params),
                 ).fetchall()
+                manual = db.execute(
+                    'SELECT COUNT(*) AS count,MIN(m.created) AS first_seen,MAX(m.created) AS last_seen '
+                    f'FROM manual_traffic m WHERE m.asset_id=?{manual_owner}'
+                    + ('' if not archived else ' AND 0'),
+                    (asset['id'], *manual_params),
+                ).fetchone()
                 runs = {}
                 fields = set()
                 for ref in refs:
                     fields.update(json.loads(ref['field_keys']))
                     runs.setdefault(ref['run_id'], {'id': ref['run_id'], 'name': ref['name'],
                                                     'state': ref['state'], 'created': ref['created']})
+                query = json.loads(asset['query_keys'])
+                first_seen = [ref['created'] for ref in refs]
+                last_seen = [ref['updated'] for ref in refs]
+                if manual['count']:
+                    first_seen.append(manual['first_seen'])
+                    last_seen.append(manual['last_seen'])
                 result.append({'id': asset['id'], 'origin': asset['origin'],
                                'method': asset['method'], 'path': asset['path'],
-                               'query': json.loads(asset['query_keys']), 'fields': sorted(fields),
+                               'query': query if isinstance(query, list) else [],
+                               'query_known': isinstance(query, list), 'fields': sorted(fields),
                                'run_count': len(runs), 'runs': list(runs.values())[:20],
-                               'first_seen': min(ref['created'] for ref in refs),
-                               'last_seen': max(ref['updated'] for ref in refs)})
+                               'manual_count': manual['count'],
+                               'first_seen': min(first_seen), 'last_seen': max(last_seen)})
         return {'assets': result, 'total': total, 'offset': offset, 'limit': limit,
                 'has_more': offset + len(result) < total}
 
     def lookup_page(self, kind, *, search='', run_id='', asset_id='', archived=False,
                     owner=None, method='', source='', verdict='', status='',
+                    status_code=None, since=None, before=None,
                     limit=50, offset=0):
         """Server-side search over value-free traffic/finding projections."""
         if kind not in ('traffic', 'finding'):
             raise ValueError('Unknown lookup kind')
-        table = 'traffic_index' if kind == 'traffic' else 'finding_index'
+        if kind == 'traffic':
+            return self._traffic_page(search=search, run_id=run_id, asset_id=asset_id,
+                                      archived=archived, owner=owner, method=method,
+                                      source=source, status_code=status_code, since=since,
+                                      before=before, limit=limit, offset=offset)
+        table = 'finding_index'
         alias = 'x'
         clauses = ["COALESCE(json_extract(r.data,'$.archived'),0)=?"]
         params = [int(bool(archived))]
@@ -362,24 +444,19 @@ class Store:
         if method:
             clauses.append('x.method=?')
             params.append(method.upper())
-        if kind == 'traffic' and source:
-            clauses.append('x.source=?')
-            params.append(source)
-        if kind == 'finding' and verdict:
+        if verdict:
             clauses.append('x.verdict=?')
             params.append(verdict)
-        if kind == 'finding' and status:
+        if status:
             clauses.append('x.status=?')
             params.append(status)
         if search:
-            columns = ['x.origin', 'x.path', 'x.method']
-            if kind == 'finding':
-                columns.append('x.category')
+            columns = ['x.origin', 'x.path', 'x.method', 'x.category']
             clauses.append('(' + ' OR '.join(f'instr(lower({col}),lower(?))>0'
                                               for col in columns) + ')')
             params.extend([search] * len(columns))
         where = ' AND '.join(clauses)
-        order = 'x.created' if kind == 'traffic' else 'x.updated'
+        order = 'x.updated'
         with self.connect() as db:
             total = db.execute(f'SELECT COUNT(*) FROM {table} x JOIN runs r ON r.id=x.run_id '
                                f'WHERE {where}', params).fetchone()[0]
@@ -387,11 +464,219 @@ class Store:
                               f'WHERE {where} ORDER BY {order} DESC,x.id DESC LIMIT ? OFFSET ?',
                               (*params, limit, offset)).fetchall()
         items = [dict(row) for row in rows]
-        if kind == 'finding':
-            for item in items:
-                item['incomplete_evidence'] = bool(item['incomplete_evidence'])
+        for item in items:
+            item['incomplete_evidence'] = bool(item['incomplete_evidence'])
         return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
                 'has_more': offset + len(items) < total}
+
+    @staticmethod
+    def _finding_group_scope(*, archived=False, owner=None, verdict='', status=''):
+        clauses = ["COALESCE(json_extract(r.data,'$.archived'),0)=?",
+                   "x.asset_id<>''", "x.origin<>''"]
+        params = [int(bool(archived))]
+        if owner is not None:
+            clauses.append("COALESCE(json_extract(r.data,'$.owner'),'') IN ('',?)")
+            params.append(owner)
+        if verdict:
+            clauses.append('x.verdict=?')
+            params.append(verdict)
+        if status:
+            clauses.append('x.status=?')
+            params.append(status)
+        return clauses, params
+
+    def finding_group_page(self, *, search='', asset_id='', archived=False, owner=None,
+                           verdict='', status='', limit=50, offset=0):
+        """Group structurally equal findings without merging their per-run verdicts."""
+        clauses, params = self._finding_group_scope(
+            archived=archived, owner=owner, verdict=verdict, status=status)
+        if asset_id:
+            clauses.append('x.asset_id=?')
+            params.append(asset_id)
+        if search:
+            columns = ('x.origin', 'x.path', 'x.method', 'x.category', 'x.actor_id')
+            clauses.append('(' + ' OR '.join(f'instr(lower({column}),lower(?))>0'
+                                              for column in columns) + ')')
+            params.extend([search] * len(columns))
+        where = ' AND '.join(clauses)
+        source = 'FROM finding_index x JOIN runs r ON r.id=x.run_id WHERE ' + where
+        group = ' GROUP BY x.asset_id,x.category,x.actor_id,x.input_shape_id'
+        with self.connect() as db:
+            total = db.execute('SELECT COUNT(*) FROM (SELECT 1 ' + source + group + ')',
+                               params).fetchone()[0]
+            rows = db.execute(
+                'SELECT x.asset_id,x.category,x.actor_id,x.input_shape_id,MAX(x.method) AS method,'
+                'MAX(x.origin) AS origin,MAX(x.path) AS path,MAX(x.updated) AS updated,'
+                'COUNT(*) AS finding_count,COUNT(DISTINCT x.run_id) AS run_count,'
+                "SUM(x.verdict='confirmed') AS confirmed_count,"
+                "SUM(x.verdict='suspicious') AS suspicious_count,"
+                "SUM(x.verdict='inconclusive') AS inconclusive_count "
+                + source + group + ' ORDER BY updated DESC,x.asset_id,x.category,x.actor_id,x.input_shape_id '
+                'LIMIT ? OFFSET ?', (*params, limit, offset),
+            ).fetchall()
+        items = [dict(row) for row in rows]
+        return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
+                'has_more': offset + len(items) < total}
+
+    def finding_group_members(self, asset_id, category, actor_id, input_shape_id, *, archived=False,
+                              owner=None, verdict='', status='', limit=50, offset=0):
+        clauses, params = self._finding_group_scope(
+            archived=archived, owner=owner, verdict=verdict, status=status)
+        clauses.extend(('x.asset_id=?', 'x.category=?', 'x.actor_id=?', 'x.input_shape_id=?'))
+        params.extend((asset_id, category, actor_id, input_shape_id))
+        where = ' AND '.join(clauses)
+        source = 'FROM finding_index x JOIN runs r ON r.id=x.run_id WHERE ' + where
+        with self.connect() as db:
+            total = db.execute('SELECT COUNT(*) ' + source, params).fetchone()[0]
+            rows = db.execute('SELECT x.* ' + source +
+                              ' ORDER BY x.updated DESC,x.id DESC LIMIT ? OFFSET ?',
+                              (*params, limit, offset)).fetchall()
+        items = [{**dict(row), 'incomplete_evidence': bool(row['incomplete_evidence'])}
+                 for row in rows]
+        return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
+                'has_more': offset + len(items) < total}
+
+    def record_manual_traffic(self, request, status, *, source='manual', owner=''):
+        """Persist a value-free summary after a user initiated request finishes."""
+        ids = self.record_manual_traffic_batch([(request, status, source)], owner=owner)
+        return ids[0] if ids else None
+
+    def record_manual_traffic_batch(self, entries, *, owner=''):
+        """Store completed request metadata in one transaction, without values."""
+        records = []
+        shapes = {}
+        for request, status, source in entries:
+            if source not in ('manual', 'bulk', 'raw', 'multi'):
+                raise ValueError('Unknown traffic source')
+            try:
+                shape = asset_shape(request)
+            except (TypeError, ValueError):
+                continue
+            if not shape:
+                continue
+            shapes[shape[0]] = shape
+            records.append((uid(), time.time(), source, shape[2], shape[1], shape[3],
+                            status if isinstance(status, int) and status > 0 else None,
+                            shape[0], owner))
+        if not records:
+            return []
+        with self.connect() as db:
+            db.executemany('INSERT INTO assets VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE '
+                           'SET query_keys=excluded.query_keys', shapes.values())
+            db.executemany('INSERT INTO manual_traffic VALUES (?,?,?,?,?,?,?,?,?)', records)
+        return [record[0] for record in records]
+
+    def _traffic_page(self, *, search='', run_id='', asset_id='', archived=False,
+                      owner=None, method='', source='', status_code=None,
+                      since=None, before=None, limit=50, offset=0):
+        agent_where = ["COALESCE(json_extract(r.data,'$.archived'),0)=?"]
+        agent_params = [int(bool(archived))]
+        if owner is not None:
+            agent_where.append("COALESCE(json_extract(r.data,'$.owner'),'') IN ('',?)")
+            agent_params.append(owner)
+        manual_where = ['?=0']
+        manual_params = [int(bool(archived))]
+        if owner is not None:
+            manual_where.append('m.owner=?')
+            manual_params.append(owner)
+        if run_id:
+            agent_where.append('x.run_id=?')
+            agent_params.append(run_id)
+            manual_where.append('0=1')
+        if asset_id:
+            agent_where.append('x.asset_id=?')
+            agent_params.append(asset_id)
+            manual_where.append('m.asset_id=?')
+            manual_params.append(asset_id)
+        if method:
+            agent_where.append('x.method=?')
+            manual_where.append('m.method=?')
+            agent_params.append(method.upper())
+            manual_params.append(method.upper())
+        if source:
+            agent_where.append('x.source=?')
+            manual_where.append('m.source=?')
+            agent_params.append(source)
+            manual_params.append(source)
+        if status_code is not None:
+            agent_where.append('x.status=?')
+            manual_where.append('m.status=?')
+            agent_params.append(status_code)
+            manual_params.append(status_code)
+        for bound, operator in ((since, '>='), (before, '<')):
+            if bound is not None:
+                agent_where.append(f'x.created{operator}?')
+                manual_where.append(f'm.created{operator}?')
+                agent_params.append(bound)
+                manual_params.append(bound)
+        if search:
+            agent_where.append('(instr(lower(x.origin),lower(?))>0 OR instr(lower(x.path),lower(?))>0 OR instr(lower(x.method),lower(?))>0)')
+            manual_where.append('(instr(lower(m.origin),lower(?))>0 OR instr(lower(m.path),lower(?))>0 OR instr(lower(m.method),lower(?))>0)')
+            agent_params.extend([search] * 3)
+            manual_params.extend([search] * 3)
+        statement = (
+            'SELECT x.id,x.run_id,x.created,x.source,x.method,x.origin,x.path,x.status,x.asset_id,x.request_id '
+            'FROM traffic_index x JOIN runs r ON r.id=x.run_id WHERE ' + ' AND '.join(agent_where) +
+            ' UNION ALL SELECT m.id,\'\',m.created,m.source,m.method,m.origin,m.path,m.status,m.asset_id,\'\' '
+            'FROM manual_traffic m WHERE ' + ' AND '.join(manual_where))
+        params = [*agent_params, *manual_params]
+        with self.connect() as db:
+            total = db.execute('SELECT COUNT(*) FROM (' + statement + ')', params).fetchone()[0]
+            rows = db.execute('SELECT * FROM (' + statement + ') ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',
+                              (*params, limit, offset)).fetchall()
+        items = [dict(row) for row in rows]
+        return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
+                'has_more': offset + len(items) < total}
+
+    def retest_comparisons(self, run_id, finding_id, *, owner=None):
+        """Read-only structural comparison; absence of evidence never means resolved."""
+        with self.connect() as db:
+            original = db.execute(
+                'SELECT f.id,f.category,f.verdict,f.method,f.origin,f.path,f.asset_id '
+                'FROM finding_index f JOIN runs r ON r.id=f.run_id '
+                'WHERE f.run_id=? AND f.id=?', (run_id, finding_id),
+            ).fetchone()
+            if original is None:
+                raise KeyError(finding_id)
+            owner_clause = (" AND COALESCE(json_extract(data,'$.owner'),'') IN ('',?)"
+                            if owner is not None else '')
+            params = [run_id, finding_id]
+            if owner is not None:
+                params.append(owner)
+            children = db.execute(
+                'SELECT id,created,state,data FROM runs WHERE '
+                "json_extract(data,'$.retest_of.run_id')=? AND "
+                "json_extract(data,'$.retest_of.finding_id')=?" + owner_clause +
+                ' ORDER BY created DESC,id DESC', params,
+            ).fetchall()
+            items = []
+            for child in children:
+                data = json.loads(child['data'])
+                request = (data.get('endpoints') or {}).get('seed') or \
+                          (data.get('spec') or {}).get('request') or {}
+                shape = asset_shape(request)
+                findings = db.execute(
+                    'SELECT id,category,verdict,status,incomplete_evidence,evidence_count '
+                    'FROM finding_index WHERE run_id=? AND category=? '
+                    "ORDER BY CASE verdict WHEN 'confirmed' THEN 2 WHEN 'suspicious' THEN 1 "
+                    'ELSE 0 END DESC,updated DESC,id DESC LIMIT 1',
+                    (child['id'], original['category']),
+                ).fetchone()
+                items.append({
+                    'run_id': child['id'], 'created': child['created'], 'state': child['state'],
+                    'same_request_shape': (shape[0] == original['asset_id'] if shape else None),
+                    'request_shape': ({'method': shape[2], 'origin': shape[1], 'path': shape[3]}
+                                      if shape else None),
+                    'finding': ({'id': findings['id'], 'verdict': findings['verdict'],
+                                 'status': findings['status'],
+                                 'incomplete_evidence': bool(findings['incomplete_evidence']),
+                                 'evidence_count': findings['evidence_count']}
+                                if findings else None),
+                })
+        return {'original': {'id': original['id'], 'category': original['category'],
+                             'verdict': original['verdict'], 'method': original['method'],
+                             'origin': original['origin'], 'path': original['path']},
+                'items': items}
 
     def diagnostic_page(self, *, owner=None, limit=20, offset=0):
         """Durable per-run stop and tool metadata; no requests or evidence bodies."""
@@ -409,7 +694,15 @@ class Store:
                 "COALESCE(json_extract(data,'$.spec.policy_version'),1) AS policy_version,"
                 "COALESCE(json_extract(data,'$.ai_calls'),0) AS ai_calls,"
                 "json_extract(data,'$.planner_attempts') AS planner_attempts,"
-                "json_extract(data,'$.procedure_sha256.agent') AS procedure_sha256 "
+                "json_extract(data,'$.procedure_sha256.agent') AS procedure_sha256,"
+                "COALESCE((SELECT COALESCE(NULLIF(json_extract(e.data,'$.code'),''),"
+                "json_extract(e.data,'$.status')) FROM events e "
+                "WHERE e.run_id=runs.id AND e.kind='browser_recon' "
+                "ORDER BY e.created DESC,e.rowid DESC LIMIT 1),"
+                "CASE WHEN json_extract(data,'$.browser_recon_attempted')=1 "
+                "THEN 'unknown' END) AS browser_status,"
+                "(SELECT COUNT(*) FROM events e WHERE e.run_id=runs.id "
+                "AND e.kind='request_error') AS request_errors "
                 f'FROM runs WHERE {where} ORDER BY updated DESC,id DESC LIMIT ? OFFSET ?',
                 (*params, limit, offset),
             ).fetchall()
@@ -419,16 +712,11 @@ class Store:
                 attempts = json.loads(item.pop('planner_attempts') or '[]')
                 item['model'] = next((str(a.get('model')) for a in reversed(attempts)
                                       if a.get('model')), '')
+                item['prompt_sha256'] = next((str(a.get('prompt_sha256')) for a in reversed(attempts)
+                                              if a.get('prompt_sha256')), '')
                 item['planner_failures'] = sum(a.get('status') == 'rejected' for a in attempts)
                 item['planner_elapsed_ms'] = sum(a.get('elapsed_ms') or 0 for a in attempts)
                 item['token_count'] = None  # Provider usage was not captured for this run.
-                browser = db.execute(
-                    "SELECT json_extract(data,'$.code') AS code,"
-                    "json_extract(data,'$.status') AS status FROM events "
-                    "WHERE run_id=? AND kind='browser_recon' ORDER BY created DESC,rowid DESC LIMIT 1",
-                    (item['id'],),
-                ).fetchone()
-                item['browser_status'] = (browser['code'] or browser['status']) if browser else None
                 items.append(item)
         return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
                 'has_more': offset + len(items) < total}
@@ -457,7 +745,8 @@ class Store:
             db.execute('DELETE FROM asset_refs WHERE run_id=?', (run_id,))
             cur = db.execute('DELETE FROM runs WHERE id=?', (run_id,))
             db.execute('DELETE FROM assets WHERE NOT EXISTS '
-                       '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id)')
+                       '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id) '
+                       'AND NOT EXISTS (SELECT 1 FROM manual_traffic WHERE manual_traffic.asset_id=assets.id)')
         return cur.rowcount > 0
 
     def deletions(self, limit=100):
@@ -594,7 +883,8 @@ class Store:
                 db.execute(f'DELETE FROM asset_refs WHERE run_id IN ({marks})', ids)
                 db.execute(f'DELETE FROM runs WHERE id IN ({marks})', ids)
                 db.execute('DELETE FROM assets WHERE NOT EXISTS '
-                           '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id)')
+                           '(SELECT 1 FROM asset_refs WHERE asset_refs.asset_id=assets.id) '
+                           'AND NOT EXISTS (SELECT 1 FROM manual_traffic WHERE manual_traffic.asset_id=assets.id)')
         return len(ids)
 
     def create_incident(self, incident, owner=''):

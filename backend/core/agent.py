@@ -1282,6 +1282,7 @@ class AgentManager:
             return
         data['browser_recon_attempted'] = True
         save()
+        self.store.event(run_id, 'browser_recon', {'status': 'started'})
         limit = min(8, spec.max_requests - data['requests'] - 10)
         if limit < 1 or deadline - time.monotonic() < 15:
             self.store.event(run_id, 'browser_recon', {'status': 'skipped_budget'})
@@ -1385,6 +1386,8 @@ class AgentManager:
             self.store.event(run_id, 'browser_discovery', {
                 'endpoint_id': eid, 'resource_type': 'form', 'source': 'rendered_dom'})
         save()
+        if not result.get('error'):
+            self.store.event(run_id, 'browser_recon', {'status': 'completed'})
 
     async def _next_action(self, run_id, spec, data, context, save, budget, deadline):
         """Repair planner-only failures within the original budget; never replay HTTP here."""

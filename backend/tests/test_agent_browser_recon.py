@@ -54,6 +54,8 @@ def test_browser_discovery_is_scoped_and_redacted(tmp_path, monkeypatch):
     observation = {'response': {'headers': {'content-type': 'text/html'}}}
     asyncio.run(manager._browser_recon(run_id, spec, data, observation, save, float('inf')))
     events = manager.store.events(run_id)
+    assert [e['data']['status'] for e in events if e['kind'] == 'browser_recon'] == [
+        'started', 'completed']
     discovered = [e for e in events if e['kind'] == 'browser_discovery']
     assert len(discovered) == 1
     assert seen['limit'] == 8 and seen['permits'] == [True]

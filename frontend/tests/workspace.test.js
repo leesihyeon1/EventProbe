@@ -50,6 +50,67 @@ test('bulk test has a restorable workspace route',()=>{
   assert.equal(opened,'bulk');
 });
 
+test('asset scoped lookup link restores its filter from the route',()=>{
+  const {context}=setup();
+  const id='a'.repeat(64);
+  let restored;
+  context.setGlobalLookupAssetFilter=(kind,assetId)=>{restored=[kind,assetId];};
+  context.switchView=()=>{};
+  context.location={hash:'#findings/'+id};
+  context.restoreWorkspaceRoute();
+  assert.deepEqual(restored,['findings',id]);
+  context.location.hash='#findings';
+  context.restoreWorkspaceRoute();
+  assert.deepEqual(restored,['findings','']);
+});
+
+test('traffic route passes its filter query to the lookup view',()=>{
+  const {context}=setup();
+  let restored;
+  context.restoreTrafficFilters=query=>{restored=query;};
+  context.setGlobalLookupAssetFilter=()=>{};
+  context.switchView=()=>{};
+  context.location={hash:'#traffic?method=POST&status=302'};
+  context.restoreWorkspaceRoute();
+  assert.equal(restored,'method=POST&status=302');
+});
+
+test('finding route passes archived scope for restoration',()=>{
+  const {context}=setup();
+  let restored;
+  context.restoreFindingFilters=query=>{restored=query;};
+  context.setGlobalLookupAssetFilter=()=>{};
+  context.switchView=()=>{};
+  context.location={hash:'#findings/'+'a'.repeat(64)+'?archived=1'};
+  context.restoreWorkspaceRoute();
+  assert.equal(restored,'archived=1');
+});
+
+test('asset detail link restores the focused asset from the route',()=>{
+  const {context}=setup();
+  const id='b'.repeat(64);
+  let restored;
+  context.setAssetFocus=value=>{restored=value;};
+  context.switchView=()=>{};
+  context.location={hash:'#assets/'+id};
+  context.restoreWorkspaceRoute();
+  assert.equal(restored,id);
+  context.location.hash='#assets';
+  context.restoreWorkspaceRoute();
+  assert.equal(restored,'');
+});
+
+test('asset route forwards date filters for restoration',()=>{
+  const {context}=setup();
+  let restored;
+  context.restoreAssetFilters=query=>{restored=query;};
+  context.setAssetFocus=()=>{};
+  context.switchView=()=>{};
+  context.location={hash:'#assets?from=2026-10-21&through=2026-10-22'};
+  context.restoreWorkspaceRoute();
+  assert.equal(restored,'from=2026-10-21&through=2026-10-22');
+});
+
 test('detail tab is encoded in a direct link and restored',()=>{
   const {context}=setup();
   const location={hash:'#agent/run123'};
@@ -60,10 +121,12 @@ test('detail tab is encoded in a direct link and restored',()=>{
   context.restoreWorkspaceRoute();
   context.setDetailMode('explore');
   assert.equal(location.hash,'#agent/run123/explore');
+  context.setDetailMode('overview');
+  assert.equal(location.hash,'#agent/run123/overview');
   context.setDetailMode('findings');
-  location.hash='#agent/run123/explore';
+  location.hash='#agent/run123/overview';
   context.restoreWorkspaceRoute();
-  assert.equal(vm.runInContext('agentDetailMode',context),'explore');
+  assert.equal(vm.runInContext('agentDetailMode',context),'overview');
 });
 
 test('source switch isolates domain fields and clears old plan approval',()=>{
@@ -142,6 +205,14 @@ test('leaving compact history requests map detail for graph tabs',()=>{
   vm.runInContext("agentRunId='run';agentDetailMode='history';_awRun={id:'run',compact:true,events:[]};setDetailMode('graph')",context);
   assert.equal(refreshed,1);
   assert.equal(vm.runInContext('_awRun',context),null);
+});
+
+test('opening overview refreshes a map projection before showing its summary',()=>{
+  const {context}=setup();
+  let polls=0;context.pollAgent=()=>polls++;
+  vm.runInContext("agentRunId='run';_awRun={id:'run',view:'map',compact:false};setDetailMode('overview')",context);
+  assert.equal(vm.runInContext('_awRun',context),null);
+  assert.equal(polls,1);
 });
 
 test('switching compact map tabs reuses metadata but timeline refreshes',()=>{
@@ -272,10 +343,12 @@ test('partial conclusion is visible, text-only, and stable between identical pol
   assert(allNodes(panel).some(n=>n.textContent==='부분 결론 · 미완료'));
   assert(allNodes(panel).some(n=>n.textContent===conclusion.text));
   assert(allNodes(panel).every(n=>n.innerHTML===undefined));
+  assert(allNodes(get('agentResults')).some(n=>n.textContent==='미확정 1'));
   context.renderAgentConclusion(conclusion);
   assert.equal(panel.children[0],first);
   context.renderAgentConclusion(null);
   assert.equal(panel.hidden,true);
+  assert.equal(get('agentResults').children.length,0);
 });
 
 test('conclusion evidence button opens the linked verification event',()=>{
@@ -306,14 +379,19 @@ test('detail tabs have one selected panel and support arrow navigation',()=>{
   assert.equal(get('awTabTimeline').tabIndex,-1);
   context.setDetailMode('history');
   assert.equal(get('agentHistory').hidden,false);
-  assert.notEqual(get('agentConclusion').hidden,true);
+  assert.equal(get('agentRecordControls').hidden,false);
+  assert.equal(get('agentOverviewPanel').hidden,true);
   context.setDetailMode('sitemap');
   let prevented=false;
   get('awTabSiteMap').onkeydown({key:'ArrowLeft',preventDefault(){prevented=true;}});
   assert(prevented);
-  assert.equal(get('agentFindings').hidden,false);
+  assert.equal(get('agentExplore').hidden,false);
   assert.equal(get('agentSiteMap').hidden,true);
-  assert.equal(get('awTabFindings').focused,true);
+  assert.equal(get('awTabExplore').focused,true);
+  get('awTabRecon').onkeydown({key:'ArrowLeft',preventDefault(){prevented=true;}});
+  assert.equal(get('agentOverviewPanel').hidden,false);
+  assert.equal(get('agentReconControls').hidden,true);
+  assert.equal(get('awTabOverview').focused,true);
 });
 
 test('sitemap receives only the existing run snapshot, and switching tasks clears it',()=>{

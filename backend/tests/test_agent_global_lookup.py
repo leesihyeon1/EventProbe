@@ -91,3 +91,42 @@ def test_browser_response_updates_the_reserved_request(tmp_path):
     store.event(run_id, 'browser_response', {'request_id': request_id, 'status': 200})
     row = store.lookup_page('traffic')['items'][0]
     assert row['id'] == request_id and row['status'] == 200 and row['source'] == 'browser'
+
+
+def test_traffic_status_and_time_filters_cover_agent_and_manual_rows(tmp_path, monkeypatch):
+    store = Store(tmp_path / 'filters.sqlite3')
+    run_id = store.create({'owner': 'alice', 'spec': {}, 'endpoints': {}})
+    store.event(run_id, 'observation', {
+        'request': {'method': 'POST', 'url': 'https://example.test/agent'},
+        'response': {'status': 302}}, 'step')
+    store.record_manual_traffic({'method': 'POST', 'url': 'https://example.test/manual'},
+                                302, owner='alice')
+    store.record_manual_traffic({'method': 'GET', 'url': 'https://example.test/other'},
+                                200, owner='bob')
+    with store.connect() as db:
+        db.execute('UPDATE traffic_index SET created=100 WHERE run_id=?', (run_id,))
+        db.execute("UPDATE manual_traffic SET created=200 WHERE owner='alice'")
+        db.execute("UPDATE manual_traffic SET created=300 WHERE owner='bob'")
+
+    class Manager:
+        def __init__(self):
+            self.store = store
+
+    monkeypatch.setattr(agent_history, 'get_manager', Manager)
+    monkeypatch.setattr(agent_history, 'owner_scope_enabled', lambda: True)
+    app = FastAPI()
+    app.include_router(agent_history.router)
+    client = TestClient(app)
+    headers = {'x-eventprobe-user': 'alice'}
+    endpoint = '/api/agent/history/traffic'
+    response = client.get(endpoint, params={'method': 'POST', 'status_code': 302,
+                                            'since': 100, 'before': 200}, headers=headers)
+    assert response.status_code == 200
+    assert [row['source'] for row in response.json()['items']] == ['agent']
+    response = client.get(endpoint, params={'status_code': 302, 'since': 200,
+                                            'before': 301}, headers=headers)
+    assert [row['source'] for row in response.json()['items']] == ['manual']
+    assert client.get(endpoint, params={'since': 0, 'before': 301},
+                      headers=headers).json()['total'] == 2
+    for params in ({'status_code': 600}, {'since': 200, 'before': 200}):
+        assert client.get(endpoint, params=params, headers=headers).status_code == 422

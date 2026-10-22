@@ -1,10 +1,11 @@
 """Local, value-free lookup indexes over durable agent events."""
 
+import hashlib
 import json
 
 from core.agent_assets import asset_shape
 from core.agent_findings import build_findings
-from core.agent_view import map_request
+from core.agent_view import map_request, request_field_keys
 
 
 TRAFFIC_KINDS = {'observation', 'browser_request', 'browser_response'}
@@ -81,14 +82,18 @@ def reindex_findings(db, run_id):
         endpoint = (data.get('endpoints') or {}).get(finding['endpoint_id']) or \
                    (data.get('endpoints') or {}).get('seed') or {}
         shape = asset_shape(endpoint)
+        input_shape_id = hashlib.sha256(
+            json.dumps(request_field_keys(endpoint), ensure_ascii=False).encode()).hexdigest()
         db.execute(
             'INSERT INTO finding_index '
             '(id,run_id,created,updated,category,verdict,status,severity,method,origin,path,'
-            'asset_id,evidence_count,incomplete_evidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'asset_id,evidence_count,incomplete_evidence,actor_id,input_shape_id) '
+            'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (finding['id'], run_id, finding['created'], finding['updated'], finding['category'],
              finding['verdict'], finding['status'], finding['severity'], finding['method'],
              finding['origin'], finding['path'], shape[0] if shape else finding.get('asset_id') or '',
-             len(finding['evidence_ids']), int(finding['incomplete_evidence'])),
+             len(finding['evidence_ids']), int(finding['incomplete_evidence']),
+             finding['actor_id'], input_shape_id),
         )
 
 
