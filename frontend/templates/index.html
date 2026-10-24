@@ -20,9 +20,9 @@
   <nav class="workspace-links">
     <button class="topbar-tab active" data-view="request" onclick="switchView('request')"><span data-icon="SquareTerminal"></span><span>요청 / 분석</span></button>
     <button class="topbar-tab" data-view="agent" onclick="switchView('agent')"><span data-icon="Crosshair"></span><span>자율 검증</span></button>
-    <button class="topbar-tab" data-view="assets" onclick="switchView('assets')"><span data-icon="Layers"></span><span>Asset</span></button>
-    <button class="topbar-tab" data-view="findings" onclick="switchView('findings')"><span data-icon="ListChecks"></span><span>발견</span></button>
-    <button class="topbar-tab" data-view="traffic" onclick="switchView('traffic')"><span data-icon="Activity"></span><span>트래픽</span></button>
+    <button class="topbar-tab" data-view="assets" onclick="switchView('assets')"><span data-icon="Layers"></span><span>자산·경로</span></button>
+    <button class="topbar-tab" data-view="findings" onclick="switchView('findings')"><span data-icon="ListChecks"></span><span>보안 발견</span></button>
+    <button class="topbar-tab" data-view="traffic" onclick="switchView('traffic')"><span data-icon="Activity"></span><span>요청 기록</span></button>
     <button class="topbar-tab" data-view="bulk" type="button" onclick="switchView('bulk')"><span data-icon="Layers"></span><span>일괄 테스트</span></button>
     <button class="topbar-tab" data-view="results" onclick="switchView('results')"><span data-icon="ListChecks"></span><span>일괄 테스트 결과</span></button>
     <button class="topbar-tab" data-view="report" onclick="switchView('report')"><span data-icon="FileChartColumn"></span><span>검증 리포트</span></button>
@@ -389,63 +389,74 @@
 
       <!-- ═══ VIEW: 자율 검증 ═══ -->
       <div class="view" data-view="assets">
-        <section class="asset-page">
-          <h1>Asset</h1>
-          <div class="sm-toolbar">
-            <input id="assetRunSearch" class="form-input" aria-label="작업 검색" placeholder="작업 이름 또는 ID 검색">
-            <select id="assetRun" aria-label="검증 작업"></select>
-            <label><input id="assetArchived" type="checkbox"> 보관된 작업</label>
-            <button id="assetPrev" class="icon-button" title="이전 작업 목록" aria-label="이전 작업 목록"><span data-icon="ChevronLeft"></span></button>
-            <button id="assetNext" class="icon-button" title="다음 작업 목록" aria-label="다음 작업 목록"><span data-icon="ChevronRight"></span></button>
-            <button id="assetRefresh" class="icon-button" title="새로고침" aria-label="새로고침"><span data-icon="RefreshCw"></span></button>
-            <button id="assetOpen" class="btn" disabled>검증 작업 열기</button>
+        <section class="asset-page lookup-page">
+          <header class="lookup-heading"><span class="lookup-eyebrow">저장된 기록 탐색</span><h1>자산·경로</h1><p>등록하거나 요청한 웹 경로를 모아 보고, 관련 보안 발견과 요청 기록으로 이동합니다.</p></header>
+          <div class="lookup-toolbar">
+            <label class="lookup-field">조회 범위<select id="assetScope"><option value="all">전체 자산</option><option value="run">작업별 사이트맵</option></select></label>
+            <label class="lookup-field lookup-search">경로 찾기<input id="assetSearch" class="form-input" type="search" aria-label="자산 검색" placeholder="도메인, 경로, 파라미터 검색"></label>
+            <button id="assetRefresh" class="btn btn-secondary" type="button">새로고침</button>
+            <button id="assetReset" class="aw-link" type="button">필터 초기화</button>
           </div>
-          <div class="sm-toolbar">
-            <input id="assetSearch" class="form-input" aria-label="자산 검색" placeholder="도메인, 경로, 파라미터 검색">
-            <label>요청 시작일 <input id="assetFrom" class="form-input" type="date" aria-label="자산 요청 시작일 포함"></label>
-            <label>요청 종료일 <input id="assetThrough" class="form-input" type="date" aria-label="자산 요청 종료일 포함"></label>
-            <span id="assetFocus" class="lookup-actions" hidden><span id="assetFocusLabel"></span><button id="assetClearFocus" class="aw-link" type="button">자산 필터 해제</button></span>
-            <select id="assetState" aria-label="관측 상태"><option value="">모든 상태</option value="discovered">발견 · 미요청</option><option value="observed">관측 · 미판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select>
-            <span id="assetCount" class="aw-muted" role="status"></span>
-            <button id="assetItemPrev" class="icon-button" title="이전 자산" aria-label="이전 자산"><span data-icon="ChevronLeft"></span></button>
-            <button id="assetItemNext" class="icon-button" title="다음 자산" aria-label="다음 자산"><span data-icon="ChevronRight"></span></button>
+          <div id="assetRunControls" class="lookup-scope-box" hidden>
+            <p class="lookup-help">작업을 선택하면 해당 작업에서 관측한 경로와 판정을 볼 수 있습니다.</p>
+            <div class="lookup-toolbar">
+              <label class="lookup-field">작업 검색<input id="assetRunSearch" class="form-input" aria-label="작업 검색" placeholder="작업 이름 또는 ID"></label>
+              <label class="lookup-field">검증 작업<select id="assetRun" aria-label="검증 작업"></select></label>
+              <button id="assetPrev" class="aw-link" type="button">이전 작업 20개</button><button id="assetNext" class="aw-link" type="button">다음 작업 20개</button>
+              <label class="lookup-field">관측 상태<select id="assetState" aria-label="관측 상태"><option value="">모든 상태</option><option value="discovered">발견 · 미요청</option><option value="observed">관측 · 미판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select></label>
+            </div>
           </div>
-          <p id="assetStack" class="aw-muted"></p>
-          <div class="asset-layout"><div id="assetGraph" class="asset-graph" aria-label="도메인 및 URL 구조"></div><aside id="assetDetail" class="sm-detail"></aside></div>
+          <details class="lookup-filter-drawer"><summary>기간 · 보관 필터</summary><div class="lookup-toolbar">
+            <label class="lookup-field">요청 시작일<input id="assetFrom" class="form-input" type="date" aria-label="자산 요청 시작일 포함"></label>
+            <label class="lookup-field">요청 종료일<input id="assetThrough" class="form-input" type="date" aria-label="자산 요청 종료일 포함"></label>
+            <label><input id="assetArchived" type="checkbox"> 보관된 작업의 기록 보기</label>
+          </div><p class="lookup-help">기간은 전체 자산에만 적용됩니다. 선택한 기간에 요청된 자산을 찾으며, 상세에는 전체 연결 이력이 표시됩니다.</p></details>
+          <div id="assetActiveFilters" class="lookup-chips" aria-label="적용된 자산 필터"></div>
+          <div id="assetFocus" class="lookup-scope-box" hidden><span id="assetFocusLabel"></span><button id="assetClearFocus" class="aw-link" type="button">자산 필터 해제</button></div>
+          <div class="lookup-result-bar"><p id="assetCount" role="status"></p><label class="lookup-field">표시 방식<select id="assetLayoutMode"><option value="list">도메인별 목록</option><option value="tree">경로 트리</option></select></label></div>
+          <p id="assetStack" class="lookup-help"></p>
+          <div class="asset-layout"><div id="assetGraph" class="asset-graph" aria-label="도메인 및 URL 구조"></div><aside id="assetDetail" class="sm-detail" aria-label="선택 경로 상세" tabindex="-1"></aside></div>
+          <div class="lookup-pages"><button id="assetOpen" class="btn btn-secondary" type="button" disabled>관련 작업 열기</button><button id="assetItemPrev" class="btn btn-secondary" type="button">이전 자산</button><button id="assetItemNext" class="btn btn-secondary" type="button">다음 자산</button></div>
         </section>
       </div>
       <div class="view" data-view="findings">
-        <section class="lookup-page" aria-label="전체 발견">
-          <h1>발견</h1>
+        <section class="lookup-page" aria-label="전체 보안 발견">
+          <header class="lookup-heading"><span class="lookup-eyebrow">검토할 결과</span><h1>보안 발견</h1><p>검증 중 기록된 보안 문제와 의심 항목을 검토합니다. 판정은 확인 정도, 심각도는 영향, 처리 상태는 검토 진행을 뜻합니다.</p></header>
           <div class="lookup-toolbar">
-            <input id="globalFindingSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 유형 검색" aria-label="발견 검색">
-            <select id="globalFindingVerdict" aria-label="판정"><option value="">모든 판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select>
-            <select id="globalFindingStatus" aria-label="처리 상태"><option value="">모든 처리 상태</option><option value="open">미처리</option><option value="triaged">분류됨</option><option value="resolved">해결</option><option value="false_positive">오탐</option><option value="ignored">무시</option></select>
-            <label><input id="globalFindingGroup" type="checkbox"> 요청 구조별 묶음</label>
-            <label><input id="globalFindingArchived" type="checkbox"> 보관 작업</label>
-            <span id="globalFindingAssetFilter" class="lookup-actions" hidden><span id="globalFindingAssetLabel"></span><button id="globalFindingClearAsset" class="aw-link" type="button">자산 필터 해제</button></span>
+            <label class="lookup-field lookup-search">발견 찾기<input id="globalFindingSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 유형 검색" aria-label="발견 검색"></label>
+            <label class="lookup-field">판정<select id="globalFindingVerdict" aria-label="판정"><option value="">모든 판정</option><option value="confirmed">확증</option><option value="suspicious">의심</option><option value="inconclusive">미확정</option></select></label>
+            <label class="lookup-field">처리 상태<select id="globalFindingStatus" aria-label="처리 상태"><option value="">모든 처리 상태</option><option value="open">미처리</option><option value="triaged">분류됨</option><option value="resolved">해결</option><option value="false_positive">오탐</option><option value="ignored">무시</option></select></label>
+            <button id="globalFindingReset" class="aw-link" type="button">필터 초기화</button>
           </div>
-          <p id="globalFindingCount" class="aw-muted" role="status"></p>
+          <details class="lookup-filter-drawer"><summary>묶음 · 보관 필터</summary><div class="lookup-toolbar"><label><input id="globalFindingGroup" type="checkbox"> 같은 요청 구조·유형·행위자별 묶음</label><label><input id="globalFindingArchived" type="checkbox"> 보관된 작업의 기록 보기</label></div><p class="lookup-help">묶음 안에서도 각 작업의 판정은 개별적으로 유지됩니다.</p></details>
+          <div id="globalFindingActiveFilters" class="lookup-chips" aria-label="적용된 발견 필터"></div>
+          <div id="globalFindingAssetFilter" class="lookup-scope-box" hidden><span id="globalFindingAssetLabel"></span><button id="globalFindingClearAsset" class="aw-link" type="button">자산 필터 해제</button></div>
+          <div class="lookup-result-bar"><p id="globalFindingCount" role="status"></p><span class="lookup-help">최근 갱신 순 · 항목을 선택해 증거 확인</span></div>
           <div id="globalFindingRows" class="lookup-rows"></div>
+          <section id="globalFindingDetail" class="lookup-detail" aria-label="선택 발견 상세" tabindex="-1" hidden></section>
           <div class="lookup-pages"><button id="globalFindingPrev" class="btn btn-secondary" type="button">이전</button><button id="globalFindingNext" class="btn btn-secondary" type="button">다음</button></div>
         </section>
       </div>
       <div class="view" data-view="traffic">
-        <section class="lookup-page" aria-label="전체 트래픽">
-          <h1>트래픽</h1>
+        <section class="lookup-page" aria-label="전체 요청 기록">
+          <header class="lookup-heading"><span class="lookup-eyebrow">요청과 응답 이력</span><h1>요청 기록</h1><p>이 도구가 보낸 요청과 수집한 응답 기록입니다. 기록을 선택해 상세를 보거나 두 건의 요약 정보를 비교하세요.</p></header>
           <div class="lookup-toolbar">
-            <input id="globalTrafficSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 메서드 검색" aria-label="트래픽 검색">
-            <select id="globalTrafficSource" aria-label="출처"><option value="">모든 출처</option><option value="agent">자율 검증</option><option value="browser">브라우저</option><option value="manual">수동 요청</option><option value="bulk">일괄 테스트</option><option value="raw">원문 패킷</option><option value="multi">다중 대상</option></select>
-            <select id="globalTrafficMethod" aria-label="HTTP 메서드"><option value="">모든 메서드</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select>
-            <input id="globalTrafficStatus" class="form-input" type="number" min="100" max="599" inputmode="numeric" placeholder="HTTP 상태" aria-label="HTTP 상태 코드">
-            <label>시작일 <input id="globalTrafficFrom" class="form-input" type="date" aria-label="시작일 포함"></label>
-            <label>종료일 <input id="globalTrafficThrough" class="form-input" type="date" aria-label="종료일 포함"></label>
-            <label><input id="globalTrafficArchived" type="checkbox"> 보관 작업</label>
-            <span id="globalTrafficAssetFilter" class="lookup-actions" hidden><span id="globalTrafficAssetLabel"></span><button id="globalTrafficClearAsset" class="aw-link" type="button">자산 필터 해제</button></span>
+            <label class="lookup-field lookup-search">요청 찾기<input id="globalTrafficSearch" class="form-input" type="search" maxlength="200" placeholder="도메인, 경로, 메서드 검색" aria-label="트래픽 검색"></label>
+            <label class="lookup-field">메서드<select id="globalTrafficMethod" aria-label="HTTP 메서드"><option value="">모든 메서드</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label>
+            <label class="lookup-field">HTTP 상태<input id="globalTrafficStatus" class="form-input" type="number" min="100" max="599" inputmode="numeric" placeholder="예: 200" aria-label="HTTP 상태 코드"></label>
+            <button id="globalTrafficReset" class="aw-link" type="button">필터 초기화</button>
           </div>
-          <p id="globalTrafficCount" class="aw-muted" role="status"></p>
-          <section id="globalTrafficCompare" class="lookup-compare" aria-label="트래픽 메타데이터 비교" hidden></section>
+          <details class="lookup-filter-drawer"><summary>기간 · 출처 · 보관 필터</summary><div class="lookup-toolbar">
+            <label class="lookup-field">출처<select id="globalTrafficSource" aria-label="출처"><option value="">모든 출처</option><option value="agent">자율 검증</option><option value="browser">브라우저</option><option value="manual">수동 요청</option><option value="bulk">일괄 테스트</option><option value="raw">원문 패킷</option><option value="multi">다중 대상</option></select></label>
+            <label class="lookup-field">시작일<input id="globalTrafficFrom" class="form-input" type="date" aria-label="시작일 포함"></label><label class="lookup-field">종료일<input id="globalTrafficThrough" class="form-input" type="date" aria-label="종료일 포함"></label>
+            <label><input id="globalTrafficArchived" type="checkbox"> 보관된 작업의 기록 보기</label>
+          </div></details>
+          <div id="globalTrafficActiveFilters" class="lookup-chips" aria-label="적용된 요청 필터"></div>
+          <div id="globalTrafficAssetFilter" class="lookup-scope-box" hidden><span id="globalTrafficAssetLabel"></span><button id="globalTrafficClearAsset" class="aw-link" type="button">자산 필터 해제</button></div>
+          <div class="lookup-result-bar"><p id="globalTrafficCount" role="status"></p><span class="lookup-help">최근 요청 순 · HTTP 상태는 보안 판정과 다릅니다</span></div>
+          <section id="globalTrafficCompare" class="lookup-compare" aria-label="요청 기록 요약 비교" hidden></section>
           <div id="globalTrafficRows" class="lookup-rows"></div>
+          <section id="globalTrafficDetail" class="lookup-detail" aria-label="선택 요청 상세" tabindex="-1" hidden></section>
           <div class="lookup-pages"><button id="globalTrafficPrev" class="btn btn-secondary" type="button">이전</button><button id="globalTrafficNext" class="btn btn-secondary" type="button">다음</button></div>
         </section>
       </div>

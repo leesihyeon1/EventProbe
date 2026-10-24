@@ -1,9 +1,28 @@
 /* Read-only projection of persisted maps. All requests stay on the local API. */
 const assets={page:0,itemPage:0,sequence:0,run:null,model:null,selected:null,initialized:false,global:false,total:0,focusId:''};
+function assetControl(label,action,cls='aw-link') {
+  const button=uiNode('button',cls,label);button.type='button';button.onclick=action;return button;
+}
+function renderAssetFilters() {
+  const box=agentEl('assetActiveFilters');box.replaceChildren();
+  for(const [name,label] of [['Search','검색'],['From','시작'],['Through','종료'],['Archived','보관 기록']]) {
+    const field=agentEl('asset'+name),check=name==='Archived',value=check?field.checked:field.value;
+    if(!value||(!assets.global&&['From','Through'].includes(name)))continue;
+    box.append(assetControl(`${label}${check?'':': '+value} ×`,()=>{
+      if(check)field.checked=false;else field.value='';
+      assets.itemPage=0;syncWorkspace('assets');name==='Archived'?loadAssetRuns():loadAssetMap();
+    },'lookup-chip'));
+  }
+}
+function resetAssetFilters() {
+  for(const name of ['Search','RunSearch','From','Through','State'])agentEl('asset'+name).value='';
+  agentEl('assetArchived').checked=false;agentEl('assetRun').value='';agentEl('assetScope').value='all';
+  assets.routeRun='';assets.page=0;assets.itemPage=0;setAssetFocus('');syncWorkspace('assets');return loadAssetRuns();
+}
 function setAssetFocus(id) {
   const next=/^[a-f0-9]{64}$/i.test(id||'')?id.toLowerCase():'';
   if(assets.focusId!==next){assets.focusId=next;assets.itemPage=0;assets.selected=next||null;}
-  if(next&&assets.initialized){agentEl('assetRun').value='';agentEl('assetSearch').value='';}
+  if(next&&assets.initialized){agentEl('assetRun').value='';agentEl('assetSearch').value='';agentEl('assetScope').value='all';assets.routeRun='';}
 }
 function assetRoute() {
   const base='#assets'+(assets.focusId?'/'+assets.focusId:'');
@@ -14,6 +33,7 @@ function assetRoute() {
     if(/^\d{4}-\d{2}-\d{2}$/.test(value))query.set(key,value);
   }
   if(agentEl('assetArchived').checked)query.set('archived','1');
+  if(agentEl('assetScope').value==='run'&&agentEl('assetRun').value)query.set('run',agentEl('assetRun').value);
   return base+(query.size?'?'+query:'');
 }
 function restoreAssetFilters(rawQuery) {
@@ -23,6 +43,9 @@ function restoreAssetFilters(rawQuery) {
     agentEl('asset'+name).value=/^\d{4}-\d{2}-\d{2}$/.test(value)?value:'';
   }
   agentEl('assetArchived').checked=query.get('archived')==='1';
+  const run=query.get('run')||'';assets.routeRun=/^[a-zA-Z0-9_-]{1,100}$/.test(run)?run:'';
+  agentEl('assetScope').value=assets.routeRun?'run':'all';
+  agentEl('assetRun').value=assets.routeRun;
   assets.itemPage=0;
 }
 function assetDayStart(value) {
@@ -34,6 +57,12 @@ function assetDayStart(value) {
 async function openAssets() {
   if(!assets.initialized) {
     assets.initialized=true;
+    agentEl('assetScope').onchange=()=>{
+      if(agentEl('assetScope').value!=='run'){agentEl('assetRun').value='';assets.routeRun='';}
+      setAssetFocus('');syncWorkspace('assets');loadAssetRuns();
+    };
+    agentEl('assetLayoutMode').onchange=drawAssets;
+    agentEl('assetReset').onclick=resetAssetFilters;
     let debounce;
     agentEl('assetRunSearch').oninput=()=>{clearTimeout(debounce);debounce=setTimeout(()=>{assets.page=0;loadAssetRuns();},250);};
     agentEl('assetArchived').onchange=()=>{assets.page=0;assets.itemPage=0;syncWorkspace('assets');loadAssetRuns();};
@@ -43,7 +72,7 @@ async function openAssets() {
     agentEl('assetPrev').onclick=()=>{assets.page--;loadAssetRuns();};
     agentEl('assetNext').onclick=()=>{assets.page++;loadAssetRuns();};
     agentEl('assetRefresh').onclick=loadAssetRuns;
-    agentEl('assetRun').onchange=()=>{setAssetFocus('');syncWorkspace('assets');loadAssetMap();};
+    agentEl('assetRun').onchange=()=>{assets.routeRun=agentEl('assetRun').value;setAssetFocus('');syncWorkspace('assets');loadAssetMap();};
     agentEl('assetSearch').oninput=()=>{if(assets.focusId){setAssetFocus('');syncWorkspace('assets');}if(assets.global){clearTimeout(assets.searchTimer);assets.searchTimer=setTimeout(()=>{assets.itemPage=0;loadAssetMap();},250);}else drawAssets();};
     agentEl('assetClearFocus').onclick=()=>{setAssetFocus('');syncWorkspace('assets');loadAssetMap();};
     agentEl('assetState').onchange=drawAssets;
@@ -60,19 +89,24 @@ function clearAssets(message) {
   agentEl('assetDetail').replaceChildren();agentEl('assetStack').textContent='';agentEl('assetCount').textContent='';
 }
 async function loadAssetRuns() {
-  const token=++assets.sequence, select=agentEl('assetRun'), previous=select.value;
+  const token=++assets.sequence, select=agentEl('assetRun'), previous=assets.routeRun||select.value;
+  const scoped=agentEl('assetScope').value==='run';
+  agentEl('assetRunControls').hidden=!scoped;
   clearAssets('작업 불러오는 중…');
   try {
     const query=new URLSearchParams({offset:assets.page*20,limit:20,search:agentEl('assetRunSearch').value,archived:agentEl('assetArchived').checked?'true':'false'});
     const result=await agentApi('/history/runs?'+query);
     if(token!==assets.sequence)return;
     select.replaceChildren();
-    const all=uiNode('option','','전체 작업');all.value='';select.append(all);
+    const all=uiNode('option','',scoped?'작업을 선택하세요':'전체 작업');all.value='';select.append(all);
     for(const run of result.runs) {const option=uiNode('option','',`${run.name||run.goal||'검증 작업'} · ${run.id.slice(0,8)}`);option.value=run.id;select.append(option);}
     select.disabled=false;
     agentEl('assetPrev').disabled=assets.page===0;
     agentEl('assetNext').disabled=(assets.page+1)*20>=result.total;
-    if(result.runs.some(r=>r.id===previous))select.value=previous;
+    if(scoped&&previous) {
+      if(!result.runs.some(r=>r.id===previous)){const saved=uiNode('option','','선택된 작업 · '+previous.slice(0,8));saved.value=previous;select.append(saved);}
+      select.value=previous;
+    }
     await loadAssetMap();
   } catch(error) {if(token===assets.sequence)clearAssets('작업 조회 실패: '+error.message);}
 }
@@ -80,8 +114,12 @@ async function loadAssetMap() {
   const id=agentEl('assetRun').value, token=++assets.sequence;
   clearAssets('자산 불러오는 중…');
   assets.global=!id;
+  renderAssetFilters();
+  if(agentEl('assetScope').value==='run'&&!id) {
+    clearAssets('위에서 작업을 선택하면 사이트맵을 확인할 수 있습니다.');return;
+  }
   agentEl('assetFocus').hidden=!assets.focusId;
-  agentEl('assetFocusLabel').textContent=assets.focusId?`선택 자산 ${assets.focusId.slice(0,12)}…`:'';
+  agentEl('assetFocusLabel').textContent=assets.focusId?'선택한 자산':'';
   agentEl('assetState').disabled=!id;
   agentEl('assetFrom').disabled=!!id;
   agentEl('assetThrough').disabled=!!id;
@@ -103,7 +141,8 @@ async function loadAssetMap() {
       assets.total=result.total;
       assets.model={rows:result.assets.map(a=>({...a,key:a.id,seed:false,browser:false,
         state:'registered',requests:[],observations:[],sources:[],actors:{},failed:false,outside:false})),limited:false};
-      agentEl('assetStack').textContent='작업과 수동 요청에서 수집한 경로 · 작업을 선택하면 관측 및 판정 상태 표시';
+      agentEl('assetStack').textContent='작업과 수동 요청에서 연결된 경로입니다. 경로를 선택하면 관련 기록과 전체 연결 이력을 볼 수 있습니다.';
+      if(assets.focusId&&result.assets.length)agentEl('assetFocusLabel').textContent=`${result.assets[0].method} ${result.assets[0].origin}${result.assets[0].path}`;
       drawAssets();return;
     }
     const run=await agentApi('/history/runs/'+encodeURIComponent(id)+'/map');
@@ -113,17 +152,39 @@ async function loadAssetMap() {
     const recon=run.recon||{};
     agentEl('assetStack').textContent=[...(recon.technologies||[]),...(recon.server_headers||[])].join(' · ');
     drawAssets();
-  } catch(error) {if(token===assets.sequence)clearAssets('사이트맵 조회 실패: '+error.message);}
+  } catch(error) {if(token===assets.sequence){clearAssets('자산 조회 실패: '+error.message);agentEl('assetGraph').append(assetControl('다시 시도',loadAssetMap));}}
 }
 function drawAssets() {
   if(!assets.model)return;
+  renderAssetFilters();
   const rows=filterSiteMapRows(assets.model.rows,assets.global?'':agentEl('assetSearch').value,'',agentEl('assetState').value);
   agentEl('assetCount').textContent=assets.global?`경로 ${assets.total}개 · ${assets.itemPage+1}페이지`:`경로 ${rows.length} / ${assets.model.rows.length}개${assets.model.limited?' · 수집 한도 도달':''}`;
   agentEl('assetItemPrev').disabled=!assets.global||assets.itemPage===0;
   agentEl('assetItemNext').disabled=!assets.global||(assets.itemPage+1)*50>=assets.total;
   const graph=agentEl('assetGraph');graph.replaceChildren();
-  if(!rows.length){graph.append(uiNode('p','sm-empty','표시할 경로가 없습니다.'));agentEl('assetDetail').replaceChildren();return;}
+  if(!rows.length){graph.append(uiNode('p','sm-empty','표시할 경로가 없습니다. 검색·기간을 확인하거나 요청 / 분석에서 기록을 생성해 주세요.'),assetControl('필터 초기화',resetAssetFilters));agentEl('assetDetail').replaceChildren();agentEl('assetOpen').disabled=true;return;}
   if(!rows.some(r=>r.key===assets.selected))assets.selected=rows[0].key;
+  if(agentEl('assetLayoutMode').value!=='tree') {
+    const groups=new Map();
+    for(const row of rows){if(!groups.has(row.origin))groups.set(row.origin,[]);groups.get(row.origin).push(row);}
+    for(const [origin,items] of groups) {
+      const group=uiNode('details','asset-domain');group.open=true;
+      group.append(uiNode('summary','',`${origin} · 이 페이지 ${items.length}개`));
+      for(const row of items) {
+        const button=assetControl('',()=>{
+          assets.selected=row.key;
+          graph.querySelectorAll('[data-key]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.key===row.key)));
+          showAssetDetail(row);
+          const panel=agentEl('assetDetail');panel.focus({preventScroll:true});panel.scrollIntoView({block:'nearest'});
+        },'asset-list-row');button.dataset.key=row.key;button.setAttribute('aria-pressed',String(row.key===assets.selected));button.setAttribute('aria-controls','assetDetail');
+        button.append(uiNode('span','sm-method',row.method),uiNode('span','sm-path',siteMapLabel(row)),
+          assets.global?uiNode('span','lookup-help',`작업 ${row.run_count??0} · 수동 요청 ${row.manual_count||0}`):siteMapBadge(row));
+        group.append(button);
+      }
+      graph.append(group);
+    }
+    showAssetDetail(rows.find(r=>r.key===assets.selected));return;
+  }
   const roots=new Map();
   for(const row of rows) {
     if(!roots.has(row.origin))roots.set(row.origin,{label:row.origin,children:new Map(),rows:[]});
@@ -160,9 +221,17 @@ function showAssetDetail(row) {
     for(const [key,value] of [['작업',`${row.run_count}개`],['수동 요청',`${row.manual_count||0}개`],['쿼리 키',row.query_known===false?'과거 기록에서 확인 불가':row.query.join(', ')||'없음'],['본문 필드',row.fields.join(', ')||'없음'],['최초 연결',new Date(row.first_seen*1000).toLocaleString('ko-KR')],['최근 연결 갱신',new Date(row.last_seen*1000).toLocaleString('ko-KR')]])facts.append(uiNode('dt','',key),uiNode('dd','',value));
     panel.append(facts,uiNode('h5','','관련 작업'));
     const links=uiNode('div','lookup-actions');
-    for(const [kind,label] of [['traffic','관련 트래픽'],['findings','관련 발견']]) {
+    for(const [kind,label] of [['traffic','관련 요청 기록'],['findings','관련 보안 발견']]) {
       const button=uiNode('button','aw-link',label);button.type='button';
-      button.onclick=()=>{setGlobalLookupAssetFilter(kind,row.id);switchView(kind);};
+      button.onclick=()=>{
+        const prefix=kind==='traffic'?'globalTraffic':'globalFinding';
+        agentEl(prefix+'Search').value='';agentEl(prefix+'Archived').checked=agentEl('assetArchived').checked;
+        if(kind==='traffic') {
+          for(const name of ['Source','Method','Status'])agentEl(prefix+name).value='';
+          for(const name of ['From','Through'])agentEl(prefix+name).value=agentEl('asset'+name).value;
+        } else {agentEl(prefix+'Verdict').value='';agentEl(prefix+'Status').value='';agentEl(prefix+'Group').checked=false;}
+        setGlobalLookupAssetFilter(kind,row.id);switchView(kind);
+      };
       links.append(button);
     }
     panel.append(links);

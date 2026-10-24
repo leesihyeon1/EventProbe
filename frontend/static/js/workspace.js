@@ -2,7 +2,7 @@
 let workspaceRuns = [], workspacePage = 0;
 const workspaceSelectedIds = new Set();
 const workspacePageSize = 10;
-const WORKSPACE_TITLES = {agent:'자율 검증', assets:'Asset', findings:'발견', traffic:'트래픽', settings:'설정 · 감사', bulk:'일괄 테스트', request:'요청 / 분석', results:'일괄 테스트 결과', report:'검증 리포트'};
+const WORKSPACE_TITLES = {agent:'자율 검증', assets:'자산·경로', findings:'보안 발견', traffic:'요청 기록', settings:'설정 · 감사', bulk:'일괄 테스트', request:'요청 / 분석', results:'일괄 테스트 결과', report:'검증 리포트'};
 function uiNode(tag, cls, text) {
   const el = document.createElement(tag); if (cls) el.className = cls;
   if (text !== undefined) el.textContent = text; return el;

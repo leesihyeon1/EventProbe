@@ -40,7 +40,7 @@ test('focused asset route accepts only a valid identifier',()=>{
 test('global asset dates filter stored traffic and restore from a link',async()=>{
   const nodes=new Map(),calls=[];
   const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false,
-    replaceChildren(){},textContent:'',hidden:false});return nodes.get(id);};
+    replaceChildren(){},append(){},textContent:'',hidden:false});return nodes.get(id);};
   const context=vm.createContext({agentEl:get,URLSearchParams,Date,
     uiNode:()=>({}),drawAssets(){},agentApi:async url=>{
       calls.push(url);return {assets:[],total:0};
@@ -59,4 +59,23 @@ test('global asset dates filter stored traffic and restore from a link',async()=
   assert.equal(calls.length,count);
   context.restoreAssetFilters('from=2026-10-21&through=2026-10-22&archived=1');
   assert.equal(context.assetRoute(),'#assets?from=2026-10-21&through=2026-10-22&archived=1');
+});
+
+
+test('asset scope link round trips a selected run and rejects malformed IDs',()=>{
+  const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false});return nodes.get(id);};
+  const context=vm.createContext({agentEl:get,URLSearchParams,Date});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/js/assets.js'),'utf8'),context);
+  context.restoreAssetFilters('run=run-123&archived=1');
+  assert.equal(get('assetScope').value,'run');
+  assert.equal(context.assetRoute(),'#assets?archived=1&run=run-123');
+  context.restoreAssetFilters('run=bad%2Fid');
+  assert.equal(get('assetScope').value,'all');assert.equal(context.assetRoute(),'#assets');
+});
+
+test('asset state contains a real discovered option and a labeled scope selector',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../templates/index.html'),'utf8');
+  assert.match(html,/<option value="discovered">발견 · 미요청<\/option>/);
+  assert(!html.includes('</option value='));
+  assert.match(html,/id="assetScope"/);
 });

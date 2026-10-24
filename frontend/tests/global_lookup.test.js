@@ -6,9 +6,13 @@ const vm=require('node:vm');
 
 class Element {
   constructor(tag='div'){this.tagName=tag;this.children=[];this.value='';this.checked=false;this.textContent='';this.dataset={};}
+  setAttribute(key,value){this[key]=value;}
+  focus(){}
+  scrollIntoView(){}
   append(...children){this.children.push(...children);}
   replaceChildren(...children){this.children=[...children];}
 }
+const descendants=node=>[node,...(node.children||[]).flatMap(descendants)];
 const nodes=new Map();
 const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
 const calls=[];
@@ -33,14 +37,18 @@ test('traffic list pages metadata and opens raw evidence only on disclosure',asy
   await context.openGlobalLookup('traffic');
   assert.equal(calls.length,1);
   assert.match(calls[0],/history\/traffic/);
-  const row=get('globalTrafficRows').children[0];
-  assert.equal(row.children[0].children[0].textContent,'POST https://example.test/login');
-  const details=row.children[1].children.find(child=>child.tagName==='details');
+  const button=descendants(get('globalTrafficRows')).find(node=>node.className==='lookup-record');
+  assert.equal(button.textContent,'POST /login');
+  await button.onclick();
+  assert.equal(calls.length,1, 'selecting metadata must not fetch raw evidence');
+  const details=descendants(get('globalTrafficDetail')).find(node=>node.tagName==='details');
   details.open=true;
   await details.ontoggle();
   assert.equal(calls.length,2);
   assert.match(calls[1],/history\/runs\/run1\/events\/ob1/);
-  assert.match(details.children[1].textContent,/PRIVATE_BODY/);
+  assert.match(JSON.stringify(details),/PRIVATE_BODY/);
+  assert.match(JSON.stringify(details),/요청/);
+  assert.match(JSON.stringify(details),/저장되지 않았습니다/);
 });
 
 test('selected asset filters both global lists and can be cleared',async()=>{
@@ -195,7 +203,7 @@ test('traffic opens same-asset findings without fetching evidence',()=>{
   get('globalFindingGroup').checked=true;
   const row=context.globalLookupRow('traffic',{id:'manual1',run_id:'',asset_id:id,
     created:1,method:'GET',origin:'https://example.test',path:'/page',source:'manual',status:200});
-  row.children[1].children.find(child=>child.textContent==='같은 자산의 발견').onclick();
+  row.children[1].children.find(child=>child.textContent==='같은 자산의 보안 발견').onclick();
   assert.deepEqual(views,['findings']);
   assert.equal(context.globalLookupRoute('findings'),'#findings/'+id+'?archived=1');
   assert.equal(get('globalFindingSearch').value,'');
@@ -208,7 +216,7 @@ test('traffic opens same-asset findings without fetching evidence',()=>{
   get('globalTrafficArchived').checked=false;
   const noAsset=context.globalLookupRow('traffic',{id:'manual2',run_id:'',asset_id:'',
     created:1,method:'GET',origin:'https://example.test',path:'/other',source:'manual',status:200});
-  assert.equal(noAsset.children[1].children.some(child=>child.textContent==='같은 자산의 발견'),false);
+  assert.equal(noAsset.children[1].children.some(child=>child.textContent==='같은 자산의 보안 발견'),false);
 });
 
 test('findings and groups return to same-asset traffic',()=>{
@@ -223,7 +231,7 @@ test('findings and groups return to same-asset traffic',()=>{
   const finding=context.globalLookupRow('findings',{id:'f1',run_id:'run1',asset_id:id,
     created:1,method:'GET',origin:'https://example.test',path:'/page',
     verdict:'confirmed',category:'access',evidence_count:1,status:'open'});
-  finding.children[1].children.find(child=>child.textContent==='같은 자산의 트래픽').onclick();
+  finding.children[1].children.find(child=>child.textContent==='같은 자산의 요청 기록').onclick();
   assert.equal(context.globalLookupRoute('traffic'),'#traffic/'+id+'?archived=1');
   assert.equal(get('globalTrafficSearch').value,'');
   assert.equal(get('globalTrafficSource').value,'');
@@ -232,7 +240,7 @@ test('findings and groups return to same-asset traffic',()=>{
     method:'GET',origin:'https://example.test',path:'/page',run_count:1,
     confirmed_count:1,suspicious_count:0,inconclusive_count:0},
     {verdict:'',status:'',archived:'true'},0);
-  group.children[0].children.find(child=>child.textContent==='같은 자산의 트래픽').onclick();
+  group.children[0].children.find(child=>child.textContent==='같은 자산의 요청 기록').onclick();
   assert.deepEqual(views,['traffic','traffic']);
   assert.equal(calls.length,before);
   context.setGlobalLookupAssetFilter('traffic','');
@@ -294,4 +302,60 @@ test('operations view distinguishes missing browser result and request errors',a
   assert.match(row.children[1].textContent,/절차 a{12} · 프롬프트 b{12}/);
   assert.match(row.children[1].textContent,/토큰 미제공/);
   assert(!JSON.stringify(row).includes('PRIVATE_BODY'));
+});
+
+
+test('manual record detail explains summary-only storage without raw I/O',async()=>{
+  const before=calls.length;
+  await context.selectLookupRecord('traffic',{id:'manual',run_id:'',created:1,method:'GET',origin:'https://example.test',path:'/item',source:'manual',status:200});
+  assert.equal(calls.length,before);
+  assert.match(JSON.stringify(get('globalTrafficDetail')),/요약만 저장됨/);
+  assert.equal(descendants(get('globalTrafficDetail')).some(node=>node.tagName==='details'),false);
+});
+
+test('finding detail loads only selected metadata and ignores a late selection response',async()=>{
+  const previousApi=context.agentApi,urls=[];
+  let resolveFirst;
+  context.agentApi=url=>{urls.push(url);return url.includes('/one/')?new Promise(resolve=>resolveFirst=resolve):Promise.resolve({findings:[{id:'second',note:'CURRENT',evidence_ids:['e2']}]});};
+  const base={method:'GET',origin:'https://example.test',path:'/item',category:'access',verdict:'suspicious',status:'open',severity:'medium',evidence_count:1};
+  const first=context.selectLookupRecord('findings',{...base,id:'first',run_id:'one'});
+  await context.selectLookupRecord('findings',{...base,id:'second',run_id:'two'});
+  resolveFirst({findings:[{id:'first',note:'STALE',evidence_ids:['e1']}]});await first;
+  const rendered=JSON.stringify(get('globalFindingDetail'));
+  assert.match(rendered,/CURRENT/);assert(!rendered.includes('STALE'));
+  assert(urls.every(url=>url.endsWith('/findings')));
+  context.agentApi=previousApi;
+});
+
+test('failed list lookup clears old rows and detail and offers retry',async()=>{
+  const previousApi=context.agentApi;
+  get('globalTrafficRows').replaceChildren(new Element('stale-row'));
+  context.agentApi=async()=>{throw new Error('offline');};
+  await context.loadGlobalLookup('traffic');
+  assert.equal(get('globalTrafficDetail').hidden,true);
+  assert(!JSON.stringify(get('globalTrafficRows')).includes('stale-row'));
+  assert.match(JSON.stringify(get('globalTrafficRows')),/다시 시도/);
+  assert.equal(get('globalTrafficNext').disabled,true);
+  context.agentApi=previousApi;
+});
+
+test('reset removes search, scoped asset and all traffic filters before querying',async()=>{
+  get('globalTrafficSearch').value='old';get('globalTrafficSource').value='manual';
+  get('globalTrafficArchived').checked=true;
+  context.setGlobalLookupAssetFilter('traffic','a'.repeat(64));
+  await context.resetGlobalLookup('traffic');
+  const query=new URLSearchParams(calls.at(-1).split('?')[1]);
+  assert.equal(query.get('search'),'');assert.equal(query.get('source'),'');
+  assert.equal(query.get('archived'),'false');assert.equal(query.has('asset_id'),false);
+  assert.equal(get('globalTrafficActiveFilters').children.length,0);
+});
+
+test('evidence retry replaces failed content and never duplicates raw sections',async()=>{
+  const previousApi=context.agentApi;let attempts=0;
+  context.agentApi=async()=>{if(++attempts===1)throw new Error('offline');return {data:{request:{method:'GET'},response:{status:200}}};};
+  const details=context.lookupEventDisclosure('r','e');details.open=true;
+  await details.ontoggle();assert.match(JSON.stringify(details),/다시 시도/);
+  await details.ontoggle();assert.equal(details.children[1].children.length,3);
+  await details.ontoggle();assert.equal(attempts,2);
+  context.agentApi=previousApi;
 });

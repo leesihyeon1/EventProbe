@@ -4,25 +4,177 @@ const runTrafficState={runId:null,page:0,seq:0};
 const trafficCompare={items:[],notice:''};
 const trafficSourceLabels={browser:'브라우저',agent:'자율 검증',manual:'수동 요청',
   bulk:'일괄 테스트',raw:'원문 패킷',multi:'다중 대상'};
+const lookupVerdicts={confirmed:'확증',suspicious:'의심',inconclusive:'미확정'};
+const lookupStatuses={open:'미처리',triaged:'분류됨',resolved:'해결',false_positive:'오탐',ignored:'무시'};
+const lookupSeverities={critical:'심각',high:'높음',medium:'보통',low:'낮음',info:'정보'};
+const lookupCategories={sqli:'SQL 삽입',xss:'스크립트 삽입',access:'접근 제어',ssrf:'서버 요청 위조',
+  lfi:'파일 접근',cmdi:'명령 삽입',ssti:'템플릿 삽입',redirect:'리디렉션',nosql:'NoSQL 삽입'};
+function lookupPrefix(kind){return kind==='findings'?'globalFinding':'globalTraffic';}
+function lookupAddress(item){return `${item.method||''} ${item.origin||''}${item.path||''}`.trim();}
+function lookupButton(label,action,cls='aw-link') {
+  const button=uiNode('button',cls,label);button.type='button';button.onclick=action;return button;
+}
+function lookupBadge(value,label) {
+  const badge=uiNode('span','lookup-badge',label||'미기록');badge.dataset.tone=value||'';return badge;
+}
+function lookupSyncRoute(kind) {
+  if(typeof history!=='undefined'&&typeof location!=='undefined') {
+    const route=globalLookupRoute(kind);if(location.hash!==route)history.pushState(null,'',route);
+  }
+}
+function resetGlobalLookup(kind) {
+  const prefix=lookupPrefix(kind);
+  for(const name of kind==='findings'?['Search','Verdict','Status']:['Search','Source','Method','Status','From','Through'])agentEl(prefix+name).value='';
+  agentEl(prefix+'Archived').checked=false;
+  if(kind==='findings')agentEl(prefix+'Group').checked=false;
+  setGlobalLookupAssetFilter(kind,'');globalLookupState[kind].page=0;
+  if(kind==='traffic')clearTrafficComparison();
+  lookupSyncRoute(kind);return loadGlobalLookup(kind);
+}
+function renderLookupFilters(kind) {
+  const prefix=lookupPrefix(kind),box=agentEl(prefix+'ActiveFilters');box.replaceChildren();
+  const fields=kind==='findings'
+    ?[['Search','검색'],['Verdict','판정',lookupVerdicts],['Status','처리',lookupStatuses],['Group','요청 구조별 묶음'],['Archived','보관 기록']]
+    :[['Search','검색'],['Source','출처',trafficSourceLabels],['Method','메서드'],['Status','HTTP'],['From','시작'],['Through','종료'],['Archived','보관 기록']];
+  for(const [name,label,labels] of fields) {
+    const field=agentEl(prefix+name),check=['Group','Archived'].includes(name),value=check?field.checked:field.value;
+    if(!value)continue;
+    box.append(lookupButton(`${label}${check?'':': '+(labels?.[value]||value)} ×`,()=>{
+      if(check)field.checked=false;else field.value='';
+      globalLookupState[kind].page=0;
+      if(kind==='traffic')clearTrafficComparison();
+      lookupSyncRoute(kind);loadGlobalLookup(kind);
+    },'lookup-chip'));
+  }
+}
+function lookupEmpty(container,title,description,action,label) {
+  const box=uiNode('div','lookup-empty');
+  box.append(uiNode('strong','',title),uiNode('p','',description));
+  if(action)box.append(lookupButton(label,action,'btn btn-secondary'));
+  container.replaceChildren(box);
+}
+function clearLookupDetail(kind) {
+  const state=globalLookupState[kind];state.detailSeq=(state.detailSeq||0)+1;
+  state.selected=null;
+  const panel=agentEl(lookupPrefix(kind)+'Detail');panel.hidden=true;panel.replaceChildren();
+  for(const button of state.rowButtons||[])button.setAttribute('aria-pressed','false');
+}
+function lookupDataSection(title,data) {
+  const section=uiNode('section','lookup-data-section');section.append(uiNode('h4','',title));
+  if(data==null)section.append(uiNode('p','lookup-help','이 이벤트에는 해당 원문이 저장되지 않았습니다.'));
+  else section.append(uiNode('pre','lookup-body',typeof data==='string'?data:JSON.stringify(data,null,2)));
+  return section;
+}
+function lookupEventDisclosure(runId,eventId,label='저장된 요청·응답 열기') {
+  const details=uiNode('details','lookup-evidence'),content=uiNode('div','lookup-event');
+  details.append(uiNode('summary','',label),content);
+  details.ontoggle=async()=>{
+    if(!details.open||details.dataset.loaded)return;
+    details.dataset.loaded='loading';content.replaceChildren(uiNode('p','lookup-help','저장된 이벤트를 불러오는 중…'));
+    try {
+      const event=await agentApi(`/history/runs/${encodeURIComponent(runId)}/events/${encodeURIComponent(eventId)}`);
+      const data=event.data||{};
+      const raw=uiNode('details','lookup-raw');raw.append(uiNode('summary','','원본 이벤트 데이터'),uiNode('pre','lookup-body',JSON.stringify(data,null,2)));
+      content.replaceChildren(lookupDataSection('요청',data.request),lookupDataSection('응답',data.response),raw);
+      details.dataset.loaded='done';
+    } catch(error) {
+      details.dataset.loaded='';
+      content.replaceChildren(uiNode('p','lookup-help','기록 조회 실패: '+error.message),lookupButton('다시 시도',()=>details.ontoggle()));
+    }
+  };
+  return details;
+}
+async function selectLookupRecord(kind,item,button) {
+  clearLookupDetail(kind);
+  const state=globalLookupState[kind],seq=state.detailSeq,panel=agentEl(lookupPrefix(kind)+'Detail');
+  state.selected=item.id;button?.setAttribute('aria-pressed','true');panel.hidden=false;
+  const heading=uiNode('div','lookup-detail-heading');
+  heading.append(uiNode('h3','',kind==='findings'?(lookupCategories[item.category]||item.category||'보안 발견'):'요청 기록 상세'),
+    lookupButton('상세 닫기',()=>{clearLookupDetail(kind);button?.focus();}));
+  panel.append(heading,uiNode('p','lookup-address',lookupAddress(item)));
+  const facts=uiNode('dl','sm-facts');
+  const entries=kind==='findings'
+    ?[['판정',lookupVerdicts[item.verdict]||'미기록'],['심각도',lookupSeverities[item.severity]||'미기록'],['처리 상태',lookupStatuses[item.status]||'미기록'],['연결 증거',`${item.evidence_count??0}개${item.incomplete_evidence?' · 일부 누락':''}`]]
+    :[['기록 시각',new Date(item.created*1000).toLocaleString('ko-KR')],['출처',trafficSourceLabels[item.source]||item.source],['HTTP 상태',item.status??'미관측'],['저장 범위',item.run_id?'작업 이벤트 · 저장된 필드만 조회':'요약만 저장됨']];
+  for(const [label,value] of entries)facts.append(uiNode('dt','',label),uiNode('dd','',String(value)));
+  panel.append(facts);
+  const links=uiNode('div','lookup-actions'),asset=globalLookupAssetButton(item.asset_id,kind);
+  if(asset)links.append(asset);
+  const related=kind==='findings'?globalFindingTrafficButton(item.asset_id):globalTrafficFindingButton(item.asset_id);
+  if(related)links.append(related);
+  if(item.run_id)links.append(globalLookupRunButton(item.run_id,'관련 작업 열기',kind==='findings'?'findings':'history'));
+  panel.append(links,uiNode('p','lookup-help','같은 자산의 기록은 경로 기준으로 연결됩니다. 개별 발견의 증거와는 구분됩니다.'));
+  panel.focus?.({preventScroll:true});panel.scrollIntoView?.({block:'nearest'});
+  if(kind==='traffic') {
+    panel.append(item.run_id?lookupEventDisclosure(item.run_id,item.id):uiNode('p','lookup-help','이 요청은 주소·출처·HTTP 상태 요약만 저장되어 요청·응답 원문을 제공하지 않습니다.'));
+    return;
+  }
+  const evidence=uiNode('section','lookup-evidence-list');panel.append(evidence);
+  if(!item.run_id){evidence.append(uiNode('p','lookup-help','연결된 작업이 없어 증거를 조회할 수 없습니다.'));return;}
+  async function loadEvidence() {
+    evidence.replaceChildren(uiNode('p','lookup-help','연결 증거를 확인하는 중…'));
+    try {
+      const view=await agentApi(`/history/runs/${encodeURIComponent(item.run_id)}/findings`);
+      if(seq!==state.detailSeq)return;
+      const finding=(view.findings||[]).find(f=>f.id===item.id);
+      evidence.replaceChildren(uiNode('h4','','판단 근거 · 연결 증거'));
+      if(!finding){evidence.append(uiNode('p','lookup-help','현재 작업에서 이 발견을 찾을 수 없습니다. 목록을 새로 조회해 주세요.'));return;}
+      if(finding.note)evidence.append(uiNode('p','lookup-note','검토 메모: '+finding.note));
+      if(finding.incomplete_evidence)evidence.append(uiNode('p','lookup-help','연결 증거 일부가 누락되었습니다.'));
+      if(!(finding.evidence_ids||[]).length)evidence.append(uiNode('p','lookup-help','연결된 증거 기록이 없습니다.'));
+      for(const [i,id] of (finding.evidence_ids||[]).entries())evidence.append(lookupEventDisclosure(item.run_id,id,`증거 ${i+1} · 요청·응답 확인`));
+    } catch(error) {
+      if(seq!==state.detailSeq)return;
+      evidence.replaceChildren(uiNode('p','lookup-help','증거 조회 실패: '+error.message),lookupButton('다시 시도',loadEvidence));
+    }
+  }
+  await loadEvidence();
+}
+function renderLookupTable(kind,items,container) {
+  const state=globalLookupState[kind];state.rowButtons=[];
+  const scroller=uiNode('div','lookup-table-scroll'),table=uiNode('table','lookup-table');
+  const caption=uiNode('caption','lookup-table-caption',kind==='findings'?'보안 발견 목록 — 유형을 선택하면 아래에 상세가 열립니다.':'요청 기록 목록 — 경로를 선택하면 아래에 상세가 열립니다.');
+  const head=uiNode('thead'),headRow=uiNode('tr'),body=uiNode('tbody');
+  const titles=kind==='findings'?['발견 유형 / 대상','판정','심각도','처리 상태','증거','갱신 시각']:['기록 시각','메서드 / 대상','HTTP','출처','저장 범위','요약 비교'];
+  for(const title of titles){const th=uiNode('th','',title);th.scope='col';headRow.append(th);}head.append(headRow);
+  for(const item of items) {
+    const row=uiNode('tr'),target=uiNode('td','lookup-target');
+    const button=lookupButton(kind==='findings'?(lookupCategories[item.category]||item.category||'유형 미기록'):`${item.method} ${item.path}`,()=>selectLookupRecord(kind,item,button),'lookup-record');
+    button.setAttribute('aria-pressed','false');button.setAttribute('aria-controls',lookupPrefix(kind)+'Detail');
+    button.title=lookupAddress(item);state.rowButtons.push(button);
+    target.append(button,uiNode('span','lookup-address',kind==='findings'?lookupAddress(item):item.origin));
+    const cell=(value)=>{const td=uiNode('td');td.append(value);return td;};
+    const date=uiNode('time','',new Date((kind==='findings'?(item.updated||item.created):item.created)*1000).toLocaleString('ko-KR'));
+    if(kind==='findings')row.append(target,cell(lookupBadge(item.verdict,lookupVerdicts[item.verdict])),cell(lookupBadge(item.severity,lookupSeverities[item.severity])),cell(uiNode('span','',lookupStatuses[item.status]||'미기록')),cell(uiNode('span','',`${item.evidence_count??0}${item.incomplete_evidence?' · 누락':''}`)),cell(date));
+    else {
+      const compare=lookupButton(trafficCompare.items.some(entry=>trafficCompareKey(entry)===trafficCompareKey(item))?'비교 해제':'비교에 담기',()=>toggleTrafficComparison(item));compare.dataset.compareKey=trafficCompareKey(item);
+      row.append(cell(date),target,cell(uiNode('code','',String(item.status??'미관측'))),cell(uiNode('span','',trafficSourceLabels[item.source]||item.source)),cell(uiNode('span','',item.run_id?'작업 이벤트':'요약만 저장')),cell(compare));
+    }
+    body.append(row);
+  }
+  table.append(caption,head,body);scroller.append(table);
+  container.append(uiNode('p','lookup-scroll-hint','표를 좌우로 밀어 나머지 항목을 확인할 수 있습니다.'),scroller);
+}
 
 function trafficCompareKey(item) {return `${item.run_id||''}:${item.id}`;}
 function clearTrafficComparison() {
   trafficCompare.items=[];trafficCompare.notice='';renderTrafficComparison();refreshTrafficCompareButtons();
 }
 function refreshTrafficCompareButtons() {
-  for(const row of agentEl('globalTrafficRows').children) {
-    for(const button of row.children[1]?.children||[]) {
+  const walk=node=>{
+    for(const button of node.children||[]) {
       if(button.dataset?.compareKey)button.textContent=trafficCompare.items.some(
         item=>trafficCompareKey(item)===button.dataset.compareKey)?'비교 해제':'비교에 담기';
+      walk(button);
     }
-  }
+  };walk(agentEl('globalTrafficRows'));
 }
 function renderTrafficComparison() {
   const panel=agentEl('globalTrafficCompare');panel.replaceChildren();
   panel.hidden=trafficCompare.items.length===0;
   if(panel.hidden)return;
   const head=uiNode('div','lookup-compare-head');
-  head.append(uiNode('strong','',`트래픽 메타데이터 비교 · ${trafficCompare.items.length}/2건`));
+  head.append(uiNode('strong','',`요청 기록 요약 비교 · ${trafficCompare.items.length}/2건`));
   const clear=uiNode('button','aw-link','선택 지우기');clear.type='button';
   clear.onclick=clearTrafficComparison;
   head.append(clear);panel.append(head);
@@ -133,6 +285,7 @@ function initGlobalLookup(kind) {
   const state=globalLookupState[kind];
   if(state.initialized)return;
   state.initialized=true;
+  agentEl(prefix+'Reset').onclick=()=>resetGlobalLookup(kind);
   agentEl(prefix+'ClearAsset').onclick=()=>{setGlobalLookupAssetFilter(kind,'');switchView(kind);};
   let debounce;
   agentEl(prefix+'Search').oninput=()=>{
@@ -165,15 +318,21 @@ function globalLookupRunButton(runId, label, mode) {
   return button;
 }
 
-function globalLookupAssetButton(assetId) {
+function globalLookupAssetButton(assetId,kind) {
   if(!/^[a-f0-9]{64}$/i.test(assetId||''))return null;
   const button=uiNode('button','aw-link','자산 열기');button.type='button';
-  button.onclick=()=>{setAssetFocus(assetId);switchView('assets');};
+  button.onclick=()=>{
+    if(kind) {
+      agentEl('assetArchived').checked=agentEl(lookupPrefix(kind)+'Archived').checked;
+      for(const name of ['From','Through'])agentEl('asset'+name).value=kind==='traffic'?agentEl('globalTraffic'+name).value:'';
+    }
+    setAssetFocus(assetId);switchView('assets');
+  };
   return button;
 }
 function globalTrafficFindingButton(assetId) {
   if(!/^[a-f0-9]{64}$/i.test(assetId||''))return null;
-  const button=uiNode('button','aw-link','같은 자산의 발견');button.type='button';
+  const button=uiNode('button','aw-link','같은 자산의 보안 발견');button.type='button';
   button.onclick=()=>{
     agentEl('globalFindingSearch').value='';
     agentEl('globalFindingVerdict').value='';
@@ -187,7 +346,7 @@ function globalTrafficFindingButton(assetId) {
 }
 function globalFindingTrafficButton(assetId) {
   if(!/^[a-f0-9]{64}$/i.test(assetId||''))return null;
-  const button=uiNode('button','aw-link','같은 자산의 트래픽');button.type='button';
+  const button=uiNode('button','aw-link','같은 자산의 요청 기록');button.type='button';
   button.onclick=()=>{
     agentEl('globalTrafficSearch').value='';
     for(const name of ['Source','Method','Status','From','Through'])agentEl('globalTraffic'+name).value='';
@@ -208,7 +367,7 @@ function globalLookupRow(kind,item) {
   top.append(uiNode('span','aw-muted',badge));row.append(top);
   const actions=uiNode('div','lookup-actions');
   actions.append(uiNode('time','aw-muted',new Date(item.created*1000).toLocaleString('ko-KR')));
-  const assetButton=globalLookupAssetButton(item.asset_id);
+  const assetButton=globalLookupAssetButton(item.asset_id,kind);
   if(assetButton)actions.append(assetButton);
   if(kind==='traffic') {
     const findingButton=globalTrafficFindingButton(item.asset_id);
@@ -237,7 +396,8 @@ function globalLookupRow(kind,item) {
     };
     actions.append(detail);
   } else if(kind==='findings') {
-    actions.append(uiNode('span','aw-muted',`증거 ${item.evidence_count}개 · ${item.status}`));
+    actions.append(uiNode('span','aw-muted',`증거 ${item.evidence_count??0}개 · ${lookupStatuses[item.status]||'미기록'}`));
+    actions.append(lookupButton('발견 상세',()=>selectLookupRecord('findings',item)));
   }
   row.append(actions);return row;
 }
@@ -248,7 +408,7 @@ function globalFindingGroupRow(item,filters,pageSeq) {
   top.append(uiNode('strong','',`${item.method} ${item.origin}${item.path} · ${item.category}`),
     uiNode('span','aw-muted',`행위자 ${item.actor_id||'기본'} · 작업 ${item.run_count}개 · 확증 ${item.confirmed_count} · 의심 ${item.suspicious_count} · 미확정 ${item.inconclusive_count}`));
   row.append(top);
-  const assetButton=globalLookupAssetButton(item.asset_id);
+  const assetButton=globalLookupAssetButton(item.asset_id,'findings');
   if(assetButton)top.append(assetButton);
   const trafficButton=globalFindingTrafficButton(item.asset_id);
   if(trafficButton)top.append(trafficButton);
@@ -282,9 +442,12 @@ async function loadGlobalLookup(kind) {
   const prefix=kind==='findings'?'globalFinding':'globalTraffic';
   const state=globalLookupState[kind],seq=++state.seq;
   const count=agentEl(prefix+'Count'),container=agentEl(prefix+'Rows');
+  clearLookupDetail(kind);renderLookupFilters(kind);
+  container.replaceChildren();
+  agentEl(prefix+'Prev').disabled=true;agentEl(prefix+'Next').disabled=true;
   const assetFilter=agentEl(prefix+'AssetFilter');
   assetFilter.hidden=!state.assetId;
-  agentEl(prefix+'AssetLabel').textContent=state.assetId?`선택 자산 ${state.assetId.slice(0,12)}…`:'';
+  agentEl(prefix+'AssetLabel').textContent=state.assetId?'선택한 자산의 기록':'';
   count.textContent='불러오는 중…';
   const query=new URLSearchParams({offset:String(state.page*50),limit:'50',
     search:agentEl(prefix+'Search').value,archived:agentEl(prefix+'Archived').checked?'true':'false'});
@@ -324,12 +487,19 @@ async function loadGlobalLookup(kind) {
     if(seq!==state.seq)return;
     container.replaceChildren();
     const filters={verdict:query.get('verdict')||'',status:query.get('status')||'',archived:query.get('archived')||'false'};
-    for(const item of result.items)container.append(grouped?globalFindingGroupRow(item,filters,seq):globalLookupRow(kind,item));
-    if(!result.items.length)container.append(uiNode('p','sm-empty',grouped?'묶을 수 있는 발견이 없습니다. 주소 구조가 없는 발견은 개별 보기에서 확인하세요.':'조건에 맞는 기록이 없습니다.'));
-    count.textContent=`전체 ${result.total}개${grouped?' 묶음':''} · ${state.page+1}페이지`;
+    if(grouped)for(const item of result.items)container.append(globalFindingGroupRow(item,filters,seq));
+    else if(result.items.length)renderLookupTable(kind,result.items,container);
+    if(state.assetId&&result.items.length)agentEl(prefix+'AssetLabel').textContent=lookupAddress(result.items[0]);
+    if(!result.items.length) {
+      const filtered=!!state.assetId||[...query.entries()].some(([key,value])=>!['offset','limit'].includes(key)&&value&&value!=='false');
+      lookupEmpty(container,grouped?'묶을 수 있는 발견이 없습니다.':filtered?'조건에 맞는 기록이 없습니다.':'아직 저장된 기록이 없습니다.',
+        grouped?'주소 구조가 없는 발견은 묶음 선택을 해제해 확인하세요.':filtered?'검색어나 기간, 조회 범위를 조정해 보세요.':kind==='findings'?'검증 작업에서 보안 발견이 기록되면 여기에 표시됩니다.':'요청 / 분석 또는 검증 작업에서 저장한 요청 이력이 여기에 표시됩니다.',
+        filtered||grouped?()=>resetGlobalLookup(kind):()=>switchView(kind==='findings'?'agent':'request'),filtered||grouped?'필터 초기화':kind==='findings'?'검증 작업 보기':'요청 / 분석 열기');
+    }
+    count.textContent=`조회 결과 ${result.total}개${grouped?' 묶음':''} · ${state.page+1} / ${Math.max(1,Math.ceil(result.total/50))}페이지`;
     agentEl(prefix+'Prev').disabled=state.page===0;
     agentEl(prefix+'Next').disabled=!result.has_more;
-  } catch(error) {if(seq===state.seq)count.textContent=error.message;}
+  } catch(error) {if(seq===state.seq){count.textContent='조회 실패';lookupEmpty(container,'기록을 불러오지 못했습니다.',error.message,()=>loadGlobalLookup(kind),'다시 시도');}}
 }
 
 function renderAgentExplore(run) {
