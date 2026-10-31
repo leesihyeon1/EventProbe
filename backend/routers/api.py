@@ -876,6 +876,36 @@ def _relabel_xss_stored(finding: dict, stored: bool) -> None:
             " · 독립 재조회 시 미잔존 → 반사형(요청 시에만 반영)"
 
 
+def _friendly_send_error(e: Exception) -> str:
+    """전송 실패 예외를 사용자용 한 줄 메시지로 바꾼다. httpx 가 socket 예외를
+    감싸므로(예: ConnectError → gaierror) 원인 체인을 훑어 분류하고, 기술 원문은
+    중복 없이 한 번만 덧붙인다. (요청/분석 탭이 'getaddrinfo failed' 같은 원문을
+    그대로 띄우지 않도록 함.)"""
+    chain, cur, seen = [], e, set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur)); chain.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    text = " ".join(str(c) for c in chain).lower()
+    is_dns = any(isinstance(c, socket.gaierror) for c in chain) or any(
+        s in text for s in ("getaddrinfo", "name or service not known",
+                             "nodename nor servname", "temporary failure in name resolution",
+                             "11001", "11004"))
+    if is_dns:
+        label = "DNS 조회 실패 — 호스트명을 확인하세요 (내부 호스트면 VPN/DNS 연결 필요)"
+    elif "refused" in text or "10061" in text:
+        label = "연결 거부됨 — 대상 포트·서비스 상태를 확인하세요"
+    elif any(s in text for s in ("unreachable", "no route", "10051", "10065", "network is unreachable")):
+        label = "네트워크 도달 불가 — 경로·방화벽을 확인하세요"
+    elif any(s in text for s in ("certificate", "ssl", "tls", "handshake", "cert_")):
+        label = "TLS/인증서 오류 — 인증서·프로토콜을 확인하세요"
+    elif any(s in text for s in ("timed out", "timeout")):
+        label = "연결 시간 초과 — 대상이 응답하지 않습니다"
+    else:
+        label = "연결 실패 — 대상에 도달하지 못했습니다 (DNS/방화벽/포트 확인)"
+    raw = str(e).strip() or (str(chain[-1]).strip() if chain else "")
+    return f"{label} · {type(e).__name__}: {raw}" if raw else f"{label} · {type(e).__name__}"
+
+
 # ── 단일 요청 전송 ──────────────────────────────────────────
 async def send_request(req: SingleRequest):
     try:
@@ -1046,14 +1076,8 @@ async def send_request(req: SingleRequest):
     except Exception as e:
         # 연결 실패/DNS/헤더 거부 등 — 500 대신 구조화된 에러로 반환해
         # 단일 전송·GO TEST UI 가 "HTTP undefined" 대신 명확히 표시하도록 함.
-        # httpx 일부 예외는 str(e) 가 비어 있으므로 하위 원인(__cause__)까지 뽑아낸다.
-        detail = str(e).strip()
-        cause = e.__cause__ or e.__context__
-        if cause and str(cause).strip():
-            detail = (detail + f" ({type(cause).__name__}: {cause})").strip() if detail else f"{type(cause).__name__}: {cause}"
-        if not detail:
-            detail = "연결 실패 (대상 도달 불가 — DNS/방화벽/포트 확인)"
-        msg = f"{type(e).__name__}: {detail}"
+        # httpx 가 socket 예외를 감싸므로 원인 체인을 분류해 사용자용 메시지로 바꾼다.
+        msg = _friendly_send_error(e)
         return {
             "status_code": 0,
             "headers": {},
@@ -1139,7 +1163,7 @@ async def send_request_raw(req: RawRequest):
             result = await asyncio.to_thread(raw_send_packet, req.raw, parsed["url"],
                                              float(max(1, min(req.timeout, 30))))
         except Exception as e:
-            return {"error": f"원문 전송 실패: {type(e).__name__}: {e}"}
+            return {"error": "원문 전송 실패: " + _friendly_send_error(e)}
         analysis = analyze_response(
             status_code=result["status_code"], headers=result["headers"],
             body=result["body"], response_time=result["response_time"],
@@ -1515,7 +1539,7 @@ async def _run_confirm_probes(req: "ConfirmRequest", headers_base: dict, plan: l
                 results.append({"role": p["role"], "status": 0, "time_ms": 0.0,
                                 "body": "", "headers": {}, "value": p["value"]})
                 probes_out.append({"role": p["role"], "label": p["label"], "value": p["value"],
-                                   "status": 0, "time_ms": 0, "error": str(e)[:120], **_reqinfo})
+                                   "status": 0, "time_ms": 0, "error": _friendly_send_error(e), **_reqinfo})
     return results, probes_out
 
 
@@ -1554,7 +1578,7 @@ async def _run_method_probes(req: "ConfirmRequest", headers_base: dict):
                            "value": parts.path or "/", "status": r.status_code, "time_ms": round(ms), "len": len(r.text)})
         else:
             probes.append({"role": "method:OPTIONS", "label": "OPTIONS", "value": parts.path or "/",
-                           "status": 0, "time_ms": 0, "error": str(r)[:120]})
+                           "status": 0, "time_ms": 0, "error": _friendly_send_error(r)})
 
         # 2) PUT 고유 마커 파일 업로드
         r, ms = await _send(client, "PUT", put_url, headers={**headers_base, "Content-Type": "text/plain"},
@@ -1565,7 +1589,7 @@ async def _run_method_probes(req: "ConfirmRequest", headers_base: dict):
                            "value": marker, "status": r.status_code, "time_ms": round(ms), "len": len(r.text)})
         else:
             probes.append({"role": "method:PUT", "label": "PUT 업로드", "value": marker,
-                           "status": 0, "time_ms": 0, "error": str(r)[:120]})
+                           "status": 0, "time_ms": 0, "error": _friendly_send_error(r)})
 
         # 3) GET 되읽기 — 마커가 그대로 오면 실제 파일 쓰기 확증
         if res.get("put_status") in (200, 201, 204):
@@ -1621,7 +1645,7 @@ async def _run_file_exposure_confirm(req: "ConfirmRequest", headers_base: dict):
             target_real = file_exposure_looks_real(tr.text, dict(tr.headers), tstatus, ext)
         except Exception as e:
             probes.append({"role": "fileexp:target", "label": f"대상 조회 실패 ({path})",
-                           "value": path, "status": 0, "error": str(e)[:120]})
+                           "value": path, "status": 0, "error": _friendly_send_error(e)})
         else:
             probes.append({"role": "fileexp:target",
                            "label": f"대상 파일 조회 — {fmt_label} 형식 {'O' if target_real else 'X'}",
@@ -1636,7 +1660,7 @@ async def _run_file_exposure_confirm(req: "ConfirmRequest", headers_base: dict):
                 cached = {"real": file_exposure_looks_real(sr.text, dict(sr.headers), sr.status_code, ext),
                           "status": sr.status_code}
             except Exception as e:
-                cached = {"real": False, "status": 0, "error": str(e)[:120]}
+                cached = {"real": False, "status": 0, "error": _friendly_send_error(e)}
             _CATCHALL_CACHE[key] = cached
             probes.append({"role": "fileexp:sibling",
                            "label": f"존재하지 않는 형제 경로 확인 ({sib_path}) — 파일형 "
@@ -1678,7 +1702,7 @@ async def _run_authbypass_probe(req: "ConfirmRequest", headers_base: dict):
             except Exception as e:
                 out[role] = {"status": 0, "location": "", "body": ""}
                 probes.append({"role": f"authbypass:{role}", "label": role, "value": req.url,
-                               "status": 0, "time_ms": 0, "error": str(e)[:120]})
+                               "status": 0, "time_ms": 0, "error": _friendly_send_error(e)})
     normal, bypass = out.get("normal", {}), out.get("bypass", {})
     request_parts = (req.url, req.body, " ".join(str(v) for v in (req.params or {}).values()),
                      " ".join(str(v) for v in headers_base.values()))
@@ -1911,6 +1935,7 @@ async def bulk_test(req: BulkRequest, request: Request):
                     },
                 })
             except Exception as e:
+                emsg = _friendly_send_error(e)
                 results.append({
                     "payload_id": p["id"],
                     "payload_name": p["name"],
@@ -1919,12 +1944,13 @@ async def bulk_test(req: BulkRequest, request: Request):
                     "risk": p["risk"],
                     "status_code": 0,
                     "response_time": 0,
+                    "error": emsg,
                     "analysis": {
                         "verdict": "error", "confidence": 0,
-                        "waf_detected": None, "block_reason": [str(e)],
+                        "waf_detected": None, "block_reason": [emsg],
                         "error_leaks": [], "sensitive_data": [],
                         "response_anomalies": [],
-                        "risk_level": "info", "details": [f"에러: {e}"], "score": 0,
+                        "risk_level": "info", "details": [f"요청 실패: {emsg}"], "score": 0,
                     },
                 })
 
@@ -1969,6 +1995,8 @@ async def multi_target_test(req: MultiTargetRequest):
             "payload_id": p["id"], "payload_name": p["name"],
             "payload": p["payload"], "description": p["description"],
             "risk": p["risk"], "status_code": 0, "response_time": rtime,
+            "error": block[0] if block else "",
+
             "analysis": {"verdict": verdict, "confidence": 30 if verdict == "timeout" else 0,
                 "waf_detected": None, "block_reason": block,
                 "error_leaks": [], "sensitive_data": [], "response_anomalies": [],
@@ -2019,7 +2047,8 @@ async def multi_target_test(req: MultiTargetRequest):
                 except httpx.TimeoutException:
                     return _fail_result(p, "timeout", ["타임아웃"], "medium", ["타임아웃"], 35, req.timeout * 1000)
                 except Exception as e:
-                    return _fail_result(p, "error", [str(e)], "info", [f"에러: {e}"], 0, 0)
+                    emsg = _friendly_send_error(e)
+                    return _fail_result(p, "error", [emsg], "info", [f"요청 실패: {emsg}"], 0, 0)
 
         # 모든 (url × payload) 조합을 동시에 실행(세마포어로 상한) 후 URL별로 재그룹화
         tasks = [(url, asyncio.create_task(run_one(url, p)))

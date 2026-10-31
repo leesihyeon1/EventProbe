@@ -3800,11 +3800,21 @@ function loadBulkPayloadList(catId) {
       <span class="item-name">${escapeHtml(p.name)}</span>
       <span class="item-payload">${escapeHtml(p.payload)}</span>
     </label>`).join('');
+  container.onchange = updateBulkSelectedCount;   // 체크 변경 시 선택 개수 갱신
+  updateBulkSelectedCount();
+}
+
+// 선택된 페이로드 개수를 '테스트 페이로드' 헤더에 표시(몇 개를 보낼지 한눈에).
+function updateBulkSelectedCount() {
+  const boxes = [...document.querySelectorAll('#bulkPayloadChecklist input[type="checkbox"]')];
+  const el = document.getElementById('bulkSelCount');
+  if (el) el.textContent = boxes.length ? `${boxes.filter(b => b.checked).length} / ${boxes.length} 선택` : '';
 }
 
 function selectAllPayloads(checked) {
   document.querySelectorAll('#bulkPayloadChecklist input[type="checkbox"]')
     .forEach(cb => cb.checked = checked);
+  updateBulkSelectedCount();
 }
 
 /* ── 다중 타겟 페이로드 목록 ── */
@@ -3854,6 +3864,8 @@ async function runMultiTargetTest() {
 
   const urls = urlsRaw.split('\n').map(u => u.trim()).filter(Boolean);
   if (!urls.length) { toast('유효한 URL이 없습니다', 'error'); return; }
+  const triageSource = window.triageBulkContext ? JSON.parse(JSON.stringify(window.triageBulkContext)) : null;
+  if (triageSource) triageSource.events = triageSource.events.filter(e => urls.includes(e.url));
 
   const targetParam = document.getElementById('multiTargetParam').value.trim() || 'q';
   const injectIn    = document.getElementById('multiInjectIn').value;
@@ -3903,14 +3915,16 @@ async function runMultiTargetTest() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
     });
-    const data = await res.json();
+    const data = await _asJson(res, '다중 대상 테스트');
     hideLoadingOverlay();
     renderMultiTargetResults(data);
+    if (triageSource?.events.length) window.dispatchEvent(new CustomEvent('triage-bulk-complete',{detail:{source:triageSource,targets:data.targets||[]}}));
     // 리포트 생성을 위해 전체 결과 평탄화해서 저장
     const flatResults = (data.targets || []).flatMap(t => t.results || []);
     state.bulkResults = {
       results: flatResults,
       summary: generateClientSummary(flatResults),
+      _triageSource: triageSource,
       _isMultiTarget: true,
       _targetCount: data.target_count || (data.targets || []).length,
     };
@@ -3970,7 +3984,7 @@ function renderMultiTargetResults(data) {
                 <tr>
                   <td style="color:var(--text-muted)">${j+1}</td>
                   <td><span class="payload-code" title="${escapeHtml(r.payload)}">${escapeHtml(r.payload_name)}</span></td>
-                  <td style="color:${httpColor(r.status_code)};font-weight:600">${r.status_code||'-'}</td>
+                  <td style="color:${httpColor(r.status_code)};font-weight:600"${r.error ? ` title="${escapeHtml(r.error)}"` : ''}>${r.status_code||'-'}</td>
                   <td>${r.response_time}ms</td>
                   <td>${verdictBadge(r.analysis?.verdict)}</td>
                   <td>${riskBadge(r.risk)}</td>
@@ -4289,15 +4303,18 @@ function hideLoadingOverlay() {
 
 /* ── Bulk Results ── */
 function renderBulkResults(data) {
-  const { results, summary } = data;
+  const { results } = data;
 
   setSummary(bulkSummaryCards(results));
+  renderBulkErrorBanner(results);
 
   const tbody = document.getElementById('resultsTableBody');
   tbody.innerHTML = results.map((r, i) => {
     const a = r.analysis;
+    const failed = (r.status_code || 0) === 0;   // 전송 실패/무응답 — 보안 판정 아님
+    const detail = r.error || a.details?.join(' / ') || '-';
     return `
-      <tr>
+      <tr${failed ? ' class="result-row-error"' : ''}>
         <td style="color:var(--text-muted)">${i+1}</td>
         <td>
           <div style="font-size:11px;font-weight:600">${escapeHtml(r.payload_name)}</div>
@@ -4307,12 +4324,39 @@ function renderBulkResults(data) {
         <td style="color:${httpColor(r.status_code)};font-weight:600">${r.status_code || '-'}</td>
         <td>${r.response_time}ms</td>
         <td>${verdictBadge(a.verdict)}</td>
-        <td>${riskBadge(r.risk)}</td>
-        <td style="font-size:11px;color:var(--text-muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          ${a.details?.join(' / ') || '-'}
-        </td>
+        <td>${failed ? '<span style="color:var(--text-muted)">-</span>' : riskBadge(r.risk)}</td>
+        <td class="result-detail-cell" title="${escapeHtml(detail)}">${escapeHtml(detail)}</td>
       </tr>`;
   }).join('');
+}
+
+// 전송 실패(연결/DNS/타임아웃) 결과를 표 위에 사유별로 한 번 요약한다.
+function renderBulkErrorBanner(results) {
+  const view = document.querySelector('.results-view');
+  if (!view) return;
+  let banner = document.getElementById('bulkResultBanner');
+  const failed = results.filter(r => (r.status_code || 0) === 0 &&
+    (r.error || ['error', 'timeout'].includes(r.analysis?.verdict)));
+  if (!failed.length) { if (banner) banner.remove(); return; }
+  const reasons = {};
+  for (const r of failed) {
+    // 배너에는 한국어 설명만(기술 원문 ' · ConnectError: ...' 은 행 상세 툴팁에 유지).
+    const full = r.error || (r.analysis?.details || []).join(' / ') || '전송 실패';
+    const key = full.split(' · ')[0];
+    reasons[key] = (reasons[key] || 0) + 1;
+  }
+  const lines = Object.entries(reasons).sort((a, b) => b[1] - a[1])
+    .map(([reason, n]) => `<li><strong>${n}건</strong> · ${escapeHtml(reason)}</li>`).join('');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'bulkResultBanner';
+    banner.className = 'bulk-error-banner';
+    view.insertBefore(banner, view.querySelector('.results-table'));
+  }
+  const head = failed.length === results.length
+    ? '모든 요청이 전송되지 못했습니다'
+    : `${failed.length}/${results.length}개 요청이 전송되지 못했습니다`;
+  banner.innerHTML = `<div class="beb-head">${escapeHtml(head)}</div><ul class="beb-list">${lines}</ul>`;
 }
 
 /* ── Report Generation ── */
@@ -4462,7 +4506,7 @@ function renderProgressBar(label, value, total, color) {
 
 /* ── View Switching ── */
 function switchView(view) {
-  if (!['request', 'results', 'agent', 'report', 'assets', 'findings', 'traffic', 'settings', 'bulk'].includes(view)) return;
+  if (!['request', 'results', 'agent', 'report', 'assets', 'findings', 'traffic', 'settings', 'bulk', 'triage'].includes(view)) return;
   state.activeView = view;
   const reportButton = document.getElementById('reportGenerateBtn');
   if (reportButton) reportButton.disabled = !state.bulkResults;

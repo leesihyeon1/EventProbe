@@ -1,0 +1,149 @@
+"""Local SIEM analysis, opt-in retention and workspace-scoped inventory."""
+from fastapi import APIRouter, HTTPException, Request
+from core.triage import analyze, MAX_BYTES
+
+import asyncio
+import contextlib
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def retention_lifespan(app):
+    task=asyncio.create_task(_retention_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+router = APIRouter(prefix='/api/triage', tags=['triage'],lifespan=retention_lifespan)
+
+async def read_text(request):
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_BYTES:
+            raise HTTPException(413, '입력은 2MB 이하로 제한됩니다.')
+    try:
+        return body.decode('utf-8-sig')
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post('/analyze')
+async def analyze_logs(request: Request):
+    try:
+        return get_store().enrich(_owner(request), analyze(await read_text(request)))
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+
+
+from pydantic import BaseModel, Field, ConfigDict
+from core.triage_planning import canonical_request, prepare
+from core.agent_assets import asset_shape
+
+
+class Preparation(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    url: str = Field(max_length=4096)
+    category: str = Field(max_length=20)
+    param: str = Field(max_length=120)
+    event_id: str = Field(max_length=120)
+    summary: str = Field(default='', max_length=2000)
+
+
+@router.post('/prepare')
+def prepare_validation(body: Preparation):
+    try:
+        return prepare(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/asset-match')
+def match_asset(request: Request, url: str):
+    from core.agent import get_manager, owner_scope_enabled
+    from routers.agent import _principal
+    try:
+        shape=asset_shape(canonical_request(url))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    owner=_principal(request) if owner_scope_enabled() else None
+    page=get_manager().store.asset_page(asset_id=shape[0],owner=owner,limit=1)
+    return {'asset_id':shape[0], 'match':page['assets'][0] if page['assets'] else None,
+            'note':'관측된 엔드포인트 대조이며 회사 전체 자산 등록 여부를 의미하지 않습니다.'}
+
+
+import os
+from pathlib import Path
+from fastapi import Query
+from core.triage_store import TriageStore
+
+
+def _owner(request):
+    # Same workspace identity as existing agent APIs; it is not independent authentication.
+    return (request.headers.get('x-eventprobe-user') or request.cookies.get('ep_user') or '').strip()[:64]
+
+
+def get_store():
+    agent_path=Path(os.getenv('AGENT_DB_PATH') or Path(__file__).resolve().parents[1]/'data'/'agent'/'runs.sqlite3')
+    return TriageStore(os.getenv('TRIAGE_DB_PATH') or agent_path.with_name('triage.sqlite3'))
+
+
+@router.post('/batches',status_code=201)
+async def save_batch(request: Request, days: int=Query(7,ge=1,le=30)):
+    text=await read_text(request)
+    try:
+        result=get_store().enrich(_owner(request),analyze(text))
+        return get_store().save(_owner(request),text,result,days)
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+
+
+@router.get('/batches')
+def list_batches(request: Request):
+    return {'batches':get_store().batches(_owner(request))}
+
+
+@router.get('/batches/{batch_id}')
+def load_batch(batch_id: str, request: Request):
+    try:return get_store().batch(_owner(request),batch_id)
+    except KeyError:raise HTTPException(404,'저장 기록을 찾을 수 없습니다.')
+
+
+@router.delete('/batches/{batch_id}')
+def delete_batch(batch_id: str, request: Request):
+    if not get_store().delete(_owner(request),batch_id):raise HTTPException(404,'저장 기록을 찾을 수 없습니다.')
+    return {'deleted':True}
+
+
+@router.get('/inventory')
+def list_inventory(request: Request):
+    return {'assets':get_store().inventory(_owner(request))}
+
+
+@router.post('/inventory')
+async def import_inventory(request: Request):
+    text=await read_text(request)
+    try:return {'imported':get_store().import_inventory(_owner(request),text)}
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@router.delete('/inventory')
+def delete_inventory(request: Request, origin: str=Query(max_length=4096)):
+    if not get_store().delete_inventory(_owner(request),origin):raise HTTPException(404,'자산을 찾을 수 없습니다.')
+    return {'deleted':True}
+
+
+async def _retention_loop():
+    import logging
+    def cleanup():
+        get_store().cleanup()
+    while True:
+        try:
+            await asyncio.to_thread(cleanup)
+        except Exception:
+            logging.getLogger(__name__).exception('SIEM retention cleanup failed')
+        await asyncio.sleep(60)

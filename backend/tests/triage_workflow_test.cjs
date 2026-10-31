@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const {overview,targets}=require('../../frontend/static/js/triage_workflow.js');
+const events=[{id:'a',line:1,host:'source.test',path:'/.env',method:'GET',action:'blocked',priority:'low'},{id:'b',line:2,host:'source.test',path:'/.env',method:'GET',action:'blocked',priority:'low'}];
+assert.match(overview({events}).conclusion,/모든 이벤트/);
+let r=targets(events,new Set(['a','b']),{'source.test':'https://approved.test'});
+assert.equal(r.urls.length,1);assert.equal(r.links.length,2);assert.equal(r.errors.length,0);
+assert.equal(targets(events,new Set(['a']),{}).errors.length,1);
+for(const path of ['//evil.test/x','/\\evil.test','/x#frag','/bad path'])assert.equal(targets([{...events[0],path}],new Set(['a']),{'source.test':'https://approved.test'}).errors.length,1);
+assert.equal(targets([{...events[0],method:'POST'}],new Set(['a']),{'source.test':'https://approved.test'}).errors.length,1);
+assert.equal(targets(events,new Set(['a']),{'source.test':'https://user:secret@approved.test'}).errors.length,1);
+console.log('triage workflow: overview, selection, deduplication, origin and method checks passed');
+
+const workflow=require('../../frontend/static/js/triage_workflow.js');
+const inferred={...events[0],fields:{dport:'443'},reasons:[]};
+assert.equal(workflow.inferredOrigin(inferred),'https://source.test');
+assert.equal(workflow.targets([inferred],new Set(['a']),{}).urls[0],'https://source.test/.env');
+assert.equal(workflow.inferredOrigin({...inferred,reasons:['HOST_CONFLICT']}),'');
+assert.equal(workflow.inferredOrigin({...inferred,fields:{}}),'');
+assert.equal(workflow.rows(events).length,1);
+assert.equal(workflow.rows(events)[0].items.length,2);
+assert.equal(workflow.rows([{...events[0],path:'/x?id=1'},{...events[1],path:'/x?id=2'}]).length,2);
+assert.equal(workflow.rows([{...events[0],priority:'low'},{...events[1],priority:'review'}])[0].priority,'review');
+console.log('analysis table: grouping, priority ordering and automatic URL recovery passed');

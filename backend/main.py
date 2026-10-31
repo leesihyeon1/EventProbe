@@ -87,6 +87,9 @@ app.include_router(agent_router)
 from routers.agent_history import router as agent_history_router
 app.include_router(agent_history_router)
 
+from routers.triage import router as triage_router
+app.include_router(triage_router)
+
 # 정적 파일
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "static")
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "templates")

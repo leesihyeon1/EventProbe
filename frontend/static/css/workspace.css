@@ -84,7 +84,17 @@ body:not([data-view="request"]) .app-body > .sidebar,body:not([data-view="reques
 #bulkWorkspace .modal-tab-content { flex:initial; overflow:visible; }
 #bulkWorkspace .modal-body { width:min(100%,920px); overflow:visible; padding:24px 32px; gap:20px; }
 #bulkWorkspace .modal-footer { position:sticky; bottom:0; z-index:2; justify-content:flex-start; background:var(--bg-primary); border-top:1px solid var(--border); padding:14px 32px; }
-#bulkWorkspace .payload-checklist { max-height:300px; }
+#bulkWorkspace .payload-checklist { max-height:320px; }
+/* 일괄 테스트 입력 폼 — 밋밋한 스택을 카드 섹션으로 구조화 */
+#bulkWorkspace .bulk-card { background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; display:flex; flex-direction:column; gap:14px; }
+#bulkWorkspace .bulk-card-title { margin:0; font-size:13px; font-weight:700; color:var(--text-primary); }
+#bulkWorkspace .bulk-card-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+#bulkWorkspace .bulk-card-actions { display:flex; gap:6px; flex-shrink:0; }
+#bulkWorkspace .bulk-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+#bulkWorkspace .bulk-count { margin-left:8px; font-size:12px; font-weight:600; color:var(--accent); }
+#bulkWorkspace .btn-xs { font-size:11px; padding:4px 10px; }
+#bulkWorkspace .modal-footer .btn-primary { display:inline-flex; align-items:center; gap:6px; padding:9px 20px; }
+@media(max-width:640px) { #bulkWorkspace .bulk-grid-2 { grid-template-columns:1fr; } }
 @media(max-width:800px) { #bulkWorkspace .modal-header { padding:20px 16px 10px; } #bulkWorkspace .modal-body { padding:16px; } #bulkWorkspace .modal-footer { padding:12px 16px; } }
 .modal-body { min-width:0; overflow:auto; }
 body.nav-collapsed { --nav-width:68px; }
