@@ -49,6 +49,9 @@ def summarize_statistics(events):
     names = Counter()
     families = Counter()
     targets = Counter()
+    cves = Counter()
+    products = defaultdict(lambda: dict(records=0, actions=Counter(), cves=set(), targets=set()))
+    cve_records = 0
     devices = defaultdict(lambda: dict(actions=Counter(), statuses=Counter(), results=Counter(), records=0, status_eligible=0))
     source_targets = defaultdict(set)
     target_sources = defaultdict(set)
@@ -60,6 +63,18 @@ def summarize_statistics(events):
         families[family] += 1
         target = event.get('host') or event.get('destination') or '대상 불명'
         targets[target] += 1
+        event_cves = event.get('cve') or []
+        event_products = event.get('products') or []
+        if event_cves or event_products:
+            cve_records += 1
+        for cve in event_cves:
+            cves[cve] += 1
+        for product in event_products:
+            p = products[product]
+            p['records'] += 1
+            p['actions'][event.get('action') or 'unknown'] += 1
+            p['cves'].update(event_cves)
+            p['targets'].add(target)
         kind = event.get('device') or '미확인'
         d = devices[kind]
         d['records'] += 1
@@ -93,6 +108,11 @@ def summarize_statistics(events):
         if len(meaningful) >= 3:
             signals.append(dict(type='multi_family_source', label=f'한 출발지에서 {len(meaningful)}개 이벤트 계열 관측', source=source, count=len(meaningful)))
     signals.sort(key=lambda signal: (-signal['count'], signal['type'], signal.get('source', signal.get('target', ''))))
+    product_rows = []
+    for name, d in sorted(products.items(), key=lambda kv: (-kv[1]['records'], kv[0]))[:10]:
+        product_rows.append(dict(name=name, records=d['records'], actions=dict(d['actions']),
+                                 cves=sorted(d['cves'])[:8], targets=len(d['targets'])))
     return dict(total=len(events), event_names=top_items(names, 10), families=top_items(families, 5),
                 devices=device_rows, targets=top_items(targets, 10), correlations=signals[:5],
+                cves=top_items(cves, 10), products=product_rows, cve_records=cve_records,
                 note='각 수치는 파싱된 로그 레코드 수입니다. 장비별 중복 관측과 발생 횟수 필드는 별도이며, HTTP 응답은 장비 기록값입니다. 미확인 장비를 추정해 IPS/WAF/IDS에 넣지 않습니다.')

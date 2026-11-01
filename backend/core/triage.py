@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from urllib.parse import urlsplit
 from core.classify import classify, is_direct_file_probe
+from core.triage_cve import identify as identify_cve
 from core.triage_campaigns import summarize_campaigns
 from core.triage_summary import refresh_attack_summary, signature_category
 from core.triage_statistics import summarize_statistics, device_kind
@@ -71,9 +72,12 @@ def normalize(data, line, raw):
     headers = data.get('request_headers') or data.get('headers') or pick('Header-Value') or inner.get('HTTP Header', '')
     if not isinstance(headers, dict):
         headers = dict(line.split(':', 1) for line in str(headers).splitlines() if ':' in line)
-    attack = classify(url=path, headers=headers, req_body=pick('request_body', 'body', 'http_body') or inner.get('HTTP Request Body', '')) if path else classify()
+    req_body = pick('request_body', 'body', 'http_body') or inner.get('HTTP Request Body', '')
+    attack = classify(url=path, headers=headers, req_body=req_body) if path else classify()
     signature = pick('attack_name', 'evntDesc', 'ruleName', 'signature')
     category = attack.primary or signature_category(signature)
+    # CVE/제품군 인식 — 요청/분석 엔진의 요청 전용 지문을 재사용(로컬, 무반출, 시도 식별이며 성공 판정 아님)
+    cve_info = identify_cve(url=path, req_body=req_body, req_headers=headers, signature=signature)
     evidence = [f'{hit.where}: {hit.subtype or hit.attack_type} · {hit.evidence}' for hit in attack.candidates]
     if signature: evidence.append(f'장비 탐지명: {signature}')
     reasons = []
@@ -105,6 +109,7 @@ def normalize(data, line, raw):
                 signature=signature, attack_evidence=evidence,
                 source=pick('src','src_ip','source_ip'), timestamp=timestamp, window=window,
                 category=category, priority=bucket, reasons=reasons,
+                cve=cve_info['cves'], products=cve_info['products'], cve_source=cve_info['source'],
                 readiness='manual_confirmation_required', fields=data)
 
 

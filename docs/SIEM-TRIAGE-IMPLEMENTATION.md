@@ -1,5 +1,15 @@
 # 이벤트 분석 구현 현황
 
+## CVE·제품군 인식 (2026-11-01)
+
+- 기존 "요청/분석" 엔진의 **요청 전용 CVE 지문**(`analyzer._cve_identify_from_request`)을 새 모듈 `core/triage_cve.py`로 감싸 triage에 연결했다. 응답 본문이 필요 없어 로그 레코드에 맞는다. 로컬 규칙만 사용하며 대상 요청·AI 호출이 없다.
+- 각 이벤트에 `cve`·`products`·`cve_source`를 부여한다. 우선순위: ① 장비 탐지명에 있는 CVE/제품명(신뢰 높음, `source=device`) → ② 요청 지문 추론(신뢰 중, `source=inferred`). 기존 `classify()` generic 분류(sqli/xss/cmdi 등, Log4Shell 등 헤더 공격 포함)는 그대로 유지한다.
+- CVE ID → 제품군 매핑(log4j·struts·spring·weblogic·citrix·confluence·apache-httpd·laravel 등)으로 요청 지문에 서버 메타가 비는 OOB 계열(Log4Shell 등)도 제품군을 보완한다.
+- 통계에 **CVE·제품군 카드**를 추가했다: CVE ID별 분포와 제품군별 레코드 수·차단/허용/불명·대상 수·연관 CVE. 분모는 CVE/제품을 식별한 레코드 수(`cve_records`)다.
+- 이는 **공격 '시도' 식별일 뿐 성공·침해 판정이 아니다.** 장비 라벨과 EventProbe 추론을 출처로 구분하며, 제품명 단순 매칭의 저신뢰 가능성은 지문 기반과 분리한다.
+- 한계: 응답 기반 제품 지문(Server 헤더·본문 마커·retire.js)은 로그에 응답이 없으면 적용하지 않는다. 요청 지문 카탈로그에 없는 CVE는 generic class로만 남는다.
+- 검증: `test_triage_cve.py` 6개(탐지명/요청지문/Log4Shell 헤더/빈 입력/통계 집계/엔드투엔드) + 전체 트리아지 회귀 통과.
+
 ## 발생 이벤트 통계 (2026-11-01)
 
 - `evtname` 우선 탐지명별 상위 10개와 기타를 원형 차트로 표시한다. 탐지명이 없으면 장비 탐지명을 사용한다.

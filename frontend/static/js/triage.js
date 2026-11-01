@@ -160,6 +160,20 @@
     const names=node('article','','triage-stat-card');names.append(chartTitle('탐지명별 비율','evtname 우선 · 없으면 장비 탐지명 · 상위 10개와 기타'),donut(s.event_names,s.total));grid.append(names);
     const families=node('article','','triage-stat-card');families.append(chartTitle('이벤트 계열','정보 수집성 · 웹 · 애플리케이션 · 네트워크 · 기타'),countRows(s.families,s.total));grid.append(families);
     const targets=node('article','','triage-stat-card');targets.append(chartTitle('대상별 이벤트','HTTP Host 우선 · 없으면 DST · 상위 10개와 기타'),countRows(s.targets,s.total));grid.append(targets);
+    const cve=node('article','','triage-stat-card');
+    cve.append(chartTitle('CVE·제품군 공격 시도',`탐지명·요청 지문 기반 · CVE/제품 식별 ${s.cve_records||0}건 · 시도 식별이며 성공 판정 아님`));
+    cve.append(node('h4','CVE별'),countRows(s.cves||[],s.cve_records||0));
+    cve.append(node('h4','제품군별'));
+    if((s.products||[]).length){
+      for(const p of s.products){
+        const detail=node('div','','triage-device-stat');detail.append(node('h5',`${p.name} · ${p.records}건 · 대상 ${p.targets}`));
+        const actionItems=[['차단',p.actions.blocked||0],['허용',p.actions.allowed||0],['불명',p.actions.unknown||0]].map(([label,count])=>({label,count}));
+        detail.append(countRows(actionItems,p.records));
+        if(p.cves.length)detail.append(node('p','CVE: '+p.cves.join(', ')));
+        cve.append(detail);
+      }
+    } else cve.append(node('p','탐지명·요청 지문에서 식별된 CVE/제품군이 없습니다.'));
+    grid.append(cve);
     const devices=node('article','','triage-stat-card');devices.append(chartTitle('장비별 처리와 응답','명시된 장비 종류별 로그 비율 · 응답 코드는 장비 기록값'));
     for(const d of s.devices){
       const detail=node('div','','triage-device-stat');detail.append(node('h4',`${d.name} · ${d.records}건`));
