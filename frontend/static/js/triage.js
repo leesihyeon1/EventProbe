@@ -89,27 +89,40 @@
       }
     }
   }
+  function isInternalHost(origin){
+    try{const h=new URL(origin).hostname.toLowerCase();
+      return h==='localhost'||/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)||/\.(local|internal|lan|corp|intra)$/.test(h);
+    }catch{return false;}
+  }
+  async function probeTechnology(origin,asset,button){
+    if(busy)return;
+    if(!asset&&typeof confirm==='function'&&!confirm(`${origin} 에 GET / 요청 1회(헤더만)를 보냅니다.${isInternalHost(origin)?'\n내부망 주소로 보입니다 — 인가된 대상인지 확인하세요.':''}\n계속할까요?`))return;
+    busy=true;if(button)button.disabled=true;el('triageStatus').textContent=`${origin} 기술 확인 중…`;
+    try{
+      const profile=await triageApi('/technology-probe',{origin});applyTechnology(origin,profile);
+      render();el('triageStatus').textContent=`${origin} 기술 확인 완료 · HTTP ${profile.status}. 요청 1건.`;
+    }catch(error){technologyProfiles[origin]={error:error.message,checked_at:new Date().toISOString()};render();el('triageStatus').textContent=error.message;}
+    finally{busy=false;render();}
+  }
   function renderTechnology(){
     const box=el('triageTechnology');box.replaceChildren(node('h2','대상 웹 기술 확인'));
-    box.append(node('p','작업공간 인벤토리에 등록된 대상만 직접 확인합니다. 로그 분석 직후 대상별 GET / 요청 1회로 자동 조사합니다(동시 2개, 최대 20개). 아래 버튼으로 재확인할 수 있으며 리다이렉트와 응답 본문은 수집하지 않습니다. 기술 지문이 보이지 않는다고 해당 기술이 없다는 뜻은 아닙니다.'));
-    const assets=new Map();
-    for(const e of result.events)if(e.inventory?.origin)assets.set(e.inventory.origin,e.inventory);
-    if(!assets.size){box.append(node('p','일치하는 등록 자산이 없습니다. 운영 자산 인벤토리에 정확한 origin을 등록하면 기술 확인 버튼을 사용할 수 있습니다.'));return;}
-    for(const [origin,asset] of assets){
+    box.append(node('p','분석된 대상에 GET / 요청 1회(헤더만)로 기술을 확인합니다. 등록 자산은 분석 직후 자동 조사하고, 미등록 대상은 버튼으로 직접 확인합니다(실제 요청 1회 · 확인 후 전송). 리다이렉트·응답 본문·쿠키·인증정보는 보내지 않으며, 기술 지문이 없다고 해당 기술이 없다는 뜻은 아닙니다.'));
+    const targets=new Map();   // origin → {origin, asset|null}
+    for(const e of result.events){
+      const origin=e.inventory?.origin||origins[TriageWorkflow.originKey(e)]||TriageWorkflow.inferredOrigin(e);
+      if(!origin)continue;
+      const prev=targets.get(origin);
+      if(!prev||(!prev.asset&&e.inventory))targets.set(origin,{origin,asset:e.inventory||null});
+    }
+    if(!targets.size){box.append(node('p','조사할 접속 주소가 없습니다. 아래 "실제 접속 주소" 입력으로 대상을 지정하면 기술을 확인할 수 있습니다.'));return;}
+    for(const {origin,asset} of targets.values()){
       const row=node('div','','triage-technology-row');
       const cached=technologyProfiles[origin];
-      row.append(node('strong',origin),node('span',`인벤토리 기술: ${asset.stack||'미기록'}${asset.stale?' (정보 오래됨)':''}`));
+      row.append(node('strong',origin),node('span',asset?`인벤토리 기술: ${asset.stack||'미기록'}${asset.stale?' (정보 오래됨)':''}`:'미등록 대상 · 수동 확인'));
       if(cached?.error)row.append(node('span',`확인 실패: ${cached.error}`));
       if(cached&&!cached.error)row.append(node('span',`응답 헤더 기술: ${cached.technologies.join(', ')||'식별되지 않음'} · HTTP ${cached.status}`));
       const button=node('button','웹 기술 확인','btn btn-secondary');button.disabled=busy;
-      button.onclick=async()=>{
-        if(busy)return;busy=true;button.disabled=true;el('triageStatus').textContent=`${origin} 기술 확인 중…`;
-        try{
-          const profile=await triageApi('/technology-probe',{origin});applyTechnology(origin,profile);
-          render();el('triageStatus').textContent=`${origin} 기술 확인 완료 · HTTP ${profile.status}. 요청 1건.`;
-        }catch(error){technologyProfiles[origin]={error:error.message,checked_at:new Date().toISOString()};render();el('triageStatus').textContent=error.message;}
-        finally{busy=false;render();}
-      };
+      button.onclick=()=>probeTechnology(origin,asset,button);
       row.append(button);box.append(row);
     }
   }

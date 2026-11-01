@@ -102,17 +102,17 @@ class TechnologyProbe(BaseModel):
 
 @router.post('/technology-probe')
 async def technology_probe(body: TechnologyProbe, request: Request):
-    """One explicit, header-only observation of a registered inventory origin."""
+    """One explicit, header-only GET of an analyst-chosen origin (registered or not)."""
     target = body.origin.strip()
     parsed = urlsplit(target)
     if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
             parsed.username or parsed.password or parsed.path not in ('', '/') or
             parsed.query or parsed.fragment or target.endswith('/') or
             any(ord(c) < 33 for c in target)):
-        raise HTTPException(422, '등록된 HTTP(S) 자산의 접속 주소만 사용할 수 있습니다.')
-    inventory = get_store().inventory(_owner(request))
-    if target not in {item['origin'] for item in inventory}:
-        raise HTTPException(403, '현재 작업공간에 등록된 자산만 기술을 확인할 수 있습니다.')
+        raise HTTPException(422, '유효한 HTTP(S) 접속 주소(scheme·host, 경로/쿼리 없이)만 사용할 수 있습니다.')
+    # 분석가가 명시적으로 요청한 단일 헤더 전용 GET 1회는 등록 자산이 아니어도 허용한다.
+    # (리다이렉트·본문·쿠키·인증정보 미전송 · 일괄/다중 테스트보다 덜 침습적. 자동 일괄 조사는
+    #  프런트에서 여전히 등록 자산으로만 제한한다.)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False,
                                      trust_env=False) as client:

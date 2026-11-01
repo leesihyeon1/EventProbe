@@ -79,7 +79,9 @@ def test_analyze_preserves_screened_events_in_statistics_and_export():
 
 
 
-def test_technology_probe_requires_registered_origin_and_reads_headers_only(monkeypatch):
+def test_technology_probe_allows_any_valid_origin_and_reads_headers_only(monkeypatch):
+    # 분석가가 명시 요청한 단일 헤더 전용 GET 1회는 미등록 origin이어도 허용한다(403 폐지).
+    # 자동 일괄 조사는 프런트에서 등록 자산으로만 제한하고, 여기서는 URL 형식만 강제한다.
     import routers.triage as triage_router
     calls = []
 
@@ -101,11 +103,23 @@ def test_technology_probe_requires_registered_origin_and_reads_headers_only(monk
         inventory=lambda owner: [{'origin': 'https://web.test'}]))
     monkeypatch.setattr(triage_router.httpx, 'AsyncClient', FakeClient)
     request = SimpleNamespace(headers={}, cookies={})
-    with pytest.raises(HTTPException) as exc:
-        asyncio.run(triage_router.technology_probe(triage_router.TechnologyProbe(origin='https://other.test'), request))
-    assert exc.value.status_code == 403 and not calls
+
+    # 미등록 origin도 헤더 전용 GET 1회로 조사된다.
+    unreg = asyncio.run(triage_router.technology_probe(
+        triage_router.TechnologyProbe(origin='https://other.test'), request))
+    assert unreg['technologies'] == ['nginx']
+    assert ('stream', 'GET', 'https://other.test/') in calls
+    assert calls[0][1]['follow_redirects'] is False
+
+    # 등록 origin도 동일하게 동작.
     answer = asyncio.run(triage_router.technology_probe(
         triage_router.TechnologyProbe(origin='https://web.test'), request))
     assert answer['technologies'] == ['nginx']
     assert ('stream', 'GET', 'https://web.test/') in calls
-    assert calls[0][1]['follow_redirects'] is False
+
+    # 잘못된 접속 주소(경로·쿼리·인증정보·비 HTTP)는 422로 거부 — 실제 요청 없음.
+    for bad in ('https://x.test/path', 'http://u:p@x.test', 'ftp://x.test', 'https://x.test/?q=1'):
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(triage_router.technology_probe(
+                triage_router.TechnologyProbe(origin=bad), request))
+        assert exc.value.status_code == 422
