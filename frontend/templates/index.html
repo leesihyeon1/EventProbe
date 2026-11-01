@@ -323,22 +323,22 @@
 
       <div class="view" data-view="triage" id="triageWorkspace">
         <section class="triage-panel">
-          <header class="triage-heading"><div><span class="triage-eyebrow">SECURITY EVENT REVIEW</span><h1>이벤트 분석</h1><p>스캔 시도를 요약하고, 노이즈를 제외한 요청만 검증합니다.</p></div><button class="btn btn-secondary" id="triageExport" disabled>분석 결과 저장(JSON)</button></header>
-          <details id="triageImport" open class="triage-import"><summary>로그 가져오기 <span>CSV · LOG · JSON / 최대 2MB</span></summary>
-            <div class="triage-dropzone" id="triageDropZone"><strong>로그 파일을 끌어놓으세요</strong><label>파일 선택 <input id="triageFile" type="file" accept=".log,.txt,.json,.jsonl,.ndjson,.csv"></label></div>
+          <header class="triage-heading"><div><h1>이벤트 분석</h1><p>로그 분석 · 자산 기술 조사 · 요청 검증</p></div><button class="btn btn-secondary" id="triageExport" disabled>분석 결과 저장(JSON)</button></header>
+          <details id="triageImport" open class="triage-import"><summary>로그 가져오기 <span>파일 업로드 또는 텍스트 입력</span></summary>
+            <div class="triage-dropzone" id="triageDropZone"><div class="triage-upload-copy"><strong>로그 파일을 여기에 끌어놓으세요</strong><span id="triageFileHint">CSV · LOG · TXT · JSON 계열 / 최대 2MB</span></div><label class="triage-file-button"><span>파일 찾아보기</span><input id="triageFile" type="file" aria-label="로그 파일 선택" accept=".log,.txt,.json,.jsonl,.ndjson,.csv"></label></div>
             <details class="triage-paste"><summary>텍스트로 붙여넣기</summary><textarea id="triageInput" rows="5" aria-label="분석할 로그" placeholder="장비 로그를 붙여넣으세요"></textarea></details>
-            <div class="triage-actions"><button class="btn btn-primary" id="triageAnalyze">로그 분석</button><button class="btn btn-secondary" id="triageClear">초기화</button><span class="triage-muted">등록 자산은 웹 기술도 자동 확인합니다.</span></div>
+            <div class="triage-actions triage-import-actions"><button class="btn btn-primary" id="triageAnalyze">로그 분석</button><button class="btn btn-secondary" id="triageClear">초기화</button><span class="triage-muted">모든 대상의 웹 기술을 자동 조사합니다.</span></div>
           </details>
           <div class="triage-progress"><p id="triageStatus" role="status" aria-live="polite"></p><button class="btn btn-secondary" id="triageProbeStop" hidden>기술 조사 중지</button></div>
           <div id="triageEmpty" class="triage-empty"><strong>로그를 넣으면 검증할 요청이 정리됩니다.</strong><p>통계 파악 → 스캔 요약 → 노이즈 제외 → URL 복사 또는 일괄 테스트</p></div>
           <section id="triageAssessment" hidden></section>
           <section id="triageFilterSection" class="triage-section" hidden>
-            <div class="triage-section-heading"><h2><span>03</span> 노이즈 제외</h2><p>제외한 로그도 통계와 원본에 남습니다.</p></div>
-            <div class="triage-filter-controls"><label><input id="triageExcludeIps" type="checkbox" checked> IPS 차단 <strong id="triageIpsCount">0건</strong></label><label><input id="triageExcludeScan" type="checkbox" checked> 단순 파일·경로 스캔 + 4xx <strong id="triageScanCount">0건</strong></label><label><input id="triageExcludeTech" type="checkbox" checked> 미사용 웹 기술 <strong id="triageTechCount">0건</strong></label></div>
+            <div class="triage-section-heading"><h2><span>03</span> 노이즈 제외</h2><p>검증 요청에서 제외할 조건</p></div>
+            <div class="triage-filter-controls"><label><input id="triageExcludeIps" type="checkbox" checked> IPS 차단 <strong id="triageIpsCount">0건</strong></label><label><input id="triageExcludeScan" type="checkbox" checked> 404 응답 · 단순 스캔 4xx <strong id="triageScanCount">0건</strong></label><label hidden><input id="triageExcludeTech" type="checkbox" checked> 미사용 웹 기술 <strong id="triageTechCount">0건</strong></label></div>
             <div id="triageSummary" class="triage-flow"></div>
-            <div class="triage-list-toolbar"><label>목록 <select id="triageScreenFilter"><option value="recommended">권장 검증 후보</option><option value="ready">전달 가능한 전체 요청</option><option value="excluded">노이즈 제외</option><option value="unresolved">정보 보완</option><option value="all">전체</option></select></label><div><button id="triageSelectReview" class="btn btn-secondary">권장 후보 선택</button><button id="triageSelectNone" class="btn btn-secondary">선택 해제</button></div></div>
+            <div class="triage-list-toolbar"><label>목록 <select id="triageScreenFilter"><option value="recommended">검증 대상 전체</option><option value="excluded">노이즈 제외</option><option value="unresolved">주소·요청 확인 필요</option><option value="all">전체</option></select></label><div><button hidden id="triageSelectReview" class="btn btn-secondary">검증 대상 전체 선택</button><button hidden id="triageSelectNone" class="btn btn-secondary">선택 해제</button></div></div>
             <div id="triageResults"></div>
-            <details id="triageOriginDetails"><summary>정보가 부족한 대상의 접속 주소 보완</summary><p>예: https://example.com 또는 http://192.0.2.10:8080</p><div id="triageOrigins"></div></details>
+            <details id="triageOriginDetails"><summary>접속 주소 입력</summary><p>예: https://example.com 또는 http://192.0.2.10:8080</p><div id="triageOrigins"></div></details>
           </section>
           <section id="triageHandoff" class="triage-section triage-delivery" hidden>
             <div class="triage-section-heading"><h2><span>04</span> 검증할 URL 목록</h2><strong id="triageSelectedCount">0건 선택</strong></div>
