@@ -213,7 +213,8 @@
       }
     } else cve.append(node('p','탐지명·요청 지문에서 식별된 CVE/제품군이 없습니다.'));
     grid.append(cve);
-    const devices=node('article','','triage-stat-card');devices.append(chartTitle('장비별 처리와 응답','명시된 장비 종류별 로그 비율 · 응답 코드는 장비 기록값'));
+    const devices=node('article','','triage-stat-card triage-devices-card');devices.append(chartTitle('장비별 처리와 응답','명시된 장비 종류별 로그 비율 · 응답 코드는 장비 기록값'));
+    const deviceRow=node('div','','triage-device-row');
     for(const d of s.devices){
       const detail=node('div','','triage-device-stat');detail.append(node('h4',`${d.name} · ${d.records}건`));
       const actionItems=[['차단',d.actions.blocked||0],['허용',d.actions.allowed||0],['불명',d.actions.unknown||0]].map(([label,count])=>({label,count}));
@@ -222,8 +223,9 @@
         detail.append(node('p','HTTP 응답 코드'),countRows(d.http_status,d.status_eligible));
         if(d.response_result.length)detail.append(node('p','장비 응답 판정'),countRows(d.response_result,d.response_result.reduce((sum,item)=>sum+item.count,0)));
       }
-      devices.append(detail);
+      deviceRow.append(detail);
     }
+    devices.append(deviceRow);
     grid.append(devices,technologyStatistics());section.append(grid);
     const correlations=node('div','','triage-stat-correlations');correlations.append(node('h3','상관 분석 후보'));
     if(s.correlations.length)for(const c of s.correlations)correlations.append(node('p',`${c.label} · ${c.source||c.target}`));

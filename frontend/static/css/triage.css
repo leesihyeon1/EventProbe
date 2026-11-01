@@ -48,6 +48,10 @@
 .triage-donut span{width:72px;height:72px;display:grid;place-items:center;background:var(--bg-primary);border-radius:50%}
 .triage-stat-rows{flex:1;min-width:0}
 .triage-device-stat{border-top:1px solid var(--border);padding-top:10px;margin-top:10px}
+/* 장비별 처리·응답: 3개(IPS·WAF·IDS)를 세로 스택 대신 가로로 한번에 나열 */
+.triage-devices-card{grid-column:1/-1}
+.triage-device-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:10px}
+.triage-device-row .triage-device-stat{border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:0}
 .triage-scan-conclusion{font-size:13px}
 .triage-scan-row{display:grid;grid-template-columns:1fr 1.6fr 1fr 1.2fr;gap:14px;padding:12px 0;border-top:1px solid var(--border);font-size:12px;align-items:center;overflow-wrap:anywhere}
 .triage-filter-controls{display:flex;gap:12px;flex-wrap:wrap}
@@ -83,6 +87,7 @@
 @media(max-width:900px){.triage-panel{padding:18px}
 .triage-section{padding:16px}
 .triage-stat-grid{grid-template-columns:1fr}
+.triage-device-row{grid-template-columns:1fr}
 .triage-metrics,.triage-flow{grid-template-columns:repeat(2,1fr)}
 .triage-section-heading,.triage-heading,.triage-list-toolbar{align-items:flex-start;flex-direction:column}
 .triage-table{min-width:800px}
