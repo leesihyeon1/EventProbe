@@ -112,3 +112,70 @@ def test_uds_block_pattern_is_excluded_before_analysis():
     assert result['statistics']['total'] == 2
     assert not result['unsupported']
     assert [e['event_name'] for e in result['events']] == ['UDS_SCAN_Permit', 'Other_Block']
+
+
+def _src(**row):
+    return analyze(json.dumps([{**dict(host='a.test', url='/x', method='GET'), **row}]))['events'][0]['source']
+
+
+def test_source_is_connection_src_when_no_proxy():
+    assert _src(src='203.0.113.9') == '203.0.113.9'
+    assert _src(source_ip='203.0.113.9') == '203.0.113.9'
+
+
+def test_source_strips_port_and_drops_placeholders():
+    assert _src(src='203.0.113.9:51234') == '203.0.113.9'
+    # N/A / 0.0.0.0 are not real sources: fall through, not counted as distinct values
+    assert _src(src='N/A', source_ip='203.0.113.9') == '203.0.113.9'
+    assert _src(src='0.0.0.0', source_ip='203.0.113.9') == '203.0.113.9'
+    assert _src(src='N/A') == ''
+
+
+def test_hostname_source_is_kept_verbatim():
+    assert _src(src='scanner.example.test') == 'scanner.example.test'
+
+
+def test_xff_leftmost_wins_over_proxy_src():
+    # Proxy/LB-fronted sensor: connection src is the proxy, true client is XFF-leftmost.
+    assert _src(src='10.9.194.72', xff='23.227.167.225,34.110.173.207,10.9.180.0') == '23.227.167.225'
+    assert _src(src='34.96.13.2', x_forwarded_for='23.227.167.225') == '23.227.167.225'
+
+
+def test_xff_recovered_from_raw_headers_and_packet_capture():
+    import base64
+    assert _src(src='34.96.13.2', Header_Value='Via: 1.1 google\nX-Forwarded-For: 23.227.167.225\n') == '23.227.167.225'
+    packet = base64.b64encode(
+        b'GET / HTTP/1.1\r\nhost: a.test\r\nx-forwarded-for: 23.227.167.225,34.160.180.79\r\n\r\n').decode()
+    assert _src(src='34.96.13.2', TrendMicroDsPacketData=packet) == '23.227.167.225'
+
+
+def test_device_resolved_client_beats_spoofed_packet_xff():
+    # Scanner spoofs an XFF header in the request body; the device-resolved pre-NAT
+    # address is authoritative and must win so a spoofed value is not a second source.
+    import base64
+    packet = base64.b64encode(
+        b'GET / HTTP/1.1\r\nx-forwarded-for: 172.56.152.138,34.160.180.79\r\n\r\n').decode()
+    assert _src(src='34.96.13.2', sourceTranslatedAddress='23.227.167.225',
+                TrendMicroDsPacketData=packet) == '23.227.167.225'
+    assert _src(src='34.96.13.2', client_ip='23.227.167.225') == '23.227.167.225'
+
+
+def test_one_client_behind_mixed_devices_aggregates_to_one_source():
+    # Same external client across IDS (direct src), IPS (xff field), WAF (header xff).
+    rows = [
+        dict(device_type='IDS', evtname='x', host='a.test', url='/a', source_ip='23.227.167.225'),
+        dict(device_type='IPS', evtname='x', host='a.test', url='/b', src='10.9.194.72', xff='23.227.167.225,34.1.1.1'),
+        dict(device_type='WAF', evtname='x', host='a.test', url='/c', src='34.96.13.2',
+             Header_Value='X-Forwarded-For: 23.227.167.225'),
+    ]
+    sources = {e['source'] for e in analyze(json.dumps(rows))['events']}
+    assert sources == {'23.227.167.225'}
+
+
+def test_host_default_port_is_normalized_but_other_ports_kept():
+    # Same asset logged with and without the default port must aggregate as one host.
+    rows = [dict(httpHost=h, url='/x', method='GET')
+            for h in ('a.test', 'a.test:443', 'a.test:80')]
+    assert {e['host'] for e in analyze(json.dumps(rows))['events']} == {'a.test'}
+    # A non-default port genuinely distinguishes a service and is preserved.
+    assert analyze(json.dumps([dict(httpHost='a.test:8080', url='/x', method='GET')]))['events'][0]['host'] == 'a.test:8080'

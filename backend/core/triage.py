@@ -1,4 +1,5 @@
 """Stateless SIEM triage. No persistence, AI calls or target requests."""
+import base64
 import csv
 import hashlib
 import io
@@ -33,6 +34,104 @@ def fields(text):
             value = value[1:-1].replace(r'\"', '"')
         out[m[1]] = value
     return out
+
+
+_IP_EMPTY = {'', 'N/A', '---', 'UNKNOWN', '0.0.0.0', '::', '0:0:0:0:0:0:0:0'}
+
+
+def _ip_token(value):
+    """Return a bare IP from one token (strips :port, brackets, zone), else ''.
+
+    Device-neutral: used to pull the real client out of X-Forwarded-For chains
+    and to drop placeholders like N/A / 0.0.0.0 that otherwise split one source
+    into many distinct values.
+    """
+    value = str(value).strip().strip('"').strip().strip('[]')
+    if value.upper() in _IP_EMPTY:
+        return ''
+    m = re.match(r'(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:\b|$)', value)
+    if m and all(int(o) < 256 for o in m[1].split('.')):
+        return m[1] if m[1] not in _IP_EMPTY else ''
+    v = value.split('%')[0]  # IPv6 zone id
+    if v.count(':') >= 2 and re.fullmatch(r'[0-9A-Fa-f:]+', v):
+        return '' if v in _IP_EMPTY else v
+    return ''
+
+
+def _xff_left(text):
+    """Leftmost valid IP of an X-Forwarded-For value (the originating client)."""
+    for token in str(text).split(','):
+        ip = _ip_token(token)
+        if ip:
+            return ip
+    return ''
+
+
+def _xff_from_headers(text):
+    """Pull the X-Forwarded-For client out of a raw HTTP header/request blob."""
+    m = re.search(r'x[-_ ]?forwarded[-_ ]?for\s*[:=]\s*([^\r\n"]+)', str(text), re.I)
+    return _xff_left(m[1]) if m else ''
+
+
+def _b64_decode(value):
+    """Best-effort base64 decode of a packet-data blob (url-safe/padding tolerant)."""
+    v = re.sub(r'[^A-Za-z0-9+/=_-]', '', str(value))
+    if not 24 <= len(v) <= 200000:
+        return ''
+    v = v.replace('-', '+').replace('_', '/').rstrip('=')
+    try:
+        return base64.b64decode(v + '=' * (-len(v) % 4)).decode('latin1')
+    except ValueError:  # binascii.Error subclasses ValueError
+        return ''
+
+
+def client_source(pick):
+    """Originating client IP across mixed device formats.
+
+    Proxy/LB-fronted sensors (e.g. CEF behind envoy/GCP) record the connection
+    `src` as the proxy/load-balancer and carry the true client in X-Forwarded-For.
+    When XFF is present — as a field, in the raw request headers, or inside the
+    base64 packet capture — its leftmost entry is the origin client and wins over
+    the connection `src`. Otherwise fall back to the connection source, keeping a
+    hostname source verbatim when it is not an IP.
+    """
+    # Device-resolved real client (pre-NAT / CIM client) — authoritative, not spoofable.
+    for key in ('true-client-ip', 'true_client_ip', 'x-real-ip', 'x_real_ip',
+                'sourceTranslatedAddress', 'source_translated_address', 'client_ip'):
+        ip = _ip_token(pick(key))
+        if ip:
+            return ip
+    ip = _xff_left(pick('xff', 'x_forwarded_for', 'x-forwarded-for'))
+    if ip:
+        return ip
+    for key in ('Header_Value', 'Header-Value', 'http_header', 'headers_raw', 'request_headers', 'headers'):
+        ip = _xff_from_headers(pick(key))
+        if ip:
+            return ip
+    for key in ('TrendMicroDsPacketData', 'Packet_Trace', 'pcapdata'):
+        ip = _xff_from_headers(_b64_decode(pick(key)))
+        if ip:
+            return ip
+    for key in ('src', 'src_ip', 'source_ip'):
+        raw = pick(key)
+        if not raw:
+            continue
+        ip = _ip_token(raw)
+        if ip:
+            return ip
+        if not re.search(r'\d{1,3}(?:\.\d{1,3}){3}', raw):  # hostname source, keep as-is
+            return raw.strip().strip('"')
+    return ''
+
+
+def _norm_host(host):
+    """Drop the implied HTTP/HTTPS default port so one asset is not split by :80/:443.
+
+    Non-default ports (e.g. :8080) and bare IPv6 literals are left untouched.
+    """
+    host = str(host).strip().strip('"')
+    m = re.fullmatch(r'(\[[0-9A-Fa-f:]+\]|[^:]+):(80|443)', host)
+    return m[1] if m else host
 
 
 def normalize(data, line, raw):
@@ -109,12 +208,12 @@ def normalize(data, line, raw):
     except ValueError: pass
     response_origin = status_provenance(pick('response_source', 'status_origin', 'http_status_source'))
     return dict(id=hashlib.sha256(f'{line}:{raw}'.encode()).hexdigest()[:20], line=line,
-                host=host, destination=destination, path=path, method=method or '불명', action=action,
+                host=_norm_host(host), destination=destination, path=path, method=method or '불명', action=action,
                 action_raw=action_raw, status=status, status_source=response_origin,
                 device=device, event_name=event_name, response_result=pick('result_status', 'response_status'),
                 occurrences=count, severity=pick('alertSev','attack_severity','severity'),
                 signature=signature, attack_evidence=evidence,
-                source=pick('src','src_ip','source_ip'), timestamp=timestamp, window=window,
+                source=client_source(pick), timestamp=timestamp, window=window,
                 category=category, priority=bucket, reasons=reasons,
                 cve=cve_info['cves'], products=cve_info['products'], cve_source=cve_info['source'],
                 readiness='manual_confirmation_required', fields=data)
