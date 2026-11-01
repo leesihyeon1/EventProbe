@@ -4,6 +4,7 @@ Screened events remain in the result and statistics; screening only controls the
 default investigation view, never the historical evidence or impact assessment.
 """
 import re
+from urllib.parse import unquote, urlsplit
 from core.classify import is_direct_file_probe
 
 
@@ -28,27 +29,66 @@ def status_provenance(value):
     return 'origin' if raw in ORIGIN_STATUS else 'edge' if raw in {'edge', 'waf', 'proxy', 'cdn'} else 'unknown'
 
 
+def simple_scan_request(event):
+    """A lookup-only probe, excluding query/body/header exploitation evidence.
+
+    A 4xx is used only to reduce default replay work, not to prove that a file
+    does not exist or that the service is secure. Raw fields are retained.
+    """
+    if event.get('method') not in ('GET', 'HEAD'):
+        return False
+    path = event.get('path') or ''
+    if not path:
+        return False
+    try:
+        parsed = urlsplit(path)
+        decoded = unquote(unquote(parsed.path))
+    except ValueError:
+        return False
+    if parsed.query or '?' in decoded or '..' in decoded or '\\' in decoded:
+        return False
+    fields = event.get('fields') or {}
+    if any(event.get(k) or fields.get(k) for k in (
+            'request_body', 'body', 'http_body', 'payload', 'webQuery', 'query', 'uri_query')):
+        return False
+    # IDS nested data can carry a request body without a top-level body field.
+    for segment in str(fields.get('layer_7_data') or '').split(';;;'):
+        key, sep, value = segment.partition('==')
+        if sep and key.strip().lower() == 'http request body' and value.strip():
+            return False
+    if event.get('cve'):
+        return False
+    if any(str(evidence).startswith('header:') for evidence in event.get('attack_evidence') or []):
+        return False
+    direct = is_direct_file_probe(path)
+    category = event.get('category') or ''
+    # Direct sensitive-file lookups may be labelled LFI by a vendor. Other
+    # attack categories and traversal/injection requests must remain visible.
+    if category and not (category == 'lfi' and direct):
+        return False
+    name = ' '.join(str(event.get(k) or '') for k in ('event_name', 'signature'))
+    scan_name = bool(re.search(r'(?:file|directory|path|web|application.layer)[ ._-]*(?:scan|probe|retrieval)|'
+                               r'(?:scan|probe).*?(?:file|directory|path)|\bzgrab\b|\bscanner\b', name, re.I))
+    return direct or event.get('family') == '정보 수집성' or scan_name
+
+
 def screen_event(event):
+    # Screening affects replay selection only. Important/mixed events stay in
+    # overall statistics and assessments even when this specific request is blocked.
+    if event.get('device') == 'IPS' and event.get('action') == 'blocked':
+        return {'screened': True, 'code': 'IPS_BLOCKED',
+                'explanation': 'IPS 차단 기록으로 기본 검증 대상에서 제외합니다. 동일 대상의 허용 이벤트는 별도로 검토합니다.'}
+    status = event.get('status')
+    if isinstance(status, int) and 400 <= status < 500 and simple_scan_request(event):
+        return {'screened': True, 'code': 'SIMPLE_SCAN_4XX',
+                'explanation': '4xx가 기록된 단순 파일·경로 탐색으로 기본 검증 대상에서 제외합니다. 응답 생성 주체나 자산의 안전을 확정하는 판단은 아닙니다.'}
     reasons = event.get('reasons') or []
     if 'MIXED_ALLOWED_BLOCKED' in reasons or 'IMPORTANT_ASSET' in reasons:
         return {'screened': False, 'code': '', 'explanation': '혼재 기록 또는 중요 자산으로 우선 확인합니다.'}
-    if event.get('device') == 'IPS' and event.get('action') == 'blocked':
-        return {'screened': True, 'code': 'IPS_BLOCKED',
-                'explanation': 'IPS 차단 기록입니다. 동일 대상의 허용 기록이나 우회 정황이 없으면 재요청 우선순위가 낮습니다.'}
     match = matching_technology(event)
     if match:
         return {'screened': False, 'code': 'TECH_MATCH',
                 'explanation': f'관측된 웹 기술과 요청 경로가 일치합니다: {match}. 실제 취약 여부는 별도 확인이 필요합니다.'}
-    path = event.get('path') or ''
-    simple_file = is_direct_file_probe(path) or (event.get('family') == '정보 수집성' and
-                   bool(path) and '?' not in path and not event.get('category'))
-    if (simple_file and event.get('status') in (404, 410) and
-            event.get('status_source') == 'origin' and
-            event.get('method') in ('GET', 'HEAD') and
-            event.get('action') != 'blocked' and
-            not any(r in reasons for r in ('HOST_CONFLICT', 'HOST_MISSING'))):
-        return {'screened': True, 'code': 'ORIGIN_NOT_FOUND_SCAN',
-                'explanation': '원 서버가 404/410을 반환한 단순 파일·경로 탐색입니다. 다른 경로의 허용·노출은 별도 확인이 필요합니다.'}
     return {'screened': False, 'code': '', 'explanation': ''}
 
 

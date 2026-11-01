@@ -323,31 +323,31 @@
 
       <div class="view" data-view="triage" id="triageWorkspace">
         <section class="triage-panel">
-          <div class="triage-heading"><span class="triage-eyebrow">보안 이벤트 대응</span><h1>무슨 일이 있었고, 무엇을 확인해야 할까요?</h1><p>장비 로그를 종합해 대응 우선순위를 정하고, 필요한 요청만 일괄 테스트로 이어갑니다.</p></div>
-          <ol class="triage-steps"><li>1. 로그 가져오기</li><li>2. 상황 판단과 대상 선택</li><li>3. 일괄 검증과 결과 확인</li></ol>
-          <p>로그는 이 도구의 서버에서 분석합니다. 기본 분석은 저장하지 않습니다. 기록 저장을 선택하면 원문과 결과를 서버에 보관합니다. 대상 요청과 AI 호출은 발생하지 않습니다.</p>
-          <details id="triageImport" open><summary>1. 로그 가져오기 · 다시 분석하기</summary>
-          <div class="triage-dropzone" id="triageDropZone">
-            <strong>로그 파일을 여기에 끌어놓으세요</strong>
-            <span>CSV · LOG · TXT · JSON · JSONL · NDJSON / 파일 1개, 최대 2MB</span>
-            <label>또는 파일 선택 <input id="triageFile" type="file" accept=".log,.txt,.json,.jsonl,.ndjson,.csv"></label>
-          </div>
-          <label for="triageInput">또는 로그 붙여넣기 (최대 2MB · 10,000건)</label>
-          <textarea id="triageInput" rows="8" placeholder="CEF, WAF, IDS, JSON 로그를 붙여넣으세요"></textarea>
-          <div class="triage-actions"><button class="btn btn-primary" id="triageAnalyze">로그 분석</button><button class="btn btn-secondary" id="triageClear">초기화</button><button class="btn btn-secondary" id="triageExport" disabled>분석 결과 내려받기</button></div>
+          <header class="triage-heading"><div><span class="triage-eyebrow">SECURITY EVENT REVIEW</span><h1>이벤트 분석</h1><p>스캔 시도를 요약하고, 노이즈를 제외한 요청만 검증합니다.</p></div><button class="btn btn-secondary" id="triageExport" disabled>분석 결과 저장(JSON)</button></header>
+          <details id="triageImport" open class="triage-import"><summary>로그 가져오기 <span>CSV · LOG · JSON / 최대 2MB</span></summary>
+            <div class="triage-dropzone" id="triageDropZone"><strong>로그 파일을 끌어놓으세요</strong><label>파일 선택 <input id="triageFile" type="file" accept=".log,.txt,.json,.jsonl,.ndjson,.csv"></label></div>
+            <details class="triage-paste"><summary>텍스트로 붙여넣기</summary><textarea id="triageInput" rows="5" aria-label="분석할 로그" placeholder="장비 로그를 붙여넣으세요"></textarea></details>
+            <div class="triage-actions"><button class="btn btn-primary" id="triageAnalyze">로그 분석</button><button class="btn btn-secondary" id="triageClear">초기화</button><span class="triage-muted">등록 자산은 웹 기술도 자동 확인합니다.</span></div>
           </details>
-          <p id="triageStatus" role="status" aria-live="polite"></p>
-          <section id="triageAssessment" class="triage-assessment" hidden aria-live="polite"></section>
-          <div id="triageSummary" class="triage-summary"></div>
-          <section id="triageTechnology" class="triage-handoff" hidden></section>
-          <section id="triageHandoff" class="triage-handoff" hidden>
-            <div><h2>검증이 필요한 요청만 일괄 테스트</h2><p>아래 분석표에서 검증할 항목을 선택하세요. 검토 필요 항목 중 접속 주소가 확인된 GET 요청은 자동 선택됩니다.</p></div>
-            <details><summary>주소를 복원하지 못한 대상만 보완하기</summary><div id="triageOrigins"></div></details>
-            <div class="triage-actions"><button id="triageSelectReview" class="btn btn-secondary">검토 필요 항목 선택</button><button id="triageSelectNone" class="btn btn-secondary">선택 해제</button><button id="triageSendBulk" class="btn btn-primary">선택 항목 일괄 테스트로 보내기</button><span id="triageSelectedCount">0건 선택</span></div>
+          <div class="triage-progress"><p id="triageStatus" role="status" aria-live="polite"></p><button class="btn btn-secondary" id="triageProbeStop" hidden>기술 조사 중지</button></div>
+          <div id="triageEmpty" class="triage-empty"><strong>로그를 넣으면 검증할 요청이 정리됩니다.</strong><p>통계 파악 → 스캔 요약 → 노이즈 제외 → URL 복사 또는 일괄 테스트</p></div>
+          <section id="triageAssessment" hidden></section>
+          <section id="triageFilterSection" class="triage-section" hidden>
+            <div class="triage-section-heading"><h2><span>03</span> 노이즈 제외</h2><p>제외한 로그도 통계와 원본에 남습니다.</p></div>
+            <div class="triage-filter-controls"><label><input id="triageExcludeIps" type="checkbox" checked> IPS 차단 <strong id="triageIpsCount">0건</strong></label><label><input id="triageExcludeScan" type="checkbox" checked> 단순 파일·경로 스캔 + 4xx <strong id="triageScanCount">0건</strong></label></div>
+            <div id="triageSummary" class="triage-flow"></div>
+            <div class="triage-list-toolbar"><label>목록 <select id="triageScreenFilter"><option value="recommended">권장 검증 후보</option><option value="ready">전달 가능한 전체 요청</option><option value="excluded">노이즈 제외</option><option value="unresolved">정보 보완</option><option value="all">전체</option></select></label><div><button id="triageSelectReview" class="btn btn-secondary">권장 후보 선택</button><button id="triageSelectNone" class="btn btn-secondary">선택 해제</button></div></div>
+            <div id="triageResults"></div>
+            <details id="triageOriginDetails"><summary>정보가 부족한 대상의 접속 주소 보완</summary><p>예: https://example.com 또는 http://192.0.2.10:8080</p><div id="triageOrigins"></div></details>
+          </section>
+          <section id="triageHandoff" class="triage-section triage-delivery" hidden>
+            <div class="triage-section-heading"><h2><span>04</span> 검증할 URL 목록</h2><strong id="triageSelectedCount">0건 선택</strong></div>
+            <p id="triageQueueNote"></p>
+            <textarea id="triageUrlList" rows="5" readonly aria-label="검증할 URL 목록" placeholder="검증 가능한 요청이 없으면 비어 있습니다."></textarea>
+            <div class="triage-actions"><button id="triageCopyUrls" class="btn btn-secondary">URL 목록 복사</button><button id="triageSendBulk" class="btn btn-primary">일괄 테스트로 전달 →</button></div>
             <p id="triageHandoffStatus" role="status"></p>
           </section>
-          <div class="triage-filter-controls"><label>조사 화면 <select id="triageScreenFilter"><option value="actionable">우선 확인</option><option value="all">전체 기록</option><option value="screened">낮은 우선순위만</option></select></label><label>표시할 우선순위 <select id="triageFilter"><option value="">전체</option><option value="review">검토 필요</option><option value="information">정보 보완</option><option value="low">재요청 저우선</option></select></label></div>
-          <div id="triageResults"></div>
+          <details id="triageTechnologyDetails" hidden><summary>대상 기술 조사 상세</summary><section id="triageTechnology"></section></details>
           <details><summary>분석 기록 보관</summary>
             <p>작업공간별 기록입니다. 작업공간 이름은 사용자 인증 수단이 아니므로 공용 토큰 공유 시 접근 정책을 확인하세요.</p>
             <label>보존 기간(일) <input id="triageRetention" type="number" min="1" max="30" value="7"></label>
