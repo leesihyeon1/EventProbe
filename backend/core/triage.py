@@ -41,13 +41,16 @@ def normalize(data, line, raw):
     for part in pick('layer_7_data').split(';;;'):
         if '==' in part:
             k, v = part.split('==', 1)
-            inner[k.strip()] = v.strip()
+            inner[k.strip().strip('"')] = v.strip().strip('"')
     destination = pick('dst', 'dst_ip', 'destination_ip', 'dest_ip', 'destinationAddress')
-    host = pick('httpHost', 'dhost', 'dest_host', 'host') or inner.get('HTTP Host', '')
+    device = device_kind(data, raw)
+    # SIEM host is commonly the collector/sensor, not the HTTP destination.
+    host = pick('httpHost', 'http_hostname', 'dhost', 'dest_host') or inner.get('HTTP Host', '')
+    if not host and device not in ('IDS', 'IPS'):
+        host = pick('host')
     path = pick('url', 'uri', 'request', 'request_uri') or inner.get('HTTP URI', '')
     method = (pick('requestMethod', 'webMethod', 'method') or inner.get('HTTP Request Method', '')).upper()
     event_name = pick('evtname', 'eventName', 'event_name', 'attack_name', 'evntDesc', 'ruleName', 'signature')
-    device = device_kind(data, raw)
     network_only = not path and bool(destination and event_name and device in ('IPS', 'IDS'))
     if not path and not network_only:
         if not data: raise ValueError('로그 필드를 읽을 수 없습니다.')
@@ -67,8 +70,12 @@ def normalize(data, line, raw):
     if query and '?' not in path: path += '?' + query.lstrip('?')
     action_raw = pick('disposition', 'act', 'action')
     action = {'permit':'allowed','allow':'allowed','allowed':'allowed','block':'blocked','blocked':'blocked','deny':'blocked','drop':'blocked','reset':'blocked'}.get(action_raw.lower(), 'unknown')
-    code = pick('resultCode', 'status', 'status_code', 'http_status')
-    status = int(code) if code.isdigit() and 100 <= int(code) <= 599 else None
+    status = None
+    for code in [pick(k) for k in ('resultCode', 'status', 'status_code', 'http_status', 'response_code', 'http_response_code')] + [inner.get('HTTP Return Code', ''), inner.get('HTTP Response Code', '')]:
+        match = re.fullmatch(r'(?:HTTP/\d(?:\.\d)?\s+)?([1-5]\d{2})(?:\s+[^\r\n]*)?', code.strip())
+        if match:
+            status = int(match[1])
+            break
     headers = data.get('request_headers') or data.get('headers') or pick('Header-Value') or inner.get('HTTP Header', '')
     if not isinstance(headers, dict):
         headers = dict(line.split(':', 1) for line in str(headers).splitlines() if ':' in line)
@@ -77,7 +84,7 @@ def normalize(data, line, raw):
     signature = pick('attack_name', 'evntDesc', 'ruleName', 'signature')
     category = attack.primary or signature_category(signature)
     # CVE/제품군 인식 — 요청/분석 엔진의 요청 전용 지문을 재사용(로컬, 무반출, 시도 식별이며 성공 판정 아님)
-    cve_info = identify_cve(url=path, req_body=req_body, req_headers=headers, signature=signature)
+    cve_info = identify_cve(url=path, req_body=req_body, req_headers=headers, signature=' '.join(dict.fromkeys(filter(None, [event_name, signature]))))
     evidence = [f'{hit.where}: {hit.subtype or hit.attack_type} · {hit.evidence}' for hit in attack.candidates]
     if signature: evidence.append(f'장비 탐지명: {signature}')
     reasons = []
@@ -145,6 +152,7 @@ def analyze(text):
         records = [(i+1,None,x) for i,x in enumerate(text.splitlines()) if x.strip()]
     if len(records)>MAX_RECORDS: raise ValueError('최대 10,000개 레코드를 분석할 수 있습니다.')
     events, errors, unsupported = [], [], []
+    excluded_detection_count = 0
     for line, data, raw in records:
         try:
             if len(raw)>100000: raise ValueError('단일 레코드는 100KB 이하이어야 합니다.')
@@ -157,6 +165,14 @@ def analyze(text):
                 # Exported fields fill gaps; original device values remain authoritative.
                 data={**{k:v for k,v in data.items() if k!='_raw' and v not in (None,'')},
                       **{k:v for k,v in embedded.items() if v not in (None,'')}}
+            # Operator exclusion: UDS_*_Block detection names never enter
+            # statistics, search/detail lists or verification handoff.
+            detection = next((str(data[k]).strip() for k in
+                              ('evtname', 'eventName', 'event_name', 'attack_name', 'evntDesc', 'ruleName', 'signature')
+                              if data.get(k) not in (None, '', 'N/A', '---')), '')
+            if re.fullmatch(r'UDS_.*_Block', detection, re.I):
+                excluded_detection_count += 1
+                continue
             events.append(normalize(data,line,raw))
         except UnsupportedLog as e:
             unsupported.append(dict(line=line, reason=str(e)))
@@ -172,7 +188,7 @@ def analyze(text):
                 e['priority']='review'; e['reasons'].append('MIXED_ALLOWED_BLOCKED')
         result.append(dict(host=host, window=window, count=len(items), events=[e['id'] for e in items], mixed=mixed))
     output=refresh_attack_summary(dict(scan_analysis=summarize_campaigns(events),policy=POLICY, events=events, errors=errors, unsupported=unsupported, groups=result,
-                summary=dict(records=len(records), parsed=len(events), errors=len(errors), unsupported=len(unsupported), groups=len(result),
+                summary=dict(records=len(records), excluded_detections=excluded_detection_count, parsed=len(events), errors=len(errors), unsupported=len(unsupported), groups=len(result),
                 review=sum(e['priority']=='review' for e in events), information=sum(e['priority']=='information' for e in events), low=sum(e['priority']=='low' for e in events)),
                 target_requests=0, persisted=False))
     output['statistics']=summarize_statistics(events)

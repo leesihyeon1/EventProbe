@@ -82,3 +82,33 @@ def test_siem_csv_arbitrary_header_and_multiline_raw():
 def test_csv_extracted_fields_fill_raw_gaps():
     r=analyze('other,_raw,httpHost,url,webMethod\nvalue,"act=Permit",example.test,/x,GET\n')
     assert r['summary']['parsed']==1 and r['events'][0]['host']=='example.test'
+
+
+def test_sensor_host_does_not_override_http_target_or_dst():
+    import json
+    from core.triage import analyze
+    rows = [
+        dict(device_type='IDS', host='sensor.test', dst='192.0.2.10', layer_7_data='HTTP Host == app.test;;;HTTP URI == /login;;;'),
+        dict(device_type='IPS', host='sensor.test', dst='192.0.2.20', evtname='Port Scan'),
+        dict(device_type='IPS', host='sensor.test', http_hostname='other.test', url='/x'),
+    ]
+    events = analyze(json.dumps(rows))['events']
+    assert events[0]['host'] == 'app.test'
+    assert events[1]['host'] == '' and events[1]['destination'] == '192.0.2.20'
+    assert events[2]['host'] == 'other.test'
+
+
+def test_uds_block_pattern_is_excluded_before_analysis():
+    import json
+    from core.triage import analyze
+    result = analyze(json.dumps([
+        dict(evtname='UDS_SCAN_Block'),
+        dict(evtname='uds_http_block', host='a.test', url='/x'),
+        dict(evtname='UDS_SCAN_Permit', host='a.test', url='/x'),
+        dict(evtname='Other_Block', host='b.test', url='/x'),
+    ]))
+    assert result['summary']['excluded_detections'] == 2
+    assert result['summary']['parsed'] == 2
+    assert result['statistics']['total'] == 2
+    assert not result['unsupported']
+    assert [e['event_name'] for e in result['events']] == ['UDS_SCAN_Permit', 'Other_Block']

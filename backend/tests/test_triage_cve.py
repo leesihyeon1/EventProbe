@@ -53,3 +53,15 @@ def test_analyze_end_to_end_tags_cve_and_product():
     assert 'CVE-2021-44228' in event['cve'] and 'log4j' in event['products']
     assert any(c['label'] == 'CVE-2021-44228' for c in result['statistics']['cves'])
     assert any(p['name'] == 'log4j' for p in result['statistics']['products'])
+
+
+def test_event_name_is_used_for_product_recognition():
+    import json
+    from core.triage import analyze
+    cases = [('Microsoft Exchange Server SSRF', 'exchange'),
+             ('Cisco ASA Directory Traversal', 'cisco-asa'),
+             ('Adobe ColdFusion Access Control Bypass', 'coldfusion'),
+             ('React Server Components Remote Code Execution', 'react')]
+    for title, product in cases:
+        result = analyze(json.dumps([dict(device_type='IDS', evtname=title, host='example.test', url='/x')]))
+        assert product in result['events'][0]['products']

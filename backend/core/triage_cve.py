@@ -25,6 +25,26 @@ _CVE_PRODUCT = {
 
 # 탐지명/서버 문자열에서 보이는 제품 키워드 → 제품군(정규화).
 _PRODUCT_HINTS = (
+    ('papercut', r'papercut'), ('coldfusion', r'coldfusion'),
+    ('cisco-asa', r'cisco asa'), ('cisco-ios-xe', r'cisco ios xe'),
+    ('goanywhere', r'goanywhere'), ('d-link', r'd-link'), ('crushftp', r'crushftp'),
+    ('centrestack', r'centrestack'), ('mylittleadmin', r'mylittleadmin'),
+    ('whatsup-gold', r'whatsup gold'), ('pan-os', r'palo alto'),
+    ('magicinfo', r'magicinfo'), ('checkpoint', r'checkpoint|check point'),
+    ('solarwinds-whd', r'solarwinds.*web help desk'), ('sysaid', r'sysaid'),
+    ('sharepoint', r'sharepoint'), ('zimbra', r'zimbra'), ('wso2', r'wso2'),
+    ('dotcms', r'dotcms'), ('linear-emerge', r'linear.*emerge'),
+    ('telerik', r'telerik'), ('vbulletin', r'vbulletin'), ('subsonic', r'subsonic'),
+    ('hpe-ilo', r'integrated lights.out|hpe.*ilo'), ('screenconnect', r'screenconnect'),
+    ('forticlient-ems', r'forticlient ems'), ('react', r'react server components'),
+    ('simplehelp', r'simplehelp'), ('sonicwall', r'sonicwall'),
+    ('teamcity', r'teamcity'), ('aspera-faspex', r'aspera faspex'),
+
+    ('fortios', r'fortios|fortigate'), ('pan-os', r'pan-os|globalprotect'),
+    ('ivanti', r'ivanti|pulse secure'), ('hikvision', r'hikvision'),
+    ('f5-bigip', r'big-?ip|\bf5\b'), ('jboss', r'jboss'),
+    ('laravel', r'laravel'), ('drupal', r'drupal'), ('phpmyadmin', r'phpmyadmin'),
+    ('jenkins', r'jenkins'), ('bash', r'\bbash\b|shellshock'),
     ('log4j', r'log4shell|log4j'), ('struts', r'struts'), ('spring', r'spring4shell|springframework|\bspring\b'),
     ('weblogic', r'weblogic'), ('citrix', r'citrix|netscaler'), ('confluence', r'confluence|atlassian'),
     ('exchange', r'proxyshell|proxylogon|\bexchange\b'), ('wordpress', r'wordpress|wp-'),
