@@ -24,7 +24,12 @@ def event_family(event):
     name = event.get('event_name', '') or ''
     path = event.get('path', '') or ''
     category = event.get('category', '') or ''
+    # Keep the established families; product/CVE evidence takes precedence
+    # over generic web techniques such as traversal, SSRF or SQL injection.
+    name = ' '.join(filter(None, [name, event.get('signature') or '']))
     has_vuln = bool(event.get('cve') or event.get('products'))
+    if has_vuln:
+        return '애플리케이션 공격'
     if is_direct_file_probe(path) or re.search(
             r'file.access|file.probe|\.env|\.git|directory.(scan|list|brows)|path.scan|recon|'
             r'information.disclosure|정보.?수집|파일.*(스캔|탐색|노출)', name, re.I):
@@ -76,7 +81,7 @@ def summarize_statistics(events):
     products = defaultdict(lambda: dict(records=0, actions=Counter(), cves=set(), targets=set()))
     cve_records = 0
     cve_open_records = 0   # CVE/제품 식별 이벤트 중 차단되지 않은(허용·불명) 건 — 우선 조사 대상
-    devices = defaultdict(lambda: dict(actions=Counter(), statuses=Counter(), results=Counter(), records=0, status_eligible=0))
+    devices = defaultdict(lambda: dict(actions=Counter(), raw_actions=Counter(), statuses=Counter(), results=Counter(), records=0, status_eligible=0))
     source_targets = defaultdict(set)
     target_sources = defaultdict(set)
     source_families = defaultdict(set)
@@ -108,6 +113,9 @@ def summarize_statistics(events):
         kind = event.get('device') or '미확인'
         d = devices[kind]
         d['records'] += 1
+        raw_action = str(event.get('action_raw') or '').strip()
+        raw_label = {'block': 'Block', 'permit': 'Permit', 'none': 'None'}.get(raw_action.lower(), raw_action) or '처리 값 미기록'
+        d['raw_actions'][raw_label] += 1
         d['actions'][event.get('action') or 'unknown'] += 1
         if kind in ('WAF', 'IDS'):
             d['status_eligible'] += 1
@@ -124,7 +132,8 @@ def summarize_statistics(events):
         if kind not in devices: continue
         d = devices[kind]
         device_rows.append(dict(name=kind, records=d['records'], actions=dict(d['actions']),
-                                http_status=top_items(d['statuses'], 6), response_result=top_items(d['results'], 6),
+                                action_values=top_items(d['raw_actions'], 10),
+                                http_status=top_items(d['statuses'], 20), response_result=top_items(d['results'], 6),
                                 status_eligible=d['status_eligible']))
     signals = []
     for source, target_set in source_targets.items():

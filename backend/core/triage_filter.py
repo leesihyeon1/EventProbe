@@ -81,11 +81,15 @@ def simple_scan_request(event):
 def screen_event(event):
     # Screening affects replay selection only. Important/mixed events stay in
     # overall statistics and assessments even when this specific request is blocked.
-    if event.get('device') == 'IPS' and event.get('action') == 'blocked':
+    if str(event.get('device') or '').upper() == 'IPS' and (event.get('action') == 'blocked' or str(event.get('action_raw') or '').strip().lower() == 'block'):
         return {'screened': True, 'code': 'IPS_BLOCKED',
                 'explanation': 'IPS 차단 기록으로 기본 검증 대상에서 제외합니다. 동일 대상의 허용 이벤트는 별도로 검토합니다.'}
     status = event.get('status')
+    # 404/4xx 제외는 '단순 탐색'에만 적용 — 페이로드·CVE·주입 시도는 404라도 유지(三상태: 경로 부재는 안전이 아님).
     if isinstance(status, int) and 400 <= status < 500 and simple_scan_request(event):
+        if status == 404:
+            return {'screened': True, 'code': 'HTTP_404',
+                    'explanation': 'HTTP 404(경로 없음)로 기록된 단순 탐색이라 기본 검증 대상에서 제외합니다. 경로 부재는 응답 주체나 자산의 안전을 확정하지 않으며 원본·통계는 유지됩니다.'}
         return {'screened': True, 'code': 'SIMPLE_SCAN_4XX',
                 'explanation': '4xx가 기록된 단순 파일·경로 탐색으로 기본 검증 대상에서 제외합니다. 응답 생성 주체나 자산의 안전을 확정하는 판단은 아닙니다.'}
     reasons = event.get('reasons') or []
@@ -99,8 +103,8 @@ def screen_event(event):
     known = [str(t).lower() for t in (event.get('technologies') or [])]
     if implied and known and implied not in known:
         # 관측된 웹 기술을 아는 경우에만 '미사용' 판단 — 기술 미관측은 부재의 증거가 아니다(三상태 준수).
-        return {'screened': True, 'code': 'TECH_MISMATCH',
-                'explanation': f'요청 경로는 {implied} 대상이지만 관측된 웹 기술에 {implied}가 없어 기본 검증 대상에서 제외합니다. '
+        return {'screened': False, 'code': 'TECH_UNCONFIRMED',
+                'explanation': f'요청 경로는 {implied} 대상이지만 응답 헤더에서 {implied} 사용 여부를 확인하지 못해 자산 기술 확인이 필요합니다. '
                                '기술 미관측은 부재의 증거가 아니며 전체 목록에서 확인할 수 있습니다.'}
     return {'screened': False, 'code': '', 'explanation': ''}
 

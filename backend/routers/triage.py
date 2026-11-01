@@ -102,7 +102,7 @@ class TechnologyProbe(BaseModel):
 
 @router.post('/technology-probe')
 async def technology_probe(body: TechnologyProbe, request: Request):
-    """One explicit, header-only GET of an analyst-chosen origin (registered or not)."""
+    """One bounded GET, analyzed locally using the request/analysis engine."""
     target = body.origin.strip()
     parsed = urlsplit(target)
     if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
@@ -110,20 +110,48 @@ async def technology_probe(body: TechnologyProbe, request: Request):
             parsed.query or parsed.fragment or target.endswith('/') or
             any(ord(c) < 33 for c in target)):
         raise HTTPException(422, '유효한 HTTP(S) 접속 주소(scheme·host, 경로/쿼리 없이)만 사용할 수 있습니다.')
-    # 분석가가 명시적으로 요청한 단일 헤더 전용 GET 1회는 등록 자산이 아니어도 허용한다.
-    # (리다이렉트·본문·쿠키·인증정보 미전송 · 일괄/다중 테스트보다 덜 침습적. 자동 일괄 조사는
-    #  프런트에서 여전히 등록 자산으로만 제한한다.)
+    # One bounded request; no external enrichment, redirects or exploit probes.
+    limit = 128 * 1024
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False,
-                                     trust_env=False) as client:
-            async with client.stream('GET', target + '/') as response:
-                headers = {k.lower(): v for k, v in response.headers.items()}
-                technologies = [item['name'] for item in analyzer.detect_stack(headers)]
-                return {'origin': target, 'status': response.status_code,
-                        'technologies': technologies,
-                        'note': '등록된 자산에 GET / 요청 1회. 리다이렉트·본문·쿠키는 수집하지 않았습니다. 응답 헤더 지문만으로 설치 기술의 전체 목록을 확정할 수 없습니다.'}
-    except httpx.RequestError as exc:
+        async with asyncio.timeout(10):
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False,
+                                         trust_env=False) as client:
+                async with client.stream('GET', target + '/') as response:
+                    headers = {k.lower(): v for k, v in response.headers.items()}
+                    raw = bytearray()
+                    truncated = False
+                    content_type = headers.get('content-type', '').lower()
+                    if any(kind in content_type for kind in ('text/', 'html', 'json', 'xml', 'javascript')):
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            room = limit - len(raw)
+                            raw.extend(chunk[:room])
+                            if len(chunk) > room or len(raw) >= limit:
+                                truncated = True
+                                break
+                    body_text = bytes(raw).decode('utf-8', errors='replace')
+                    # Reuse the request/analysis engine locally, returning only
+                    # technology observations, never raw body/cookies/findings.
+                    # Reuse discovery components only. The full attack analyzer
+                    # evaluates exploit matchers and is unnecessary for discovery.
+                    stack = analyzer.detect_stack(headers)
+                    analysis = {'waf_detected': analyzer.detect_waf(headers),
+                                'spa_shell': analyzer._detect_spa_shell(body_text, headers)}
+                    technologies = list(dict.fromkeys(item['name'] for item in stack))
+                    evidence = [{'name': item['name'], 'source': 'response-header'} for item in stack]
+                    shell = analysis.get('spa_shell')
+                    if shell and shell.get('framework'):
+                        name = shell['framework']
+                        if name not in technologies:
+                            technologies.append(name)
+                            evidence.append({'name': name, 'source': 'html-pattern', 'confidence': 'tentative'})
+                    return {'origin': target, 'status': response.status_code,
+                            'technologies': technologies, 'evidence': evidence,
+                            'waf': analysis.get('waf_detected'), 'body_bytes_examined': len(raw),
+                            'body_truncated': truncated, 'requests': 1,
+                            'note': 'GET / 1회 · 본문 최대 128KiB 로컬 분석 · 리다이렉트/추가 경로/외부 서비스 없음. 기술 관측은 제품 버전이나 CVE 취약 여부의 확증이 아닙니다.'}
+    except (httpx.RequestError, TimeoutError) as exc:
         raise HTTPException(502, f'기술 확인 요청 실패: {type(exc).__name__}') from exc
+
 
 
 @router.post('/batches',status_code=201)

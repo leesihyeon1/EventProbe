@@ -16,10 +16,11 @@
     const f=e.fields||{};
     try {
       for(const k of ['url','uri','request','request_uri'])if(/^https?:\/\//i.test(f[k]||''))return new URL(f[k]).origin;
-      const port=String(f.dport||f.destination_port||f.dpt||'');
+      const port=String(f.dport||f.destination_port||f.dest_port||f.dpt||'');
       const scheme=String(f.scheme||f.url_scheme||'').toLowerCase()||({'80':'http','443':'https'}[port]);
-      if(!scheme||!e.host)return '';
-      const u=new URL(scheme+'://'+e.host);
+      if(!scheme||!(e.host||e.destination))return '';
+      const address=e.host||e.destination;
+      const u=new URL(scheme+'://'+(address.includes(':')&&!address.startsWith('[')&&address.split(':').length>2?'['+address+']':address));
       if(port&&!u.port&&!['80','443'].includes(port))u.port=port;
       return u.origin;
     }catch{return '';}
@@ -55,7 +56,7 @@
     for(const e of events.filter(e=>selected.has(e.id))){
       if(e.method!=='GET'){errors.push(`${e.line}번: GET 요청만 일괄 연결할 수 있습니다.`);continue;}
       try {
-        const origin=new URL(origins[originKey(e)]||inferredOrigin(e)||'');
+        const origin=new URL(origins[originKey(e)]||e.inventory?.origin||inferredOrigin(e)||'');
         if(!['http:','https:'].includes(origin.protocol)||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw Error();
         if(!e.path.startsWith('/')||e.path.startsWith('//')||/[\\\x00-\x20]/.test(e.path))throw Error();
         const u=new URL(e.path,origin.origin);
@@ -70,7 +71,7 @@
     const groups=new Map();
     for(const e of events){
       const key=e.inventory?.origin||e.host||e.destination||'(대상 불명)';
-      if(!groups.has(key))groups.set(key,{target:key,hosts:new Set(),destinations:new Set(),records:0,inventory:new Set(),stale:false,profile:profiles[key]||null});
+      if(!groups.has(key))groups.set(key,{target:key,hosts:new Set(),destinations:new Set(),records:0,inventory:new Set(),stale:false,profile:profiles[key]||profiles[inferredOrigin(e)]||null});
       const g=groups.get(key);g.records++;
       if(e.host)g.hosts.add(e.host);if(e.destination)g.destinations.add(e.destination);
       if(e.inventory?.stack)g.inventory.add(e.inventory.stack);if(e.inventory?.stale)g.stale=true;
@@ -82,9 +83,14 @@
       identified:rows.filter(g=>!g.profile?.error&&g.profile?.technologies?.length).length,
       technologies:[...observed].map(([label,count])=>({label,count})).sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label))};
   }
-  async function probeTargets(events,probe,onProgress=()=>{},stopped=()=>false){
-    const origins=[...new Set(events.map(e=>e.inventory?.origin).filter(Boolean))];
-    const queue=origins.slice(0,20);let cursor=0,completed=0,failed=0;
+  function investigationOrigin(e){
+    const known=e.inventory?.origin||inferredOrigin(e);if(known)return known;
+    const host=e.host||e.destination;if(!host)return '';
+    try{const url=new URL('https://'+host);if(url.username||url.password||url.pathname!=='/'||url.search||url.hash)return '';return url.origin;}catch{return '';}
+  }
+  async function probeTargets(events,probe,onProgress=()=>{},stopped=()=>false,resolveOrigin=investigationOrigin){
+    const origins=[...new Set(events.map(resolveOrigin).filter(Boolean))];
+    const queue=origins;let cursor=0,completed=0,failed=0;
     async function worker(){
       while(cursor<queue.length&&!stopped()){
         const origin=queue[cursor++];let profile;
@@ -97,13 +103,15 @@
   }
   function noiseKind(event){
     const code=event.screening?.code;
-    if(code==='IPS_BLOCKED')return 'ips';
-    if(['SIMPLE_SCAN_4XX','ORIGIN_NOT_FOUND_SCAN'].includes(code))return 'scan';
-    if(code==='TECH_MISMATCH')return 'tech';
+    if(code==='IPS_BLOCKED'||(String(event.device||'').toUpperCase()==='IPS'&&(event.action==='blocked'||String(event.action_raw||'').trim().toLowerCase()==='block')))return 'ips';
+    // 404/4xx 노이즈는 백엔드 screening 코드(단순 탐색일 때만 부여)를 따른다 — 404라도 공격 시도는 유지.
+    if(['HTTP_404','SIMPLE_SCAN_4XX','ORIGIN_NOT_FOUND_SCAN'].includes(code))return 'scan';
+    // Header fingerprints cannot prove a product is absent.
+    // Older saved TECH_MISMATCH records stay eligible for verification.
     return '';
   }
   function recommended(event){
-    return event.action!=='blocked'&&(event.priority==='review'||event.action==='allowed');
+    return true;
   }
   function queue(events,origins={},filters={ips:true,scan:true}){
     const ready=[],excluded=[],unresolved=[];
@@ -111,11 +119,14 @@
       const kind=noiseKind(e);
       if(kind&&filters[kind]){excluded.push(e);continue;}
       const target=targets([e],new Set([e.id]),origins);
-      if(target.errors.length||!target.urls.length){unresolved.push({...e,queue_reason:e.method!=='GET'?'일괄 연결은 GET 요청만 지원': '접속 주소 또는 경로 확인 필요'});continue;}
+      if(target.errors.length||!target.urls.length){unresolved.push({...e,queue_reason:e.method!=='GET'?`${e.method||'메서드 미기록'} 요청: 메서드·본문을 포함한 개별 검증 필요`: '접속 주소 또는 경로 확인 필요'});continue;}
       ready.push({...e,verification_url:target.urls[0]});
     }
     return {ready,excluded,unresolved,unique_urls:[...new Set(ready.map(e=>e.verification_url))]};
   }
-  const api={overview,targets,inferredOrigin,originKey,rows,technologyMatch,impliedTechnology,technologySummary,probeTargets,noiseKind,queue,recommended};root.TriageWorkflow=api;
+  function queueTransfer(queue,origins={}){
+    return targets(queue.ready,new Set(queue.ready.map(e=>e.id)),origins);
+  }
+  const api={investigationOrigin,queueTransfer,overview,targets,inferredOrigin,originKey,rows,technologyMatch,impliedTechnology,technologySummary,probeTargets,noiseKind,queue,recommended};root.TriageWorkflow=api;
   if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

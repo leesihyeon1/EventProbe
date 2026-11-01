@@ -54,11 +54,32 @@ console.log('attack importance: blocked high-impact attacks remain visible; lega
   const events=Array.from({length:23},(_,i)=>({inventory:{origin:`https://target${i}.test`}}));
   events.push(events[0]);let active=0,maxActive=0,calls=0;const updates=[];
   const result=await workflow.probeTargets(events,async origin=>{active++;maxActive=Math.max(maxActive,active);calls++;await new Promise(resolve=>setTimeout(resolve,1));active--;if(origin.endsWith('1.test'))throw new Error('test failure');return {technologies:['nginx'],status:200};},p=>updates.push(p));
-  assert.equal(calls,20);assert.equal(maxActive,2);assert.equal(result.deferred,3);assert.equal(result.failed,2);assert.equal(updates.length,20);
+  assert.equal(calls,23);assert.equal(maxActive,2);assert.equal(result.deferred,0);assert.equal(result.failed,3);assert.equal(updates.length,23);
   let stopped=true;
   const cancelled=await workflow.probeTargets(events,async()=>{throw Error('must not run');},()=>{},()=>stopped);
   assert.equal(cancelled.completed,0);assert.equal(cancelled.stopped,true);
-  const empty=await workflow.probeTargets([{host:'unregistered.test'}],async()=>{throw Error('must not run');});
-  assert.equal(empty.total,0);
+  const queried=[];const all=await workflow.probeTargets([{host:'unregistered.test'},{destination:'192.0.2.10'}],async origin=>{queried.push(origin);return {technologies:[]};});
+  assert.equal(all.total,2);assert.deepEqual(queried,['https://unregistered.test','https://192.0.2.10']);
   console.log('automatic technology probes: deduplication, concurrency, cap, failure isolation, stop and registration checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+{
+ const base={host:'a.test',path:'/check',method:'GET',fields:{dport:'443'},action:'blocked',priority:'low'};
+ const events=[{...base,id:'ips',device:'IPS',action_raw:'Block'},{...base,id:'404',status:404,screening:{code:'HTTP_404'}},{...base,id:'waf',device:'WAF'},{...base,id:'duplicate',device:'IDS',action:'unknown'},{...base,id:'missing',host:'b.test',fields:{}}];
+ const q=workflow.queue(events);
+ const transfer=workflow.queueTransfer(q);
+ assert.equal(q.excluded.length,2);assert.equal(q.unresolved.length,1);
+ assert.deepEqual(transfer.urls,['https://a.test/check']);
+ assert.deepEqual(transfer.links.map(e=>e.event_id),['waf','duplicate']);
+ assert.equal(workflow.queueTransfer(workflow.queue(events,{}, {ips:false,scan:false})).links.length,4);
+ console.log('noise filtering -> automatic URL handoff: all remaining requests, deduplication and missing origins passed');
+}
+
+{
+ const events=[{id:'dst',line:1,destination:'192.0.2.10',method:'GET',path:'/check',fields:{dest_port:'80'}},
+ {id:'asset',line:2,host:'app.test',method:'GET',path:'/login',inventory:{origin:'https://app.test:8443'}}];
+ assert.deepEqual(workflow.queueTransfer(workflow.queue(events)).urls,['http://192.0.2.10/check','https://app.test:8443/login']);
+ const observed={id:'probe',host:'observed.test',method:'GET',path:'/api'};
+ assert.deepEqual(workflow.queueTransfer(workflow.queue([observed],{'observed.test':'https://observed.test'}),{'observed.test':'https://observed.test'}).urls,['https://observed.test/api']);
+ console.log('verification origins: DST port, inventory and observed origin handoff passed');
+}

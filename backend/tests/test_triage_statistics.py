@@ -57,3 +57,31 @@ def test_unknown_device_is_not_assigned_to_ids_and_pathless_audit_still_unsuppor
     assert result['summary']['unsupported'] == 1
     assert result['statistics']['devices'][0]['name'] == '미확인'
     assert device_kind({'deviceProduct': 'TippingPoint UnityOne'}) == 'IPS'
+
+
+def test_device_raw_actions_and_nested_ids_response_codes():
+    from core.triage import analyze
+    import json
+    rows = [
+        dict(device_type='IPS', host='a.test', url='/x', act='Permit'),
+        dict(device_type='WAF', host='a.test', url='/x', act='None'),
+        dict(device_type='WAF', host='a.test', url='/x'),
+        dict(device_type='IDS', layer_7_data='HTTP URI == /x;;;HTTP Host == a.test;;;HTTP Return Code == 302 Found;;;', result_status='Inconclusive'),
+        dict(device_type='IDS', host='a.test', url='/x', status='Inconclusive', http_status='404'),
+    ]
+    result = analyze(json.dumps(rows))
+    devices = {d['name']: d for d in result['statistics']['devices']}
+    assert devices['IPS']['action_values'] == [{'label': 'Permit', 'count': 1}]
+    assert {v['label'] for v in devices['WAF']['action_values']} == {'None', '처리 값 미기록'}
+    assert {v['label'] for v in devices['IDS']['http_status']} == {'302', '404'}
+    assert result['events'][1]['action'] == 'unknown'
+
+
+def test_product_vulnerability_precedes_web_technique_or_disclosure():
+    from core.triage_statistics import event_family
+    assert event_family(dict(products=['cisco-asa'], category='lfi', event_name='Directory Traversal')) == '애플리케이션 공격'
+    assert event_family(dict(products=['exchange'], category='ssrf')) == '애플리케이션 공격'
+    assert event_family(dict(products=['confluence'], event_name='Information Disclosure')) == '애플리케이션 공격'
+    assert event_family(dict(cve=['CVE-2099-1234'], category='sqli')) == '애플리케이션 공격'
+    assert event_family(dict(category='sqli')) == '웹 공격'
+    assert event_family(dict(event_name='Port Scan', device='IPS')) == '네트워크 공격'

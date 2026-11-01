@@ -29,7 +29,7 @@ def test_ips_block_is_screened_even_when_asset_or_group_needs_investigation():
 @pytest.mark.parametrize('source', ['origin', 'edge', 'unknown'])
 def test_simple_4xx_probe_is_default_noise_without_claiming_origin_or_safety(status, source):
     answer = screen_event(event(status=status, status_source=source))
-    assert answer['screened'] and answer['code'] == 'SIMPLE_SCAN_4XX'
+    assert answer['screened'] and answer['code'] == ('HTTP_404' if status == 404 else 'SIMPLE_SCAN_4XX')
 
 
 @pytest.mark.parametrize('changes', [
@@ -53,7 +53,7 @@ def test_technology_match_does_not_override_a_simple_failed_probe():
     # 관측 기술에 없는 제품을 겨냥한 요청은 기본 뷰에서 노이즈로 접는다(TECH_MISMATCH). 헤더 지문은
     # 불완전하므로 '부재'로 단정하지 않으며(설명에 명시), 토글로 되돌릴 수 있고 전체 목록에는 남는다.
     mismatch = screen_event(event(path='/wp-login.php', category='', technologies=['Next.js'], status=None))
-    assert mismatch['screened'] and mismatch['code'] == 'TECH_MISMATCH'
+    assert not mismatch['screened'] and mismatch['code'] == 'TECH_UNCONFIRMED'
 
 
 def test_named_scanner_4xx_can_be_filtered_but_generic_4xx_is_retained():
@@ -89,7 +89,9 @@ def test_technology_probe_allows_any_valid_origin_and_reads_headers_only(monkeyp
 
     class FakeResponse:
         status_code = 200
-        headers = {'server': 'nginx'}
+        headers = {'server': 'nginx', 'content-type': 'text/html'}
+        async def aiter_bytes(self, chunk_size=8192):
+            yield b'<html><div id="root"></div><script src="/bundle.js"></script></html>'
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
 
@@ -109,15 +111,29 @@ def test_technology_probe_allows_any_valid_origin_and_reads_headers_only(monkeyp
     # 미등록 origin도 헤더 전용 GET 1회로 조사된다.
     unreg = asyncio.run(triage_router.technology_probe(
         triage_router.TechnologyProbe(origin='https://other.test'), request))
-    assert unreg['technologies'] == ['nginx']
+    assert 'nginx' in unreg['technologies']
     assert ('stream', 'GET', 'https://other.test/') in calls
     assert calls[0][1]['follow_redirects'] is False
 
     # 등록 origin도 동일하게 동작.
     answer = asyncio.run(triage_router.technology_probe(
         triage_router.TechnologyProbe(origin='https://web.test'), request))
-    assert answer['technologies'] == ['nginx']
+    assert 'nginx' in answer['technologies']
+    assert answer['requests'] == 1
+    assert answer['body_bytes_examined'] > 0
+    assert 'body' not in answer and 'headers' not in answer
     assert ('stream', 'GET', 'https://web.test/') in calls
+
+    async def large_body(self, chunk_size=8192):
+        for _ in range(100):
+            yield b'x' * 8192
+    monkeypatch.setattr(FakeResponse, 'aiter_bytes', large_body)
+    bounded = asyncio.run(triage_router.technology_probe(
+        triage_router.TechnologyProbe(origin='https://web.test'), request))
+    assert bounded['body_bytes_examined'] == 128 * 1024
+    assert bounded['body_truncated'] is True
+    assert bounded['requests'] == 1
+    assert calls[0][1]['trust_env'] is False
 
     # 잘못된 접속 주소(경로·쿼리·인증정보·비 HTTP)는 422로 거부 — 실제 요청 없음.
     for bad in ('https://x.test/path', 'http://u:p@x.test', 'ftp://x.test', 'https://x.test/?q=1'):
@@ -131,7 +147,7 @@ def test_tech_mismatch_screens_only_when_observed_tech_lacks_implied_product():
     from core.triage_filter import screen_event
     # 경로는 wordpress(/wp-login.php) 겨냥이나 관측 기술은 nginx뿐 → 미사용 → 노이즈 제외
     s = screen_event({'path': '/wp-login.php', 'method': 'GET', 'technologies': ['nginx']})
-    assert s['screened'] and s['code'] == 'TECH_MISMATCH'
+    assert not s['screened'] and s['code'] == 'TECH_UNCONFIRMED'
     # 관측 기술에 wordpress 가 있으면 일치 → 유지(TECH_MATCH)
     keep = screen_event({'path': '/wp-login.php', 'method': 'GET', 'technologies': ['nginx', 'wordpress']})
     assert keep['code'] == 'TECH_MATCH' and not keep['screened']
