@@ -50,8 +50,10 @@ def test_technology_match_does_not_override_a_simple_failed_probe():
     matched = event(path='/wp-login.php', category='', technologies=['WordPress'], status=403)
     assert screen_event(matched)['code'] == 'SIMPLE_SCAN_4XX'
     assert screen_event(event(**dict(path='/wp-login.php', category='', technologies=['WordPress'], status=200)))['code'] == 'TECH_MATCH'
-    # Missing fingerprint is not proof that the technology is absent.
-    assert not screen_event(event(path='/wp-login.php', category='', technologies=['Next.js'], status=None))['screened']
+    # 관측 기술에 없는 제품을 겨냥한 요청은 기본 뷰에서 노이즈로 접는다(TECH_MISMATCH). 헤더 지문은
+    # 불완전하므로 '부재'로 단정하지 않으며(설명에 명시), 토글로 되돌릴 수 있고 전체 목록에는 남는다.
+    mismatch = screen_event(event(path='/wp-login.php', category='', technologies=['Next.js'], status=None))
+    assert mismatch['screened'] and mismatch['code'] == 'TECH_MISMATCH'
 
 
 def test_named_scanner_4xx_can_be_filtered_but_generic_4xx_is_retained():
@@ -123,3 +125,20 @@ def test_technology_probe_allows_any_valid_origin_and_reads_headers_only(monkeyp
             asyncio.run(triage_router.technology_probe(
                 triage_router.TechnologyProbe(origin=bad), request))
         assert exc.value.status_code == 422
+
+
+def test_tech_mismatch_screens_only_when_observed_tech_lacks_implied_product():
+    from core.triage_filter import screen_event
+    # 경로는 wordpress(/wp-login.php) 겨냥이나 관측 기술은 nginx뿐 → 미사용 → 노이즈 제외
+    s = screen_event({'path': '/wp-login.php', 'method': 'GET', 'technologies': ['nginx']})
+    assert s['screened'] and s['code'] == 'TECH_MISMATCH'
+    # 관측 기술에 wordpress 가 있으면 일치 → 유지(TECH_MATCH)
+    keep = screen_event({'path': '/wp-login.php', 'method': 'GET', 'technologies': ['nginx', 'wordpress']})
+    assert keep['code'] == 'TECH_MATCH' and not keep['screened']
+    # 기술 미관측(빈 목록)이면 부재의 증거가 아니므로 제외하지 않는다(三상태 준수)
+    unknown = screen_event({'path': '/wp-login.php', 'method': 'GET', 'technologies': []})
+    assert not unknown['screened'] and unknown['code'] == ''
+    # 중요 자산은 미사용이어도 제외하지 않는다
+    important = screen_event({'path': '/wp-login.php', 'method': 'GET', 'technologies': ['nginx'],
+                              'reasons': ['IMPORTANT_ASSET']})
+    assert not important['screened']

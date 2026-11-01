@@ -15,7 +15,7 @@
   }
 
   let listPage=0;
-  function filters(){return {ips:el('triageExcludeIps').checked,scan:el('triageExcludeScan').checked};}
+  function filters(){return {ips:el('triageExcludeIps').checked,scan:el('triageExcludeScan').checked,tech:el('triageExcludeTech')?.checked??true};}
   function currentQueue(){return TriageWorkflow.queue(result?.events||[],origins,filters());}
   function selectReady(){selected.clear();for(const e of currentQueue().ready)if(TriageWorkflow.recommended(e))selected.add(e.id);}
   function render() {
@@ -35,6 +35,7 @@
     renderAssessment();renderTechnology();
     el('triageIpsCount').textContent=result.events.filter(e=>TriageWorkflow.noiseKind(e)==='ips').length+'건';
     el('triageScanCount').textContent=result.events.filter(e=>TriageWorkflow.noiseKind(e)==='scan').length+'건';
+    {const c=el('triageTechCount');if(c)c.textContent=result.events.filter(e=>TriageWorkflow.noiseKind(e)==='tech').length+'건';}
     for(const [title,n] of [['분석 이벤트',result.events.length],['노이즈 제외',q.excluded.length],['정보 보완',q.unresolved.length],['권장 검증 후보',q.ready.filter(e=>TriageWorkflow.recommended(e)).length]]){
       const item=node('div','');item.append(node('span',title),node('strong',`${n}건`));el('triageSummary').append(item);
     }
@@ -76,16 +77,26 @@
     for(const id of ['triageSendBulk','triageCopyUrls'])el(id).disabled=busy||!transfer.urls.length||!!transfer.errors.length;
     return transfer;
   }
+  function eventOrigin(e){return e.inventory?.origin||origins[TriageWorkflow.originKey(e)]||TriageWorkflow.inferredOrigin(e);}
   function applyTechnology(origin,profile){
     technologyProfiles[origin]={...profile,checked_at:new Date().toISOString()};
     result.technology_profiles={...technologyProfiles};
     if(profile.error)return;
-    for(const e of result.events.filter(item=>item.inventory?.origin===origin)){
-      e.technologies=[...new Set([...(e.technologies||[]),...profile.technologies])];
+    // 등록 자산뿐 아니라 (추론/입력)origin 이 일치하는 모든 이벤트에 관측 기술을 반영한다.
+    // (이전엔 inventory.origin 만 봐서 미등록 호스트 수동 조사 결과가 반영되지 않았다.)
+    const hard=['IPS_BLOCKED','SIMPLE_SCAN_4XX','ORIGIN_NOT_FOUND_SCAN'];
+    for(const e of result.events){
+      if(eventOrigin(e)!==origin)continue;
+      e.technologies=[...new Set([...(e.technologies||[]),...(profile.technologies||[])])];
+      if(hard.includes(e.screening?.code)||e.reasons?.includes('MIXED_ALLOWED_BLOCKED')||e.reasons?.includes('IMPORTANT_ASSET'))continue;
       const match=TriageWorkflow.technologyMatch(e);
-      if(match&&!['IPS_BLOCKED','SIMPLE_SCAN_4XX','ORIGIN_NOT_FOUND_SCAN'].includes(e.screening?.code)&&!e.reasons?.includes('MIXED_ALLOWED_BLOCKED')&&!e.reasons?.includes('IMPORTANT_ASSET')){
+      const implied=TriageWorkflow.impliedTechnology(e);
+      const known=(e.technologies||[]).map(t=>String(t).toLowerCase());
+      if(match){
         e.screening={screened:false,code:'TECH_MATCH',explanation:`관측된 웹 기술과 요청 경로가 일치합니다: ${match}. 실제 취약 여부는 별도 확인이 필요합니다.`};
-        // Technology evidence is shown without changing the operator's selection.
+      }else if(implied&&known.length&&!known.includes(implied)){
+        // 관측 기술을 아는 경우에만 '미사용' 판단 — 기술 미관측은 부재의 증거가 아니다(三상태).
+        e.screening={screened:true,code:'TECH_MISMATCH',explanation:`요청 경로는 ${implied} 대상이지만 관측된 웹 기술에 ${implied}가 없어 기본 검증 대상에서 제외합니다. 기술 미관측은 부재의 증거가 아닙니다.`};
       }
     }
   }
@@ -369,7 +380,7 @@
   el('triageInventoryRefresh').onclick=()=>refreshInventory().catch(err=>{el('triageStatus').textContent=err.message;});
   el('triageInventoryImport').onclick=async()=>{const button=el('triageInventoryImport');button.disabled=true;try{const r=await textPost('/inventory',el('triageInventoryInput').value);el('triageStatus').textContent=`자산 ${r.imported}건 반영. 로그를 다시 분석하면 최신 정보를 적용합니다.`;await refreshInventory();}catch(err){el('triageStatus').textContent=err.message;}finally{button.disabled=false;}};
 
-  for(const id of ['triageExcludeIps','triageExcludeScan'])el(id).onchange=()=>{selectReady();listPage=0;render();};
+  for(const id of ['triageExcludeIps','triageExcludeScan','triageExcludeTech'])el(id)&&(el(id).onchange=()=>{selectReady();listPage=0;render();});
   el('triageCopyUrls').onclick=async()=>{const text=el('triageUrlList').value;if(!text)return;try{await navigator.clipboard.writeText(text);el('triageHandoffStatus').textContent='URL 목록을 복사했습니다. 일괄 테스트 대상 목록에 붙여넣으세요.';}catch{el('triageUrlList').focus();el('triageUrlList').select();el('triageHandoffStatus').textContent='목록을 선택했습니다. Ctrl+C로 복사하세요.'}};
   el('triageScreenFilter').onchange=()=>{listPage=0;render();};
   el('triageClear').onclick=()=>{if(busy)return;result=null;analyzedText=null;el('triageSave').disabled=true;el('triageInput').value='';el('triageFile').value='';el('triageStatus').textContent='';el('triageExport').disabled=true;render();};

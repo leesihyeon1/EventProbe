@@ -334,7 +334,7 @@
           <section id="triageAssessment" hidden></section>
           <section id="triageFilterSection" class="triage-section" hidden>
             <div class="triage-section-heading"><h2><span>03</span> 노이즈 제외</h2><p>제외한 로그도 통계와 원본에 남습니다.</p></div>
-            <div class="triage-filter-controls"><label><input id="triageExcludeIps" type="checkbox" checked> IPS 차단 <strong id="triageIpsCount">0건</strong></label><label><input id="triageExcludeScan" type="checkbox" checked> 단순 파일·경로 스캔 + 4xx <strong id="triageScanCount">0건</strong></label></div>
+            <div class="triage-filter-controls"><label><input id="triageExcludeIps" type="checkbox" checked> IPS 차단 <strong id="triageIpsCount">0건</strong></label><label><input id="triageExcludeScan" type="checkbox" checked> 단순 파일·경로 스캔 + 4xx <strong id="triageScanCount">0건</strong></label><label><input id="triageExcludeTech" type="checkbox" checked> 미사용 웹 기술 <strong id="triageTechCount">0건</strong></label></div>
             <div id="triageSummary" class="triage-flow"></div>
             <div class="triage-list-toolbar"><label>목록 <select id="triageScreenFilter"><option value="recommended">권장 검증 후보</option><option value="ready">전달 가능한 전체 요청</option><option value="excluded">노이즈 제외</option><option value="unresolved">정보 보완</option><option value="all">전체</option></select></label><div><button id="triageSelectReview" class="btn btn-secondary">권장 후보 선택</button><button id="triageSelectNone" class="btn btn-secondary">선택 해제</button></div></div>
             <div id="triageResults"></div>

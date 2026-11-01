@@ -24,6 +24,12 @@ def matching_technology(event):
     return next((name for pattern, name in TECH_PATHS if re.search(pattern, path, re.I) and name in tech), '')
 
 
+def implied_technology(event):
+    """요청 경로가 특정 제품을 겨냥함을 뜻하는 기술명(존재 여부와 무관). 없으면 ''."""
+    path = event.get('path') or ''
+    return next((name for pattern, name in TECH_PATHS if re.search(pattern, path, re.I)), '')
+
+
 def status_provenance(value):
     raw = str(value or '').strip().lower()
     return 'origin' if raw in ORIGIN_STATUS else 'edge' if raw in {'edge', 'waf', 'proxy', 'cdn'} else 'unknown'
@@ -89,6 +95,13 @@ def screen_event(event):
     if match:
         return {'screened': False, 'code': 'TECH_MATCH',
                 'explanation': f'관측된 웹 기술과 요청 경로가 일치합니다: {match}. 실제 취약 여부는 별도 확인이 필요합니다.'}
+    implied = implied_technology(event)
+    known = [str(t).lower() for t in (event.get('technologies') or [])]
+    if implied and known and implied not in known:
+        # 관측된 웹 기술을 아는 경우에만 '미사용' 판단 — 기술 미관측은 부재의 증거가 아니다(三상태 준수).
+        return {'screened': True, 'code': 'TECH_MISMATCH',
+                'explanation': f'요청 경로는 {implied} 대상이지만 관측된 웹 기술에 {implied}가 없어 기본 검증 대상에서 제외합니다. '
+                               '기술 미관측은 부재의 증거가 아니며 전체 목록에서 확인할 수 있습니다.'}
     return {'screened': False, 'code': '', 'explanation': ''}
 
 

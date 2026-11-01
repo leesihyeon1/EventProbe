@@ -33,17 +33,22 @@
     }
     return [...groups.values()].sort((a,b)=>(a.assessment?.rank??4)-(b.assessment?.rank??4)||({review:0,information:1,low:2}[a.priority]-{review:0,information:1,low:2}[b.priority]));
   }
-  function technologyMatch(event){
+  const TECH_PATTERNS=[
+    [/^\/wp-(?:admin|content|includes|login\.php)|^\/xmlrpc\.php/i,'wordpress'],
+    [/^\/phpmyadmin(?:\/|$)/i,'phpmyadmin'],
+    [/^\/_next(?:\/|$)|^\/next\.js(?:\/|$)/i,'next.js'],
+    [/^\/actuator(?:\/|$)/i,'spring'],
+    [/^\/owa(?:\/|$)|^\/ecp(?:\/|$)/i,'exchange']
+  ];
+  function impliedTechnology(event){
     const path=event.path||'';
-    const technologies=(event.technologies||[]).join(' ').toLowerCase();
-    for(const [pattern,name] of [
-      [/^\/wp-(?:admin|content|includes|login\.php)|^\/xmlrpc\.php/i,'wordpress'],
-      [/^\/phpmyadmin(?:\/|$)/i,'phpmyadmin'],
-      [/^\/_next(?:\/|$)|^\/next\.js(?:\/|$)/i,'next.js'],
-      [/^\/actuator(?:\/|$)/i,'spring'],
-      [/^\/owa(?:\/|$)|^\/ecp(?:\/|$)/i,'exchange']
-    ])if(pattern.test(path)&&technologies.includes(name))return name;
+    for(const [pattern,name] of TECH_PATTERNS)if(pattern.test(path))return name;
     return '';
+  }
+  function technologyMatch(event){
+    const technologies=(event.technologies||[]).join(' ').toLowerCase();
+    const name=impliedTechnology(event);
+    return name&&technologies.includes(name)?name:'';
   }
   function targets(events,selected,origins){
     const urls=[],links=[],errors=[];
@@ -94,6 +99,7 @@
     const code=event.screening?.code;
     if(code==='IPS_BLOCKED')return 'ips';
     if(['SIMPLE_SCAN_4XX','ORIGIN_NOT_FOUND_SCAN'].includes(code))return 'scan';
+    if(code==='TECH_MISMATCH')return 'tech';
     return '';
   }
   function recommended(event){
@@ -110,6 +116,6 @@
     }
     return {ready,excluded,unresolved,unique_urls:[...new Set(ready.map(e=>e.verification_url))]};
   }
-  const api={overview,targets,inferredOrigin,originKey,rows,technologyMatch,technologySummary,probeTargets,noiseKind,queue,recommended};root.TriageWorkflow=api;
+  const api={overview,targets,inferredOrigin,originKey,rows,technologyMatch,impliedTechnology,technologySummary,probeTargets,noiseKind,queue,recommended};root.TriageWorkflow=api;
   if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
