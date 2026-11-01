@@ -85,7 +85,7 @@ def execute_single(tmp_path, kind):
     manager = agent.AgentManager(Store(tmp_path / "review.db"))
     data = {"endpoints": {"seed": spec.request.model_dump()}}
 
-    async def fetch(req, actor, *args):
+    async def fetch(req, actor, *args, **kwargs):   # isolate/source 등 신규 kwargs 수용(실제 fetch 서명 동기화)
         calls.append((req["url"], actor))
         return {"id": str(len(calls)), "response": {
             "status": 200, "headers": {"content-type": "application/json"},
