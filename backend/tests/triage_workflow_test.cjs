@@ -21,3 +21,12 @@ assert.equal(workflow.rows(events)[0].items.length,2);
 assert.equal(workflow.rows([{...events[0],path:'/x?id=1'},{...events[1],path:'/x?id=2'}]).length,2);
 assert.equal(workflow.rows([{...events[0],priority:'low'},{...events[1],priority:'review'}])[0].priority,'review');
 console.log('analysis table: grouping, priority ordering and automatic URL recovery passed');
+
+const assessed=[
+  {...events[0],priority:'review',assessment:{rank:2,importance:'medium'}},
+  {...events[1],priority:'low',assessment:{rank:1,importance:'high'}}
+];
+assert.equal(workflow.rows(assessed)[0].id,'b');
+assert.equal(workflow.rows([{...assessed[0],priority:'low'},assessed[1]]).length,2);
+assert.equal(workflow.rows([...assessed,{...events[0],id:'legacy'}])[2].id,'legacy');
+console.log('attack importance: blocked high-impact attacks remain visible; legacy rows supported');

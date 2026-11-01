@@ -3,6 +3,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -126,16 +127,24 @@ class TriageStore:
     def enrich(self,owner,result):
         inventory=self.inventory(owner)
         for e in result['events']:
-            matches=[i for i in inventory if urlsplit(i['origin']).netloc.lower()==e['host'].lower()]
+            target=e['host'] or e.get('destination') or ''
+            matches=[i for i in inventory if urlsplit(i['origin']).netloc.lower()==target.lower()]
             if len(matches)!=1 or any(r in e['reasons'] for r in ('HOST_CONFLICT','HOST_MISSING')):
                 e['inventory']=None
+                e['technologies']=[]
                 continue
             item=dict(matches[0]);item['stale']=time.time()-item['verified_at']>30*86400
             e['inventory']=item
+            e['technologies']=[name.strip() for name in re.split(r'[,;/]',item.get('stack') or '') if name.strip()] if not item['stale'] else []
             if item['stale']:e['reasons'].append('INVENTORY_STALE')
             elif item['importance']=='high':
                 e['reasons'].append('IMPORTANT_ASSET')
                 if e['priority']=='information':e['priority']='review'
         for bucket in ('review','information','low'):
             result['summary'][bucket]=sum(e['priority']==bucket for e in result['events'])
-        return result
+        from core.triage_summary import refresh_attack_summary
+        from core.triage_statistics import summarize_statistics
+        refresh_attack_summary(result)
+        result['statistics']=summarize_statistics(result['events'])
+        from core.triage_filter import refresh_screening
+        return refresh_screening(result)

@@ -339,13 +339,14 @@
           <p id="triageStatus" role="status" aria-live="polite"></p>
           <section id="triageAssessment" class="triage-assessment" hidden aria-live="polite"></section>
           <div id="triageSummary" class="triage-summary"></div>
+          <section id="triageTechnology" class="triage-handoff" hidden></section>
           <section id="triageHandoff" class="triage-handoff" hidden>
             <div><h2>검증이 필요한 요청만 일괄 테스트</h2><p>아래 분석표에서 검증할 항목을 선택하세요. 검토 필요 항목 중 접속 주소가 확인된 GET 요청은 자동 선택됩니다.</p></div>
             <details><summary>주소를 복원하지 못한 대상만 보완하기</summary><div id="triageOrigins"></div></details>
             <div class="triage-actions"><button id="triageSelectReview" class="btn btn-secondary">검토 필요 항목 선택</button><button id="triageSelectNone" class="btn btn-secondary">선택 해제</button><button id="triageSendBulk" class="btn btn-primary">선택 항목 일괄 테스트로 보내기</button><span id="triageSelectedCount">0건 선택</span></div>
             <p id="triageHandoffStatus" role="status"></p>
           </section>
-          <label>표시할 우선순위 <select id="triageFilter"><option value="">전체</option><option value="review">검토 필요</option><option value="information">정보 보완</option><option value="low">재요청 저우선</option></select></label>
+          <div class="triage-filter-controls"><label>조사 화면 <select id="triageScreenFilter"><option value="actionable">우선 확인</option><option value="all">전체 기록</option><option value="screened">낮은 우선순위만</option></select></label><label>표시할 우선순위 <select id="triageFilter"><option value="">전체</option><option value="review">검토 필요</option><option value="information">정보 보완</option><option value="low">재요청 저우선</option></select></label></div>
           <div id="triageResults"></div>
           <details><summary>분석 기록 보관</summary>
             <p>작업공간별 기록입니다. 작업공간 이름은 사용자 인증 수단이 아니므로 공용 토큰 공유 시 접근 정책을 확인하세요.</p>

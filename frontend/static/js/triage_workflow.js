@@ -27,10 +27,22 @@
   function rows(events){
     const groups=new Map();
     for(const e of events){
-      const key=JSON.stringify([e.host,e.method,e.path,e.signature,e.action,e.status,e.priority]);
+      const key=JSON.stringify([e.host,e.destination,e.method,e.path,e.signature,e.action,e.status,e.priority,e.assessment,e.screening]);
       if(!groups.has(key))groups.set(key,{...e,items:[]});groups.get(key).items.push(e);
     }
-    return [...groups.values()].sort((a,b)=>({review:0,information:1,low:2}[a.priority]-{review:0,information:1,low:2}[b.priority]));
+    return [...groups.values()].sort((a,b)=>(a.assessment?.rank??4)-(b.assessment?.rank??4)||({review:0,information:1,low:2}[a.priority]-{review:0,information:1,low:2}[b.priority]));
+  }
+  function technologyMatch(event){
+    const path=event.path||'';
+    const technologies=(event.technologies||[]).join(' ').toLowerCase();
+    for(const [pattern,name] of [
+      [/^\/wp-(?:admin|content|includes|login\.php)|^\/xmlrpc\.php/i,'wordpress'],
+      [/^\/phpmyadmin(?:\/|$)/i,'phpmyadmin'],
+      [/^\/_next(?:\/|$)|^\/next\.js(?:\/|$)/i,'next.js'],
+      [/^\/actuator(?:\/|$)/i,'spring'],
+      [/^\/owa(?:\/|$)|^\/ecp(?:\/|$)/i,'exchange']
+    ])if(pattern.test(path)&&technologies.includes(name))return name;
+    return '';
   }
   function targets(events,selected,origins){
     const urls=[],links=[],errors=[];
@@ -48,6 +60,6 @@
     }
     return {urls,links,errors};
   }
-  const api={overview,targets,inferredOrigin,rows};root.TriageWorkflow=api;
+  const api={overview,targets,inferredOrigin,rows,technologyMatch};root.TriageWorkflow=api;
   if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

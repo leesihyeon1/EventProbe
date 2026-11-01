@@ -80,6 +80,9 @@ import os
 from pathlib import Path
 from fastapi import Query
 from core.triage_store import TriageStore
+from core import analyzer
+from urllib.parse import urlsplit
+import httpx
 
 
 def _owner(request):
@@ -90,6 +93,37 @@ def _owner(request):
 def get_store():
     agent_path=Path(os.getenv('AGENT_DB_PATH') or Path(__file__).resolve().parents[1]/'data'/'agent'/'runs.sqlite3')
     return TriageStore(os.getenv('TRIAGE_DB_PATH') or agent_path.with_name('triage.sqlite3'))
+
+
+class TechnologyProbe(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    origin: str = Field(max_length=4096)
+
+
+@router.post('/technology-probe')
+async def technology_probe(body: TechnologyProbe, request: Request):
+    """One explicit, header-only observation of a registered inventory origin."""
+    target = body.origin.strip()
+    parsed = urlsplit(target)
+    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
+            parsed.username or parsed.password or parsed.path not in ('', '/') or
+            parsed.query or parsed.fragment or target.endswith('/') or
+            any(ord(c) < 33 for c in target)):
+        raise HTTPException(422, '등록된 HTTP(S) 자산의 접속 주소만 사용할 수 있습니다.')
+    inventory = get_store().inventory(_owner(request))
+    if target not in {item['origin'] for item in inventory}:
+        raise HTTPException(403, '현재 작업공간에 등록된 자산만 기술을 확인할 수 있습니다.')
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), follow_redirects=False,
+                                     trust_env=False) as client:
+            async with client.stream('GET', target + '/') as response:
+                headers = {k.lower(): v for k, v in response.headers.items()}
+                technologies = [item['name'] for item in analyzer.detect_stack(headers)]
+                return {'origin': target, 'status': response.status_code,
+                        'technologies': technologies,
+                        'note': '등록된 자산에 GET / 요청 1회. 리다이렉트·본문·쿠키는 수집하지 않았습니다. 응답 헤더 지문만으로 설치 기술의 전체 목록을 확정할 수 없습니다.'}
+    except httpx.RequestError as exc:
+        raise HTTPException(502, f'기술 확인 요청 실패: {type(exc).__name__}') from exc
 
 
 @router.post('/batches',status_code=201)

