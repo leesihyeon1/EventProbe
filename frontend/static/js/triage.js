@@ -163,7 +163,7 @@
     for(const c of scan.campaigns){
       const card=node('article','','triage-assessment');
       card.append(node('h3',`${c.axis==='target'?'대상':'출발지'} ${c.entity} · ${c.signals.join(' / ')}`));
-      card.append(node('p',`${new Date(Number(c.window)*900000).toLocaleString()}부터 15분 · 로그 ${c.record_count} · 경로 ${c.path_count} · 출발지 ${c.source_count} · 자산 ${c.host_count}`));
+      card.append(node('p',`${c.window_label||'시간 불명'}${c.window_count>1?` (${c.window_count}개 15분 구간)`:''} · 로그 ${c.record_count} · 경로 ${c.path_count} · 출발지 ${c.source_count} · 자산 ${c.host_count}`));
       card.append(node('p',`차단 ${c.actions.blocked||0} / 허용 ${c.actions.allowed||0} / 불명 ${c.actions.unknown||0}`));
       card.append(node('p',c.response));
       const button=node('button',`대표 검증 후보 ${c.representative_ids.length}건 선택`,'btn btn-primary');button.disabled=!c.representative_ids.length;

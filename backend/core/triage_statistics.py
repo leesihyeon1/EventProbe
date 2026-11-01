@@ -21,20 +21,43 @@ def device_kind(data, raw=''):
 
 
 def event_family(event):
-    name = event.get('event_name', '')
-    path = event.get('path', '')
-    category = event.get('category', '')
-    if is_direct_file_probe(path) or re.search(r'file.access|file.probe|\.env|\.git|directory.scan|path.scan|파일.*(스캔|탐색)', name, re.I):
+    name = event.get('event_name', '') or ''
+    path = event.get('path', '') or ''
+    category = event.get('category', '') or ''
+    has_vuln = bool(event.get('cve') or event.get('products'))
+    if is_direct_file_probe(path) or re.search(
+            r'file.access|file.probe|\.env|\.git|directory.(scan|list|brows)|path.scan|recon|'
+            r'information.disclosure|정보.?수집|파일.*(스캔|탐색|노출)', name, re.I):
         return '정보 수집성'
+    # 뚜렷한 네트워크/볼류메트릭 공격 먼저(이름 기준) — 이후 이름/CVE 로 앱·웹 분류.
+    if re.search(r'port.?scan|network.?scan|syn.?scan|\bdos\b|ddos|flood|amplification|'
+                 r'brute.?force|network.?attack|네트워크|포트.*스캔|무차별', name, re.I):
+        return '네트워크 공격'
+    if category in ('sqli', 'xss', 'lfi', 'ssrf', 'nosql', 'xxe', 'redirect') or re.search(
+            r'sql.?injection|\bxss\b|cross.?site|\bssrf\b|\blfi\b|\brfi\b|file.?inclusion|'
+            r'traversal|directory.?climb|\bxxe\b|open.?redirect|path.?confusion|web.?attack|웹.*공격', name, re.I):
+        return '웹 공격'
+    if category in ('cmdi', 'ssti', 'authbypass', 'deserial', 'upload') or re.search(
+            r'\brce\b|code.?execution|command.?(execution|injection)|remote.?code|arbitrary.?(file|command|code)|'
+            r'deserial|\bjndi\b|\bognl\b|\bspel\b|log4j|log4shell|shellshock|proxylogon|proxyshell|'
+            r'buffer.?overflow|overflow|\bexploit\b|injection|application.?attack|앱.*공격|코드.?실행|원격.?실행', name, re.I):
+        return '애플리케이션 공격'
+    # 이름으로는 못 가렸지만 특정 CVE·제품 익스플로잇이면 앱 공격으로 분류해 '미분류'를 줄인다.
+    if has_vuln:
+        return '애플리케이션 공격'
     if not path and event.get('device') in ('IPS', 'IDS'):
         return '네트워크 공격'
-    if re.search(r'port.scan|network.scan|syn.scan|dos|ddos|flood|network.attack|네트워크|포트.*스캔', name, re.I):
-        return '네트워크 공격'
-    if category in ('cmdi', 'ssti', 'authbypass', 'deserial', 'upload') or re.search(r'\brce\b|code.execution|application.attack|앱.*공격', name, re.I):
-        return '애플리케이션 공격'
-    if category in ('sqli', 'xss', 'lfi', 'ssrf', 'nosql', 'xxe', 'redirect', 'authbypass') or re.search(r'sql.injection|\bxss\b|web.attack|웹.*공격', name, re.I):
-        return '웹 공격'
     return '기타/미분류'
+
+
+def display_name(name):
+    """장비가 집계한 비식별 탐지명(예: Imperva 'Multiple signatures from <IP>')을 읽기 쉬운
+    한국어로 정규화한다. 그 외는 원본 유지."""
+    name = (name or '').strip()
+    m = re.match(r'(?i)^multiple\s+signatures\s+from\s+(\S+)', name)
+    if m:
+        return f'다수 시그니처(장비 집계) · 출발지 {m.group(1)}'
+    return name or '탐지명 없음'
 
 
 def top_items(counter, limit=8):
@@ -57,7 +80,7 @@ def summarize_statistics(events):
     target_sources = defaultdict(set)
     source_families = defaultdict(set)
     for event in events:
-        names[event.get('event_name') or '탐지명 없음'] += 1
+        names[display_name(event.get('event_name'))] += 1
         family = event_family(event)
         event['family'] = family
         families[family] += 1

@@ -32,7 +32,11 @@ def test_repeated_single_path_does_not_claim_broad_scan():
     assert summarize_campaigns(data)['campaigns']==[]
 
 
-def test_time_windows_remain_separate():
+def test_separate_windows_merge_into_one_campaign_with_time_span():
+    # 같은 엔티티의 활동은 여러 15분 버킷에 걸쳐도 하나의 캠페인으로 병합하고(인접 버킷 분할 방지),
+    # 사람이 읽는 시간 범위와 구간 수를 표기한다.
     data=events()
-    for i,e in enumerate(data):e['window']=str(i)
-    assert summarize_campaigns(data)['campaigns']==[]
+    for i,e in enumerate(data):e['window']=str(1992770+i)
+    target=next(c for c in summarize_campaigns(data)['campaigns'] if c['axis']=='target')
+    assert target['record_count']==12 and target['window_count']==12
+    assert 'KST' in target['window_label']
