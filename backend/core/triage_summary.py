@@ -90,4 +90,6 @@ def refresh_attack_summary(result):
         group['actions'] = dict(group['actions'])
     result['attack_summary'] = dict(groups=ordered, high=sum(e['assessment']['importance']=='high' for e in result['events']),
         limitation='요청 패턴과 장비 탐지에 근거한 분석입니다. 허용이나 HTTP 2xx만으로 침해 성공을 확정하지 않습니다. 장비 발생 횟수는 중복을 포함할 수 있습니다.')
+    from core.triage_anomalies import summarize_anomalies
+    result['anomaly_analysis'] = summarize_anomalies(result['events'])
     return result

@@ -104,7 +104,7 @@
   function noiseKind(event){
     const code=event.screening?.code;
     if(code==='IPS_BLOCKED'||(String(event.device||'').toUpperCase()==='IPS'&&(event.action==='blocked'||String(event.action_raw||'').trim().toLowerCase()==='block')))return 'ips';
-    // 404/4xx 노이즈는 백엔드 screening 코드(단순 탐색일 때만 부여)를 따른다 — 404라도 공격 시도는 유지.
+    // Only the backend's simple-scan 4xx codes qualify for this separate filter.
     if(['HTTP_404','SIMPLE_SCAN_4XX','ORIGIN_NOT_FOUND_SCAN'].includes(code))return 'scan';
     // Header fingerprints cannot prove a product is absent.
     // Older saved TECH_MISMATCH records stay eligible for verification.
@@ -115,18 +115,33 @@
   }
   function queue(events,origins={},filters={ips:true,scan:true}){
     const ready=[],excluded=[],unresolved=[];
+    const unresolved_counts={origin:0,request:0,method:0,other:0};
     for(const e of events){
       const kind=noiseKind(e);
       if(kind&&filters[kind]){excluded.push(e);continue;}
       const target=targets([e],new Set([e.id]),origins);
-      if(target.errors.length||!target.urls.length){unresolved.push({...e,queue_reason:e.method!=='GET'?`${e.method||'메서드 미기록'} 요청: 메서드·본문을 포함한 개별 검증 필요`: '접속 주소 또는 경로 확인 필요'});continue;}
+      if(target.errors.length||!target.urls.length){
+        const reason=e.method!=='GET'?'method':!e.path?'request':
+          !(origins[originKey(e)]||e.inventory?.origin||inferredOrigin(e))?'origin':'other';
+        unresolved_counts[reason]++;
+        const messages={method:`${e.method||'메서드 미기록'} 요청은 현재 GET 일괄 검증에 연결할 수 없습니다. 메서드·본문을 확인해 개별 검증하세요.`,
+          request:'HTTP 요청 경로가 없어 검증 URL을 만들 수 없습니다. 원본 요청을 확인하세요.',
+          origin:'HTTP/HTTPS 접속 주소가 확인되지 않았습니다. 실제 서비스 주소와 포트를 입력하세요.',
+          other:'접속 주소 또는 요청 경로 형식을 확인하세요.'};
+        unresolved.push({...e,queue_reason:messages[reason],queue_reason_code:reason});continue;
+      }
       ready.push({...e,verification_url:target.urls[0]});
     }
-    return {ready,excluded,unresolved,unique_urls:[...new Set(ready.map(e=>e.verification_url))]};
+    return {ready,excluded,unresolved,unresolved_counts,
+      unique_urls:[...new Set(ready.map(e=>e.verification_url))]};
   }
   function queueTransfer(queue,origins={}){
     return targets(queue.ready,new Set(queue.ready.map(e=>e.id)),origins);
   }
-  const api={investigationOrigin,queueTransfer,overview,targets,inferredOrigin,originKey,rows,technologyMatch,impliedTechnology,technologySummary,probeTargets,noiseKind,queue,recommended};root.TriageWorkflow=api;
+  function findingQueue(events,finding,origins={},filters={ips:true,scan:true}){
+    const ids=new Set(finding.candidate_ids||[]);
+    return queue(events.filter(e=>ids.has(e.id)),origins,filters);
+  }
+  const api={findingQueue,investigationOrigin,queueTransfer,overview,targets,inferredOrigin,originKey,rows,technologyMatch,impliedTechnology,technologySummary,probeTargets,noiseKind,queue,recommended};root.TriageWorkflow=api;
   if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

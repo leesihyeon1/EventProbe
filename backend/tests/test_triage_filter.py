@@ -48,10 +48,10 @@ def test_missing_status_or_non_simple_request_is_retained(changes):
 
 def test_technology_match_does_not_override_a_simple_failed_probe():
     matched = event(path='/wp-login.php', category='', technologies=['WordPress'], status=403)
+    assert screen_event(matched)['screened']
     assert screen_event(matched)['code'] == 'SIMPLE_SCAN_4XX'
     assert screen_event(event(**dict(path='/wp-login.php', category='', technologies=['WordPress'], status=200)))['code'] == 'TECH_MATCH'
-    # 관측 기술에 없는 제품을 겨냥한 요청은 기본 뷰에서 노이즈로 접는다(TECH_MISMATCH). 헤더 지문은
-    # 불완전하므로 '부재'로 단정하지 않으며(설명에 명시), 토글로 되돌릴 수 있고 전체 목록에는 남는다.
+    # 헤더 지문은 불완전하므로 관측되지 않은 기술의 부재를 단정하지 않는다.
     mismatch = screen_event(event(path='/wp-login.php', category='', technologies=['Next.js'], status=None))
     assert not mismatch['screened'] and mismatch['code'] == 'TECH_UNCONFIRMED'
 

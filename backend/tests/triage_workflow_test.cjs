@@ -9,6 +9,20 @@ for(const path of ['//evil.test/x','/\\evil.test','/x#frag','/bad path'])assert.
 assert.equal(targets([{...events[0],method:'POST'}],new Set(['a']),{'source.test':'https://approved.test'}).errors.length,1);
 assert.equal(targets(events,new Set(['a']),{'source.test':'https://user:secret@approved.test'}).errors.length,1);
 console.log('triage workflow: overview, selection, deduplication, origin and method checks passed');
+{
+ const base={method:'GET',host:'test.local',fields:{dport:'443'}};
+ const workflow=require('../../frontend/static/js/triage_workflow.js');
+ const events=[{...base,id:'blocked',path:'/a',screening:{code:'IPS_BLOCKED'}},
+   {...base,id:'failed',path:'/b',screening:{code:'HTTP_404'}},
+   {...base,id:'ready',path:'/c'},{...base,id:'different',path:'/d'},
+   {...base,id:'duplicate',path:'/c'},{...base,id:'unrelated',path:'/other'}];
+ const finding={candidate_ids:['blocked','failed','ready','different','duplicate']};
+ const q=workflow.findingQueue(events,finding);
+ assert.equal(q.excluded.length,2);
+ assert.deepEqual(workflow.queueTransfer(q).urls,['https://test.local/c','https://test.local/d']);
+ assert.equal(workflow.queueTransfer(q).links.length,3);
+ assert.equal(workflow.findingQueue(events,finding,{}, {ips:false,scan:false}).ready.length,5);
+}
 
 const workflow=require('../../frontend/static/js/triage_workflow.js');
 const inferred={...events[0],fields:{dport:'443'},reasons:[]};
@@ -69,10 +83,41 @@ console.log('attack importance: blocked high-impact attacks remain visible; lega
  const q=workflow.queue(events);
  const transfer=workflow.queueTransfer(q);
  assert.equal(q.excluded.length,2);assert.equal(q.unresolved.length,1);
+ assert.equal(q.unresolved_counts.origin,1);
+ assert.deepEqual(workflow.queue([{id:'missing-path',method:'GET',host:'x.test',path:'',reasons:[],fields:{}}]).unresolved_counts,{origin:0,request:1,method:0,other:0});
+ assert.equal(workflow.queue([{id:'post',method:'POST',host:'x.test',path:'/x',reasons:[],fields:{}}]).unresolved_counts.method,1);
+ const incomplete=workflow.queue(Array.from({length:7},(_,i)=>({id:`sample-${i}`,method:'GET',host:'sample.test',path:'/check',reasons:[],fields:{}})));
+ assert.equal(incomplete.unresolved.length,7);
+ assert.deepEqual(incomplete.unresolved_counts,{origin:7,request:0,method:0,other:0});
+ assert.equal(incomplete.ready.length+incomplete.excluded.length+incomplete.unresolved.length,7);
  assert.deepEqual(transfer.urls,['https://a.test/check']);
  assert.deepEqual(transfer.links.map(e=>e.event_id),['waf','duplicate']);
  assert.equal(workflow.queueTransfer(workflow.queue(events,{}, {ips:false,scan:false})).links.length,4);
  console.log('noise filtering -> automatic URL handoff: all remaining requests, deduplication and missing origins passed');
+}
+
+{
+ const scan=Array.from({length:20},(_,i)=>({id:`scan-${i}`,host:'web.test',source:'203.0.113.10',
+   window:'100',device:'WAF',event_name:'Directory scan',family:'정보 수집성',method:'GET',path:`/dir/${i}`,
+   fields:{dport:'443'},action:'unknown',status:null,category:'',attack_evidence:[]}));
+ const extra=[{...scan[0],id:'success',path:'/private',status:200},
+   {...scan[1],id:'injection',path:'/dir/attack?x=1%20UNION%20SELECT%20password',category:'sqli'},
+   {...scan[2],id:'different-source',path:'/other',source:'198.51.100.20'}];
+ const q=workflow.queue([...scan,...extra]);
+ assert.equal(q.ready.length,23);
+ assert.equal(q.excluded.length,0);
+ assert.equal(q.unresolved.length,0);
+ assert.equal(workflow.queueTransfer(q).urls.length,23);
+ assert.equal(q.ready.length+q.excluded.length+q.unresolved.length,23);
+ const duplicate={...scan[0],id:'same-url-again'};
+ const repeated=workflow.queueTransfer(workflow.queue([...scan,duplicate]));
+ assert.equal(repeated.urls.length,20);
+ assert.equal(repeated.links.length,21);
+ const blocked=workflow.queue([{...scan[0],id:'scan-404',status:404,screening:{code:'HTTP_404'}},scan[1]]);
+ assert.equal(blocked.excluded.length,1);
+ assert.deepEqual(workflow.queueTransfer(blocked).urls,['https://web.test/dir/1']);
+ assert.equal(workflow.queueTransfer(workflow.queue([{...scan[0],id:'scan-404',status:404,screening:{code:'HTTP_404'}}],{}, {ips:true,scan:false})).urls.length,1);
+ console.log('distinct scan paths remain ready; only identical URLs are deduplicated for handoff');
 }
 
 {

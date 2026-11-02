@@ -15,7 +15,7 @@
   }
 
   let listPage=0;
-  function filters(){return {ips:el('triageExcludeIps').checked,scan:el('triageExcludeScan').checked,tech:el('triageExcludeTech')?.checked??true};}
+  function filters(){return {ips:el('triageExcludeIps').checked,scan:el('triageExcludeScan').checked};}
   function resolvedOrigins(){
     const resolved={...origins};
     for(const e of result?.events||[]){const key=TriageWorkflow.originKey(e);if(resolved[key]||(e.reasons||[]).some(r=>['HOST_CONFLICT','HOST_MISSING','PCAP_NOT_INSPECTED'].includes(r)))continue;
@@ -34,7 +34,8 @@
       for(const key of Object.keys(origins))delete origins[key];
       for(const key of Object.keys(technologyProfiles))delete technologyProfiles[key];
       Object.assign(technologyProfiles,result.technology_profiles||{});
-      shownResult=result;listPage=0;el('triageScreenFilter').value='recommended';el('triageHandoffStatus').textContent='';renderOrigins();selectReady();
+      shownResult=result;listPage=0;el('triageHandoffStatus').textContent='';renderOrigins();selectReady();
+      {const initial=currentQueue();el('triageScreenFilter').value=initial.ready.length?'recommended':initial.unresolved.length?'unresolved':'all';}
     }
     const q=currentQueue();const readyIds=new Set(q.ready.map(e=>e.id));
     for(const id of selected)if(!readyIds.has(id))selected.delete(id);
@@ -42,7 +43,7 @@
     el('triageIpsCount').textContent=result.events.filter(e=>TriageWorkflow.noiseKind(e)==='ips').length+'건';
     el('triageScanCount').textContent=result.events.filter(e=>TriageWorkflow.noiseKind(e)==='scan').length+'건';
     {const c=el('triageTechCount');if(c)c.textContent=result.events.filter(e=>TriageWorkflow.noiseKind(e)==='tech').length+'건';}
-    for(const [title,n] of [['분석 이벤트',result.events.length],['노이즈 제외',q.excluded.length],['주소·요청 확인 필요',q.unresolved.length],['검증 대상',q.ready.filter(e=>TriageWorkflow.recommended(e)).length]]){
+    for(const [title,n] of [['분석 이벤트',result.events.length],['자동 제외',q.excluded.length],['URL 준비 완료',q.ready.filter(e=>TriageWorkflow.recommended(e)).length],['준비 정보 부족',q.unresolved.length]]){
       const item=node('div','');item.append(node('span',title),node('strong',`${n}건`));el('triageSummary').append(item);
     }
     updateSelection();
@@ -64,14 +65,14 @@
       const attack=node('td',row.event_name||row.signature||row.assessment?.title||row.category||'미분류');
       const outcome=node('td',`${row.device||'장비 불명'} · ${{blocked:'차단',allowed:'허용',unknown:'불명'}[row.action]||'불명'}`);outcome.append(node('div',row.status?`HTTP ${row.status}`:'응답 미기록'));
       const reason=node('td','');const excluded=excludedIds.has(row.id);
-      reason.append(node('span',excluded?'노이즈 제외':readyIds.has(row.id)?'검증 가능':'정보 보완',`triage-badge ${excluded?'muted':'active'}`));
-      reason.append(node('div',excluded?(row.screening?.explanation||'IPS 차단 또는 HTTP 404 응답으로 제외'):row.queue_reason||row.screening?.explanation||row.assessment?.next_action||'요청 응답과 재현 여부를 확인하세요.'));
+      reason.append(node('span',excluded?'자동 제외':readyIds.has(row.id)?'URL 준비 완료':'준비 정보 부족',`triage-badge ${excluded?'muted':'active'}`));
+      reason.append(node('div',excluded?(row.screening?.explanation||'IPS 차단 또는 단순 경로 탐색 4xx로 자동 제외'):row.queue_reason||row.screening?.explanation||row.assessment?.next_action||'요청 응답과 재현 여부를 확인하세요.'));
       const latest=row.items.find(e=>e.latest_verification)?.latest_verification;
       if(latest)reason.append(node('small',`최근 검증: ${latest.statuses.map(c=>c||'무응답').join(', ')}`));
       line.append(pick,target,attack,outcome,reason,node('td',String(row.items.length)));body.append(line);
     }
     table.append(body);const wrap=node('div','','triage-table-wrap');wrap.append(table);el('triageResults').append(wrap);
-    if(!rows.length)el('triageResults').append(node('p',['ready','recommended'].includes(mode)?'노이즈 제외 후 전달 가능한 요청이 없습니다. 정보 보완 목록을 확인하세요.':'이 분류에 해당하는 이벤트가 없습니다.','triage-empty-row'));
+    if(!rows.length)el('triageResults').append(node('p',mode==='recommended'?'준비된 검증 URL이 없습니다. 「준비 정보 부족」 목록에서 필요한 주소·요청 정보를 확인하세요.':'이 분류에 해당하는 이벤트가 없습니다.','triage-empty-row'));
     if(rows.length>50){const pager=node('div','','triage-actions');for(const [label,delta] of [['이전',-1],['다음',1]]){const b=node('button',label,'btn btn-secondary');b.disabled=listPage+delta<0||(listPage+delta)*50>=rows.length;b.onclick=()=>{listPage+=delta;render();};pager.append(b);}pager.append(node('span',`${listPage+1} / ${Math.ceil(rows.length/50)} 페이지 · 묶음 ${rows.length}개`));el('triageResults').append(pager);}
     for(const [key,title] of [['unsupported','HTTP 요청 없는 로그'],['errors','파싱 실패']])if(result[key]?.length){const d=node('details','');d.append(node('summary',`${title} ${result[key].length}건`));d.ontoggle=()=>{if(d.open&&d.children.length===1)d.append(node('pre',JSON.stringify(result[key],null,2)));};el('triageResults').append(d);}
   }
@@ -79,7 +80,7 @@
     const q=currentQueue();const transfer=TriageWorkflow.queueTransfer(q,resolvedOrigins());
     el('triageUrlList').value=transfer.urls.join('\n');
     el('triageSelectedCount').textContent=`URL ${transfer.urls.length}개`;
-    el('triageQueueNote').textContent=transfer.urls.length?`노이즈 제외 후 ${transfer.links.length}건 → 중복 URL을 합친 ${transfer.urls.length}개 요청. 자동 반영 · 주소·요청 확인 필요 ${q.unresolved.length}건은 별도 표시됩니다.`:'노이즈 제외 후 URL로 변환 가능한 요청이 없습니다. 정보 보완 목록에서 접속 주소를 입력하세요.';
+    el('triageQueueNote').textContent=transfer.urls.length?`제외 필터를 통과한 요청 ${transfer.links.length}건 → 완전히 같은 URL만 합친 ${transfer.urls.length}개 검증 URL. 서로 다른 경로는 합치지 않습니다. 준비 정보 부족 ${q.unresolved.length}건은 별도 확인이 필요합니다.`:`현재 검증 URL을 만들 수 없습니다. 준비 정보 부족 ${q.unresolved.length}건 중 접속 주소 ${q.unresolved_counts.origin}건, 요청 경로 ${q.unresolved_counts.request}건, GET 이외 요청 ${q.unresolved_counts.method}건을 확인하세요.`;
     for(const id of ['triageSendBulk','triageCopyUrls'])el(id).disabled=busy||!transfer.urls.length||!!transfer.errors.length;
     return transfer;
   }
@@ -339,6 +340,58 @@
     return section;
   }
   function sectionHeading(number,title,description){const header=node('div','','triage-section-heading');const h=node('h2','');h.append(node('span',number),document.createTextNode(title));header.append(h);if(description)header.append(node('p',description));return header;}
+  function anomaliesPanel(){
+    const panel=node('section','','triage-section triage-anomalies');
+    const analysis=result.anomaly_analysis;
+    panel.append(sectionHeading('분석','우선 확인할 이상 징후','관련 로그를 연결한 조사 후보 · 공격 성공 여부는 별도 확인'));
+    if(!analysis){panel.append(node('p','이 저장 기록에는 이상 징후 분석이 없습니다. 원본 로그를 다시 분석하세요.'));return panel;}
+    const findings=analysis.findings||[], coverage=analysis.coverage;
+    panel.append(node('p',`확인할 신호 ${findings.length}개 · 우선 확인 ${findings.filter(f=>f.priority==='high').length}개 · 시각 미확인 ${coverage.missing_time}건 · 대상 미확인 ${coverage.missing_target}건 (중복 가능)`));
+    if(!findings.length)panel.append(node('p','현재 규칙에 해당하는 이상 징후가 발견되지 않았습니다. 수집 범위와 시각·대상 정보가 충분한지 확인하세요. 안전 판정은 아닙니다.'));
+    const events=new Map(result.events.map(e=>[e.id,e]));
+    let visible=0;
+    const cards=node('div','','triage-anomaly-list'),more=node('button','이상 징후 더 보기','btn btn-secondary');
+    const appendPage=()=>{
+      for(const f of findings.slice(visible,visible+10)){
+        const card=node('article','',`triage-anomaly-card ${f.priority}`);
+        card.append(node('span',f.priority==='high'?'우선 확인':'확인 필요','triage-badge active'),node('h3',f.title),
+          node('p',f.targets.join(' · '),'triage-path'),node('small',`${f.start} ~ ${f.end}`),
+          node('p',f.evidence),node('p',`예상 영향: ${f.impact}`),node('p',`다음 확인: ${f.next_action}`),
+          node('small',`${f.context} · 판단 신뢰도 보통 · ${f.outcome}`));
+        const q=TriageWorkflow.findingQueue(result.events,f,resolvedOrigins(),filters());
+        const transfer=TriageWorkflow.queueTransfer(q,resolvedOrigins());
+        card.append(node('p',`관련 로그 ${f.event_ids.length}건 · 확인 후보 ${f.candidate_ids.length}건 → 필터 제외 ${q.excluded.length}건 / 정보 보완 ${q.unresolved.length}건 / 전달 URL ${transfer.urls.length}개`));
+        const send=node('button','이 항목의 요청을 일괄 테스트로 전달','btn btn-secondary');
+        send.disabled=busy||!transfer.urls.length||!!transfer.errors.length;
+        send.onclick=()=>sendToBulk(TriageWorkflow.queueTransfer(TriageWorkflow.findingQueue(result.events,f,resolvedOrigins(),filters()),resolvedOrigins()));
+        card.append(send);
+        const detail=node('details','');detail.append(node('summary',`근거 로그 ${f.event_ids.length}건 · 시간순으로 보기`));
+        detail.ontoggle=()=>{
+          if(!detail.open||detail.children.length>1)return;
+          const table=node('table','','triage-table'),head=node('thead',''),header=node('tr','');
+          for(const label of ['시각 / 출발지','대상 / 요청','장비 / 동작 / 응답','원본'])header.append(node('th',label));
+          head.append(header);const body=node('tbody','');table.append(head,body);
+          const wrap=node('div','','triage-table-wrap');wrap.append(table);detail.append(wrap);
+          let offset=0;const next=node('button','근거 로그 더 보기','btn btn-secondary');
+          const load=()=>{
+            for(const id of f.event_ids.slice(offset,offset+40)){
+              const e=events.get(id);if(!e)continue;
+              const row=node('tr',''),raw=node('td',''),disclosure=node('details','');
+              disclosure.append(node('summary',`원본 ${e.line}행`));
+              disclosure.ontoggle=()=>{if(disclosure.open&&disclosure.children.length===1)disclosure.append(node('pre',JSON.stringify(e,null,2)));};raw.append(disclosure);
+              row.append(node('td',`${e.timestamp} / ${e.source||'출발지 불명'}`),node('td',`${e.host||e.destination} ${e.method} ${e.path||''}`),
+                node('td',`${e.device||'장비 불명'} / ${{blocked:'차단',allowed:'허용',unknown:'불명'}[e.action]||'불명'} / ${e.status||'응답 미기록'}`),raw);body.append(row);
+            }
+            offset+=40;next.hidden=offset>=f.event_ids.length;
+          };next.onclick=load;detail.append(next);load();
+        };card.append(detail);cards.append(card);
+      }
+      visible+=10;more.hidden=visible>=findings.length;
+    };more.onclick=appendPage;panel.append(cards,more);appendPage();
+    const policy=node('details','');policy.append(node('summary','분석 범위와 판정 기준'),node('p',analysis.limitation),
+      node('p','동일 15분 구간에서 404 경로 3개 이상과 200·206 응답의 혼재, 탐색 이후 공격 요청, 동일 경로의 차단·허용 혼재, 공격 요청 5XX 3건 이상, 민감 경로 탐색 3건 이상, 출발지 3개·경로 5개 이상의 집중 또는 대상 3개 이상의 탐색을 확인합니다. IPS 차단과 단순 스캔 4XX도 분석 근거에 포함하며, 테스트 전달에는 화면의 제외 필터를 적용합니다.'));
+    panel.append(policy);return panel;
+  }
   function renderAssessment(){
     const box=el('triageAssessment');box.replaceChildren();const events=result.events;const o=TriageWorkflow.overview(result);const q=currentQueue();
     const scans=node('section','','triage-section triage-overview');scans.append(sectionHeading('01','분석 요약','현재 입력 로그 기준'));
@@ -346,7 +399,7 @@
     for(const e of events){const target=e.host||e.destination||'대상 불명';targetCounts.set(target,(targetCounts.get(target)||0)+1);if(e.source)sources.add(e.source);for(const p of new Set(e.products||[]))productCounts.set(p,(productCounts.get(p)||0)+1);for(const id of e.cve||[])cves.add(id);}
     const top=counts=>[...counts].sort((a,b)=>b[1]-a[1]).slice(0,3).map(([name,count])=>`${name} (${count}건)`).join(' · ');
     const metrics=node('div','','triage-metrics');
-    for(const [label,value] of [['분석 로그',events.length+'건'],['대상 / 출발지',targetCounts.size+' / '+sources.size],['검증 URL',q.unique_urls.length+'개'],['확인 필요 요청',q.unresolved.length+'건']]){const item=node('div','');item.append(node('span',label),node('strong',String(value)));metrics.append(item);}scans.append(metrics);
+    for(const [label,value] of [['분석 로그',events.length+'건'],['대상 / 출발지',targetCounts.size+' / '+sources.size],['준비된 검증 URL',q.unique_urls.length+'개'],['준비 정보 부족',q.unresolved.length+'건']]){const item=node('div','');item.append(node('span',label),node('strong',String(value)));metrics.append(item);}scans.append(metrics);
     const productAttempts=events.filter(e=>e.products?.length||e.cve?.length).length;
     const targets=new Map();for(const e of events){const origin=eventOrigin(e);const key=origin||e.host||e.destination||'대상 불명';targets.set(key,origin?technologyProfiles[origin]:null);}
     const profiles=[...targets.values()];const checked=profiles.filter(p=>p&&!p.error).length,failed=profiles.filter(p=>p?.error).length,identified=profiles.filter(p=>p&&!p.error&&p.technologies?.length).length;
@@ -354,21 +407,34 @@
     const overview=node('div','','triage-summary-body');
     const headline=node('div','','triage-summary-headline');headline.append(node('span','이번 로그의 핵심','triage-kicker'),node('h3',productAttempts?`제품·CVE 스캔 ${productAttempts}건`:'제품·CVE 식별 기록 없음'),node('p',`제품 ${productCounts.size}종 · CVE ${cves.size}종 · 반복 스캔 후보 ${campaigns.length}묶음`));
     const focal=node('div','','triage-focus-target');const first=[...targetCounts].sort((a,b)=>b[1]-a[1])[0];focal.append(node('span','가장 많이 탐지된 대상'),node('strong',first?first[0]:'대상 없음'),node('small',first?`${first[1]}건 · 분석 로그의 ${(first[1]/events.length*100).toFixed(1)}%`:''));headline.append(focal);overview.append(headline);
-    const pipeline=node('div','','triage-summary-pipeline');pipeline.append(node('h3','검증 준비 현황'));
-    for(const [label,value,color] of [['노이즈 제외',q.excluded.length,'neutral'],['검증 가능 요청',q.ready.length,'ready'],['주소·요청 확인 필요',q.unresolved.length,'attention']]){const row=node('div','',`triage-pipeline-row ${color}`);row.append(node('span',label),node('strong',`${value}건`));pipeline.append(row);}pipeline.append(node('small',`검증 가능 요청은 중복을 합쳐 URL ${q.unique_urls.length}개로 전달`));overview.append(pipeline);
+    const pipeline=node('div','','triage-summary-pipeline');pipeline.append(node('h3','검증 URL 준비'));
+    pipeline.append(node('p',`분석 로그 ${events.length}건 중 자동 제외 ${q.excluded.length}건, URL 준비 완료 ${q.ready.length}건, 준비 정보 부족 ${q.unresolved.length}건.`,'triage-pipeline-explanation'));
+    for(const [label,value,color,description] of [
+      ['자동 제외',q.excluded.length,'neutral','IPS 차단 또는 단순 경로 탐색 4xx에 해당합니다. 0건이어도 노이즈가 없다고 확정한 것은 아닙니다.'],
+      ['URL 준비 완료',q.ready.length,'ready','제외 필터를 통과했고 접속 주소와 GET 경로가 확인된 요청입니다. 서로 다른 파일·경로는 합치지 않습니다.'],
+      ['준비 정보 부족',q.unresolved.length,'attention','현재 정보로 검증 URL을 만들 수 없습니다. 공격의 중요도와는 별개입니다.']]){
+      const row=node('div','',`triage-pipeline-row ${color}`);const name=node('span','');name.append(node('strong',label),node('small',description));row.append(name,node('b',`${value}건`));pipeline.append(row);
+    }
+    if(q.unresolved.length){
+      const details=[];for(const [label,count] of [['접속 주소·포트 미확인',q.unresolved_counts.origin],['HTTP 요청 경로 없음',q.unresolved_counts.request],['GET 이외 요청',q.unresolved_counts.method],['주소·경로 형식 확인',q.unresolved_counts.other]])if(count)details.push(`${label} ${count}건`);
+      pipeline.append(node('p',`확인할 정보: ${details.join(' · ')}`,'triage-pipeline-next'));
+      if(q.unresolved_counts.origin&&events.some(e=>/\.test(?::\d+)?$/i.test(e.host||e.destination||'')))
+        pipeline.append(node('small','이 입력에는 .test 예시 주소가 있습니다. 실제 서비스의 접속 주소를 입력해야 검증 URL을 만들 수 있습니다.'));
+    }
+    pipeline.append(node('small',`준비된 요청 ${q.ready.length}건에서 완전히 같은 URL만 합치면 검증 URL ${q.unique_urls.length}개입니다. 모든 로그는 전체 목록과 통계에 남습니다.`));overview.append(pipeline);
     const tech=node('div','','triage-summary-tech');tech.append(node('h3','자산 기술 조사'));const ratio=targets.size?checked/targets.size*100:0;tech.append(node('strong',`${checked} / ${targets.size}`),node('span','대상 응답 확인'));
     const progress=node('div','','triage-tech-progress');const fill=node('span','');fill.style.width=ratio+'%';progress.append(fill);tech.append(progress,node('p',`기술 식별 ${identified} · 미식별 ${checked-identified}`),node('small',`실패 ${failed} · 미완료 ${targets.size-checked-failed}`));overview.append(tech);scans.append(overview);
     const actions=node('div','','triage-actions');
-    for(const [label,id] of [['검증 URL 보기','triageHandoff'],['확인 필요 요청 보기','triageFilterSection'],['기술 조사 결과 보기','triageTechnologyDetails']]){const button=node('button',label,'btn btn-secondary');button.onclick=()=>{if(id==='triageFilterSection'){el('triageScreenFilter').value='unresolved';render();}if(id==='triageTechnologyDetails')el(id).open=true;el(id).scrollIntoView({block:'start'});};actions.append(button);}scans.append(actions);
+    for(const [label,id] of [['검증 URL 보기','triageHandoff'],['준비 정보 부족한 로그 보기','triageFilterSection'],['기술 조사 결과 보기','triageTechnologyDetails']]){const button=node('button',label,'btn btn-secondary');button.onclick=()=>{if(id==='triageFilterSection'){el('triageScreenFilter').value='unresolved';render();}if(id==='triageTechnologyDetails')el(id).open=true;el(id).scrollIntoView({block:'start'});};actions.append(button);}scans.append(actions);
     const omitted=result.summary.excluded_detections||0;const errors=result.errors?.length||0;const unsupported=result.unsupported?.length||0;
     if(omitted||errors||unsupported)scans.append(node('small',`입력 ${result.summary.records}건 중 UDS 패턴 제외 ${omitted}건 · 파싱 실패 ${errors}건 · 지원하지 않는 로그 ${unsupported}건`));
     const campaign=node('details','');campaign.append(node('summary','반복 스캔 상세 근거'),campaignPanel());scans.append(campaign);box.append(scans);
+    box.append(anomaliesPanel());
     const stats=node('section','','triage-section');stats.append(sectionHeading('02','이벤트 통계','로그 건수 기준'),statisticsPanel());box.append(stats);
   }
   el('triageSelectReview').onclick=()=>{selectReady();el('triageScreenFilter').value='recommended';render();};
   el('triageSelectNone').onclick=()=>{selected.clear();render();};
-  el('triageSendBulk').onclick=()=>{
-    const transfer=updateSelection();
+  function sendToBulk(transfer){
     if(transfer.errors.length){el('triageHandoffStatus').textContent=transfer.errors.join(' / ');return;}
     if(!transfer.urls.length)return;
     if(!state.payloads){el('triageHandoffStatus').textContent='일괄 테스트 구성을 불러오는 중입니다. 잠시 후 다시 시도하세요.';return;}
@@ -379,7 +445,8 @@
     banner.replaceChildren(node('h3',`노이즈 제외 후 ${transfer.links.length}건 → URL ${transfer.urls.length}개`),node('p','기본 준비는 GET 단순 요청 · 동시 1개입니다. 기존 요청 헤더와 기본 헤더 설정을 확인한 뒤 아래 테스트 시작 버튼을 누르세요. 요청 재현은 과거 침해 성공을 확정하지 않습니다.'));
     const back=node('button','이벤트 판단으로 돌아가기','btn btn-secondary');back.onclick=()=>switchView('triage');banner.append(back);
     banner.scrollIntoView({block:'start'});
-  };
+  }
+  el('triageSendBulk').onclick=()=>sendToBulk(updateSelection());
 
   async function loadLogFiles(files) {
     if(busy){el('triageStatus').textContent='현재 작업이 끝난 뒤 파일을 넣어주세요.';return;}
@@ -473,7 +540,7 @@
   el('triageInventoryRefresh').onclick=()=>refreshInventory().catch(err=>{el('triageStatus').textContent=err.message;});
   el('triageInventoryImport').onclick=async()=>{const button=el('triageInventoryImport');button.disabled=true;try{const r=await textPost('/inventory',el('triageInventoryInput').value);el('triageStatus').textContent=`자산 ${r.imported}건 반영. 로그를 다시 분석하면 최신 정보를 적용합니다.`;await refreshInventory();}catch(err){el('triageStatus').textContent=err.message;}finally{button.disabled=false;}};
 
-  for(const id of ['triageExcludeIps','triageExcludeScan','triageExcludeTech'])el(id)&&(el(id).onchange=()=>{selectReady();listPage=0;render();});
+  for(const id of ['triageExcludeIps','triageExcludeScan'])el(id).onchange=()=>{selectReady();listPage=0;render();};
   el('triageCopyUrls').onclick=async()=>{const text=el('triageUrlList').value;if(!text)return;try{await navigator.clipboard.writeText(text);el('triageHandoffStatus').textContent='URL 목록을 복사했습니다. 일괄 테스트 대상 목록에 붙여넣으세요.';}catch{el('triageUrlList').focus();el('triageUrlList').select();el('triageHandoffStatus').textContent='목록을 선택했습니다. Ctrl+C로 복사하세요.'}};
   el('triageScreenFilter').onchange=()=>{listPage=0;render();};
   el('triageClear').onclick=()=>{if(busy)return;result=null;analyzedText=null;el('triageSave').disabled=true;el('triageInput').value='';el('triageFileHint').textContent='CSV · LOG · TXT · JSON 계열 / 최대 2MB';el('triageFile').value='';el('triageStatus').textContent='';el('triageExport').disabled=true;render();};

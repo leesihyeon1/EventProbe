@@ -85,7 +85,7 @@ def screen_event(event):
         return {'screened': True, 'code': 'IPS_BLOCKED',
                 'explanation': 'IPS 차단 기록으로 기본 검증 대상에서 제외합니다. 동일 대상의 허용 이벤트는 별도로 검토합니다.'}
     status = event.get('status')
-    # 404/4xx 제외는 '단순 탐색'에만 적용 — 페이로드·CVE·주입 시도는 404라도 유지(三상태: 경로 부재는 안전이 아님).
+    # 404/4xx 제외는 '단순 탐색'에만 적용 — 페이로드·CVE·주입 시도는 404라도 유지.
     if isinstance(status, int) and 400 <= status < 500 and simple_scan_request(event):
         if status == 404:
             return {'screened': True, 'code': 'HTTP_404',

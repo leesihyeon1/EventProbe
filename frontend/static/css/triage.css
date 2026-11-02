@@ -1,4 +1,14 @@
 /* Event analysis: overview -> summary -> filtering -> reusable request list. */
+.triage-anomaly-list{display:grid;gap:14px;margin:16px 0}
+.triage-anomaly-card{min-width:0;padding:20px 24px;background:var(--bg-primary);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;overflow-wrap:anywhere}
+.triage-anomaly-card.high{border-left-color:#c07935}
+.triage-anomaly-card h3{font-size:16px;margin:10px 0}
+.triage-anomaly-card p{font-size:13px;line-height:1.7;margin:8px 0}
+.triage-anomaly-card small{color:var(--text-muted);line-height:1.6}
+.triage-anomaly-card>details{margin-top:14px}
+.triage-anomaly-card pre{max-height:360px;overflow:auto;white-space:pre-wrap}
+.triage-anomaly-card summary{cursor:pointer}
+@media(max-width:650px){.triage-anomaly-card{padding:16px}.triage-anomaly-card>.btn{width:100%;white-space:normal}}
 .triage-panel{max-width:none;margin:0;padding:24px 28px;box-sizing:border-box;height:100%;overflow:auto;width:100%;color:var(--text-primary)}
 
 .triage-panel [hidden]{display:none!important}
@@ -31,6 +41,7 @@
 .triage-empty{text-align:center;padding:70px 20px;border:1px dashed var(--border);border-radius:10px}
 .triage-empty p{font-size:12px}
 .triage-metrics,.triage-flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}
+.triage-flow{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:1050px){.triage-flow{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:650px){.triage-flow{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .triage-metrics>div,.triage-flow>div{background:var(--bg-primary);padding:14px;border:1px solid var(--border);border-radius:8px}
 .triage-metrics span,.triage-flow span{display:block;font-size:12px;color:var(--text-muted);margin-bottom:8px}
 .triage-metrics strong{font-size:25px;font-variant-numeric:tabular-nums}
@@ -183,6 +194,7 @@
 .triage-heading{margin-bottom:20px}.triage-heading h1{font-size:27px;letter-spacing:-.04em}.triage-heading p{font-size:13px}
 .triage-section{background:var(--bg-primary);padding:24px;border-radius:12px;margin:20px 0}
 .triage-overview{border-top:1px solid var(--border);box-shadow:0 3px 18px #172b4d05}
+.triage-summary-pipeline .triage-pipeline-explanation{font-size:12px;line-height:1.6;color:var(--text-primary);margin:10px 0 4px}.triage-summary-pipeline .triage-pipeline-next{font-size:12px;line-height:1.6;padding:10px 12px;border-radius:6px;background:var(--bg-primary);color:var(--text-primary)}.triage-summary-pipeline .triage-pipeline-row{gap:12px;align-items:flex-start}.triage-summary-pipeline .triage-pipeline-row span{display:grid;gap:3px}.triage-summary-pipeline .triage-pipeline-row strong{font-size:12px;font-weight:650}.triage-summary-pipeline .triage-pipeline-row small{color:var(--text-muted);font-size:11px;line-height:1.45}.triage-summary-pipeline .triage-pipeline-row b{font-size:16px;white-space:nowrap}.triage-summary-pipeline .triage-pipeline-row.ready b{color:var(--accent)}.triage-summary-pipeline .triage-pipeline-row.attention b{color:#c07935}
 .triage-section-heading h2{font-size:17px;letter-spacing:-.02em}.triage-section-heading h2 span{color:var(--text-muted);font-size:11px;font-weight:500}
 .triage-overview .triage-metrics{border-bottom:1px solid var(--border);padding-bottom:22px;gap:0;margin:8px 0 24px}
 .triage-overview .triage-metrics>div{border:0;border-right:1px solid var(--border);border-radius:0;padding:4px 24px;background:none}.triage-overview .triage-metrics>div:first-child{padding-left:0}.triage-overview .triage-metrics>div:last-child{border:0}.triage-overview .triage-metrics strong{font-size:29px;letter-spacing:-.04em;font-weight:650}.triage-overview .triage-metrics span{font-size:12px;margin-bottom:10px}
