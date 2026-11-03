@@ -124,10 +124,10 @@
         const reason=e.method!=='GET'?'method':!e.path?'request':
           !(origins[originKey(e)]||e.inventory?.origin||inferredOrigin(e))?'origin':'other';
         unresolved_counts[reason]++;
-        const messages={method:`${e.method||'메서드 미기록'} 요청은 현재 GET 일괄 검증에 연결할 수 없습니다. 메서드·본문을 확인해 개별 검증하세요.`,
-          request:'HTTP 요청 경로가 없어 검증 URL을 만들 수 없습니다. 원본 요청을 확인하세요.',
-          origin:'HTTP/HTTPS 접속 주소가 확인되지 않았습니다. 실제 서비스 주소와 포트를 입력하세요.',
-          other:'접속 주소 또는 요청 경로 형식을 확인하세요.'};
+        const messages={method:`${e.method||'메서드 미기록'} 요청은 GET 일괄 테스트에 보낼 수 없습니다. 메서드와 요청 본문을 확인하세요.`,
+          request:'요청 경로가 없습니다. 원본 로그에서 경로를 확인하세요.',
+          origin:'대상 접속 주소가 없습니다. 실제 주소와 포트를 확인하세요.',
+          other:'접속 주소와 요청 경로의 형식을 확인하세요.'};
         unresolved.push({...e,queue_reason:messages[reason],queue_reason_code:reason});continue;
       }
       ready.push({...e,verification_url:target.urls[0]});
