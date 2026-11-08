@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 from collections import defaultdict
 from datetime import datetime
@@ -15,8 +16,10 @@ from core.triage_summary import refresh_attack_summary, signature_category
 from core.triage_statistics import summarize_statistics, device_kind
 from core.triage_filter import refresh_screening, status_provenance
 
-MAX_BYTES = 2_000_000
-MAX_RECORDS = 10000
+# 입력 한도는 환경변수로 조절한다(코드 수정 없이 배포 단위로 상향 가능). 기본 20MB/10만건.
+MAX_BYTES = int(os.getenv('TRIAGE_MAX_BYTES') or 20_000_000)
+MAX_RECORDS = int(os.getenv('TRIAGE_MAX_RECORDS') or 100_000)
+MAX_MB = MAX_BYTES // 1_000_000
 POLICY = "triage-3"
 
 
@@ -230,7 +233,7 @@ def is_csv_export(text):
 
 
 def analyze(text):
-    if len(text.encode('utf-8')) > MAX_BYTES: raise ValueError('입력은 2MB 이하로 제한됩니다.')
+    if len(text.encode('utf-8')) > MAX_BYTES: raise ValueError(f'입력은 {MAX_MB}MB 이하로 제한됩니다.')
     text = text.lstrip("\ufeff")
     stripped = text.strip()
     if not stripped: raise ValueError('분석할 로그를 입력하세요.')
@@ -249,7 +252,7 @@ def analyze(text):
             raise ValueError(f'CSV 형식을 확인하세요: {exc}') from exc
     else:
         records = [(i+1,None,x) for i,x in enumerate(text.splitlines()) if x.strip()]
-    if len(records)>MAX_RECORDS: raise ValueError('최대 10,000개 레코드를 분석할 수 있습니다.')
+    if len(records)>MAX_RECORDS: raise ValueError(f'최대 {MAX_RECORDS:,}개 레코드를 분석할 수 있습니다.')
     events, errors, unsupported = [], [], []
     excluded_detection_count = 0
     for line, data, raw in records:

@@ -1,6 +1,6 @@
 import json
 import pytest
-from core.triage import analyze
+from core.triage import analyze, MAX_BYTES
 
 
 def test_vendor_action_and_count():
@@ -41,7 +41,16 @@ def test_not_all_error_statuses_are_low(status):
 
 def test_malformed_and_limits():
     assert analyze('{bad')['summary']['errors']==1
-    with pytest.raises(ValueError): analyze('x'*2000001)
+    with pytest.raises(ValueError): analyze('x'*(MAX_BYTES+1))
+
+
+def test_default_input_limits_are_20mb_100k():
+    import os
+    from core.triage import MAX_BYTES as mb, MAX_RECORDS as mr, MAX_MB as m
+    if not os.getenv('TRIAGE_MAX_BYTES'):
+        assert mb == 20_000_000 and m == 20
+    if not os.getenv('TRIAGE_MAX_RECORDS'):
+        assert mr == 100_000
 
 
 def test_unknown_times_do_not_merge_as_campaign():
@@ -61,7 +70,7 @@ def test_api_is_stateless_and_limits_input(monkeypatch,tmp_path):
             response=await client.post('/api/triage/analyze',content='act=Permit dhost=example.test request=/x')
             assert response.status_code==200 and response.json()['persisted'] is False
             assert (await client.post('/api/triage/analyze',content=b'\xff')).status_code==422
-            assert (await client.post('/api/triage/analyze',content='x'*2000001)).status_code==413
+            assert (await client.post('/api/triage/analyze',content='x'*(MAX_BYTES+1))).status_code==413
     asyncio.run(check())
 
 

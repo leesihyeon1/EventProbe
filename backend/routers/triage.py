@@ -1,6 +1,6 @@
 """Local SIEM analysis, opt-in retention and workspace-scoped inventory."""
 from fastapi import APIRouter, HTTPException, Request
-from core.triage import analyze, MAX_BYTES
+from core.triage import analyze, MAX_BYTES, MAX_MB
 
 import asyncio
 import contextlib
@@ -25,7 +25,7 @@ async def read_text(request):
     async for chunk in request.stream():
         body.extend(chunk)
         if len(body) > MAX_BYTES:
-            raise HTTPException(413, '입력은 2MB 이하로 제한됩니다.')
+            raise HTTPException(413, f'입력은 {MAX_MB}MB 이하로 제한됩니다.')
     try:
         return body.decode('utf-8-sig')
     except (ValueError, UnicodeError) as exc:

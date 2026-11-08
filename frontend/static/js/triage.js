@@ -1,6 +1,9 @@
 /* Session-only triage: untrusted log values are always rendered as text. */
 (() => {
   const el = id => document.getElementById(id);
+  // 입력 한도(바이트). 백엔드 TRIAGE_MAX_BYTES 기본값과 맞춘다. 백엔드가 최종 강제(413)하며 여기선 사전 안내용.
+  const MAX_INPUT_BYTES = 20_000_000, MAX_INPUT_MB = Math.floor(MAX_INPUT_BYTES / 1_000_000);
+  const SIZE_HINT = `CSV · LOG · TXT · JSON 계열 / 최대 ${MAX_INPUT_MB}MB`;
   let result = null, busy = false, analyzedText = null;
   const technologyProfiles={};
   let probeController=null;
@@ -182,12 +185,13 @@
   }
   const chartColors=['#6366f1','#06b6d4','#f59e0b','#ef4444','#22c55e','#a855f7','#f97316','#64748b','#14b8a6','#eab308','#ec4899'];
   function chartTitle(title,description){const box=node('div','');box.append(node('h3',title),node('p',description));return box;}
-  function countRows(items,total){
+  function countRows(items,total,onSelect){
     const list=node('div','','triage-stat-rows');
     for(const [index,item] of items.entries()){
-      const row=node('div','','triage-stat-row');
+      const row=node('div','','triage-stat-row'+(onSelect?' triage-stat-clickable':''));
+      if(onSelect){row.setAttribute('role','button');row.tabIndex=0;row.title='클릭하면 해당 요청을 봅니다';row.onclick=()=>onSelect(item);row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect(item);}};}
       const percent=total?item.count/total*100:0;
-      const label=node('span',item.label);label.title=item.label;
+      const label=node('span',item.label);if(!onSelect)label.title=item.label;
       const value=node('strong','');value.append(node('b',`${item.count.toLocaleString()}건`),node('small',`${percent.toFixed(1)}%`));row.append(label,value);
       const track=node('div','','triage-stat-track');const fill=node('div','','triage-stat-fill');fill.style.width=`${percent}%`;fill.style.background=({Block:'#e47777',Permit:'#24a89c',None:'#9b8ac4','HTTP 응답 미기록':'#99a3b3','처리 값 미기록':'#99a3b3'}[item.label]||'var(--accent)');track.append(fill);row.append(track);list.append(row);
     }
@@ -375,12 +379,22 @@
     const deviceRow=node('div','','triage-device-row');
     for(const d of s.devices){
       const detail=node('div','','triage-device-stat');detail.append(node('h4',`${d.name} · ${d.records}건`));
+      // 다른 통계 요소처럼 각 수치를 클릭하면 해당 요청을 인스펙터로 연다. 라벨→이벤트 매핑은
+      // 통계 집계와 동일한 규칙(원 처리 값·상태 코드·응답 판정)을 사용한다.
+      const deviceEvents=result.events.filter(e=>(e.device||'미확인')===d.name);
+      const rawLabel=e=>{const r=String(e.action_raw||'').trim();return ({block:'Block',permit:'Permit',none:'None'}[r.toLowerCase()]||r)||'처리 값 미기록';};
+      const statusLabel=e=>e.status!=null?String(e.status):'HTTP 응답 미기록';
+      const byLabel=(rows,fn,item)=>{const shown=new Set(rows.filter(x=>x.label!=='기타').map(x=>x.label));return item.label==='기타'?deviceEvents.filter(e=>!shown.has(fn(e))):deviceEvents.filter(e=>fn(e)===item.label);};
       const actionItems=[['차단',d.actions.blocked||0],['허용',d.actions.allowed||0],['불명',d.actions.unknown||0]].map(([label,count])=>({label,count}));
-      if(d.name!=='IDS'||d.action_values?.some(item=>item.label!=='처리 값 미기록'))detail.append(node('p','장비 처리 값'),countRows(d.action_values||actionItems,d.records));
+      const actMap={'차단':'blocked','허용':'allowed','불명':'unknown'};
+      if(d.name!=='IDS'||d.action_values?.some(item=>item.label!=='처리 값 미기록')){
+        const rows=d.action_values||actionItems,usingRaw=!!d.action_values;
+        detail.append(node('p','장비 처리 값'),countRows(rows,d.records,item=>inspect(`${d.name} · ${item.label}`,usingRaw?byLabel(rows,rawLabel,item):deviceEvents.filter(e=>(e.action||'unknown')===actMap[item.label]))));
+      }
       if(d.name==='WAF')detail.append(node('p','None은 로그의 원래 처리 값이며 허용으로 단정하지 않습니다.'));
       if(d.name==='WAF'||d.name==='IDS'){
-        detail.append(node('p','HTTP 응답 코드'),countRows(d.http_status,d.status_eligible));
-        if(d.response_result.length)detail.append(node('p','장비 응답 판정'),countRows(d.response_result,d.response_result.reduce((sum,item)=>sum+item.count,0)));
+        detail.append(node('p','HTTP 응답 코드'),countRows(d.http_status,d.status_eligible,item=>inspect(`${d.name} · HTTP ${item.label}`,byLabel(d.http_status,statusLabel,item))));
+        if(d.response_result.length){const shownRes=new Set(d.response_result.filter(x=>x.label!=='기타').map(x=>x.label));detail.append(node('p','장비 응답 판정'),countRows(d.response_result,d.response_result.reduce((sum,item)=>sum+item.count,0),item=>inspect(`${d.name} · ${item.label}`,deviceEvents.filter(e=>e.response_result&&(item.label==='기타'?!shownRes.has(String(e.response_result)):String(e.response_result)===item.label)))));}
       }
       deviceRow.append(detail);
     }
@@ -540,7 +554,7 @@
     if(!files?.length)return;
     if(files.length!==1){el('triageStatus').textContent='로그 파일은 한 번에 1개씩 넣어주세요.';return;}
     const file=files[0];
-    if(file.size>2000000){el('triageStatus').textContent='파일이 너무 큽니다. 2MB 이하 파일을 넣어주세요.';return;}
+    if(file.size>MAX_INPUT_BYTES){el('triageStatus').textContent=`파일이 너무 큽니다. ${MAX_INPUT_MB}MB 이하 파일을 넣어주세요.`;return;}
     if(!/\.(csv|log|txt|json|jsonl|ndjson)$/i.test(file.name)){el('triageStatus').textContent='CSV, LOG, TXT, JSON, JSONL, NDJSON 파일을 넣어주세요.';return;}
     busy=true;el('triageAnalyze').disabled=true;el('triageFile').disabled=true;
     try {
@@ -579,7 +593,7 @@
     el('triageStatus').textContent='로그 분석 중…';
     try {
       const text=el('triageInput').value;
-      if(new TextEncoder().encode(text).length>2000000)throw new Error('입력은 2MB 이하로 제한됩니다.');
+      if(new TextEncoder().encode(text).length>MAX_INPUT_BYTES)throw new Error(`입력은 ${MAX_INPUT_MB}MB 이하로 제한됩니다.`);
       const response=await fetch('/api/triage/analyze',{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:text});
       result=await _asJson(response,'로그 분석');analyzedText=text;el('triageSave').disabled=false; render(); el('triageExport').disabled=false;
       probeController=new AbortController();el('triageProbeStop').hidden=false;
@@ -596,7 +610,7 @@
   };
 
   async function textPost(path,text) {
-    if(new TextEncoder().encode(text).length>2000000)throw new Error('입력은 2MB 이하로 제한됩니다.');
+    if(new TextEncoder().encode(text).length>MAX_INPUT_BYTES)throw new Error(`입력은 ${MAX_INPUT_MB}MB 이하로 제한됩니다.`);
     return _asJson(await fetch('/api/triage'+path,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:text}),'기록 관리');
   }
   async function refreshHistory() {
@@ -630,7 +644,7 @@
   for(const id of ['triageExcludeIps','triageExcludeScan'])el(id).onchange=()=>{selectReady();listPage=0;render();};
   el('triageCopyUrls').onclick=async()=>{const text=el('triageUrlList').value;if(!text)return;try{await navigator.clipboard.writeText(text);el('triageHandoffStatus').textContent='URL을 복사했습니다.';}catch{el('triageUrlList').focus();el('triageUrlList').select();el('triageHandoffStatus').textContent='URL을 선택했습니다. Ctrl+C로 복사하세요.'}};
   el('triageScreenFilter').onchange=()=>{listPage=0;render();};
-  el('triageClear').onclick=()=>{if(busy)return;result=null;analyzedText=null;el('triageSave').disabled=true;el('triageInput').value='';el('triageFileHint').textContent='CSV · LOG · TXT · JSON 계열 / 최대 2MB';el('triageFile').value='';el('triageStatus').textContent='';el('triageExport').disabled=true;render();};
+  el('triageClear').onclick=()=>{if(busy)return;result=null;analyzedText=null;el('triageSave').disabled=true;el('triageInput').value='';el('triageFileHint').textContent=SIZE_HINT;el('triageFile').value='';el('triageStatus').textContent='';el('triageExport').disabled=true;render();};
   el('triageExport').onclick=()=>{
     if(!result)return;
     const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));

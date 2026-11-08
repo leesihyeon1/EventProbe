@@ -325,7 +325,7 @@
         <section class="triage-panel">
           <header class="triage-heading"><div><h1>이벤트 분석</h1></div><button class="btn btn-secondary" id="triageExport" disabled>분석 결과 다운로드</button></header>
           <details id="triageImport" open class="triage-import"><summary>로그 입력 <span>파일 또는 텍스트</span></summary>
-            <div class="triage-dropzone" id="triageDropZone"><div class="triage-upload-copy"><strong>로그 파일을 여기에 끌어놓으세요</strong><span id="triageFileHint">CSV · LOG · TXT · JSON 계열 / 최대 2MB</span></div><label class="triage-file-button"><span>파일 찾아보기</span><input id="triageFile" type="file" aria-label="로그 파일 선택" accept=".log,.txt,.json,.jsonl,.ndjson,.csv"></label></div>
+            <div class="triage-dropzone" id="triageDropZone"><div class="triage-upload-copy"><strong>로그 파일을 여기에 끌어놓으세요</strong><span id="triageFileHint">CSV · LOG · TXT · JSON 계열 / 최대 20MB</span></div><label class="triage-file-button"><span>파일 찾아보기</span><input id="triageFile" type="file" aria-label="로그 파일 선택" accept=".log,.txt,.json,.jsonl,.ndjson,.csv"></label></div>
             <details class="triage-paste"><summary>텍스트로 붙여넣기</summary><textarea id="triageInput" rows="5" aria-label="분석할 로그" placeholder="장비 로그를 붙여넣으세요"></textarea></details>
             <div class="triage-actions triage-import-actions"><button class="btn btn-primary" id="triageAnalyze">로그 분석</button><button class="btn btn-secondary" id="triageClear">입력 지우기</button><span class="triage-muted">분석 후 대상 홈페이지의 웹 기술을 확인합니다.</span></div>
           </details>
