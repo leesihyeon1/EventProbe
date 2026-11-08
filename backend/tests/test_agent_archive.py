@@ -81,14 +81,14 @@ def test_archive_and_resume_claim_cannot_cross(tmp_path, monkeypatch):
                         'needs_credentials': False, 'requests': 0, 'ai_calls': 0,
                         'steps': 0, 'elapsed': 0, 'endpoints': {}})
     manager = AgentManager(store, transport=httpx.MockTransport(lambda r: pytest.fail('target request')))
-    claim = store.claim
+    enqueue = store.enqueue
 
     def archive_before_claim(run_id):
         manager.set_archived(run_id, True)
-        return claim(run_id)
+        return enqueue(run_id)
 
-    monkeypatch.setattr(store, 'claim', archive_before_claim)
-    with pytest.raises(ValueError, match='재개'):
+    monkeypatch.setattr(store, 'enqueue', archive_before_claim)
+    with pytest.raises(ValueError, match='대기열'):
         manager.start(rid)
     assert store.get(rid)['data']['archived'] is True
     assert store.get(rid)['state'] == 'paused'
@@ -96,7 +96,7 @@ def test_archive_and_resume_claim_cannot_cross(tmp_path, monkeypatch):
     assert rid not in manager.specs
     assert store.events(rid) == []
 
-    monkeypatch.setattr(store, 'claim', claim)
+    monkeypatch.setattr(store, 'enqueue', enqueue)
     manager.set_archived(rid, False)
     assert store.claim(rid)
     with pytest.raises(ValueError, match='실행 중인 작업'):

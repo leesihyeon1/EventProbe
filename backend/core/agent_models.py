@@ -88,6 +88,7 @@ class RunSpec(Contract):
     max_steps: int = Field(default=8, ge=1, le=50)
     max_requests: int = Field(default=24, ge=1, le=150)
     max_ai_calls: int = Field(default=8, ge=0, le=50)
+    model_profile_ids: list[str] = Field(default_factory=list, max_length=8)
     max_seconds: int = Field(default=300, ge=10, le=1800)
     timeout: int = Field(default=15, ge=1, le=60)
     allow_write_methods: bool = False
@@ -108,6 +109,9 @@ class RunSpec(Contract):
 
     @model_validator(mode='after')
     def check_scope(self):
+        if (len(set(self.model_profile_ids)) != len(self.model_profile_ids) or
+                any(not key or len(key) > 100 for key in self.model_profile_ids)):
+            raise ValueError('중복 없는 모델 프로파일 ID가 필요합니다.')
         if self.protected_marker and len(self.protected_marker) < 8:
             raise ValueError('보호 콘텐츠 표식은 8자 이상이어야 합니다.')
         if self.approved_plan is not None:

@@ -12,6 +12,7 @@ function resetFindings() {
   agentEl('fdSearch').value='';agentEl('fdStatus').value='';agentEl('fdSeverity').value='';
 }
 function initFindings() {
+  mountSavedLibraryButton(agentEl('fdReport')?.parentElement,'fdSavedLibrary');
   agentEl('fdSearch').oninput=drawFindings;
   agentEl('fdStatus').onchange=drawFindings;agentEl('fdSeverity').onchange=drawFindings;
   agentEl('fdReport').onclick=()=>{if(findingsState.runId) window.open('/api/agent/runs/'+encodeURIComponent(findingsState.runId)+'/report','_blank','noopener');};
@@ -113,6 +114,7 @@ function renderFindingDetail(f) {
     };
     exports.append(link);
   }
+  const preserve=savedPreserveButton(findingsState.runId,f.id);exports.append(preserve);
   panel.append(exports);
   if(FD_VULN.has(f.category)) {
     const retest=uiNode('button','aw-link fd-retest','새 실행으로 재검증');retest.type='button';
@@ -178,4 +180,135 @@ async function showFindingEvidence(id) {
     } catch(error) {agentEl('ahCount').textContent=error.message;return;}
   }
   if(event){event.open=true;event.scrollIntoView({block:'center'});event.querySelector('summary')?.focus();}
+}
+
+
+/* Independent evidence library: every body is a local, explicit disclosure. */
+let savedLibraryState={page:0,query:'',request:0,detailRequest:0,selected:null,version:null};
+function mountSavedLibraryButton(parent,id) {
+  if(!parent||document.getElementById?.(id))return;
+  const button=uiNode('button','aw-link','보존한 발견');button.id=id;button.type='button';
+  button.onclick=()=>openSavedLibrary();parent.append(button);
+}
+function savedPreserveButton(runId,findingId) {
+  const button=uiNode('button','aw-link','증거 별도 보존');button.type='button';
+  button.onclick=()=>preserveSourceFinding(runId,findingId,button);return button;
+}
+async function preserveSourceFinding(runId,findingId,button) {
+  if(typeof confirm==='function'&&!confirm('선택한 발견의 URL·요청·응답 값을 별도로 보존합니다. 실행 기록을 삭제해도 남으며 보존 목록에서 따로 삭제합니다. 계속할까요?'))return;
+  button.disabled=true;
+  try {
+    const base=`/runs/${encodeURIComponent(runId)}/findings/${encodeURIComponent(findingId)}`;
+    const previous=await agentApi(base+'/preserved');
+    const body=previous.saved?{expected_revision:previous.saved.revision}:{};
+    const result=await agentApi(base+'/preserve',body);
+    button.textContent=result.unchanged?'이미 보존됨':'보존 완료';
+    if(button.isConnected!==false)await openSavedLibrary(result.id);
+  } catch(error){button.textContent=error.message||'보존 실패';}
+  finally{button.disabled=false;}
+}
+function ensureSavedLibrary() {
+  let dialog=document.getElementById('savedFindingDialog');if(dialog)return dialog;
+  dialog=uiNode('dialog','aw-dialog');dialog.id='savedFindingDialog';dialog.setAttribute('aria-label','별도 보존한 발견');
+  const head=uiNode('div','aw-dialog-head'),title=uiNode('h2','','보존한 발견');
+  const close=uiNode('button','aw-link','닫기');close.type='button';close.onclick=()=>{savedLibraryState.request++;savedLibraryState.detailRequest++;dialog.close();};head.append(title,close);
+  const form=uiNode('div','aw-form');
+  form.append(uiNode('p','aw-muted','실행 기록과 별개로 보존한 시점의 증거입니다. 조회·가져오기는 대상 요청이나 AI 호출을 만들지 않습니다.'));
+  const search=uiNode('input');search.id='savedFindingSearch';search.type='search';search.maxLength=200;search.placeholder='보존 발견 검색';search.setAttribute('aria-label','보존 발견 검색');
+  const find=uiNode('button','aw-link','검색');find.type='button';find.onclick=()=>{savedLibraryState.page=0;savedLibraryState.query=search.value;loadSavedLibrary();};
+  const file=uiNode('input');file.type='file';file.accept='.zip';file.setAttribute('aria-label','보존 패키지 가져오기');
+  const status=uiNode('p','aw-muted');status.id='savedFindingStatus';status.setAttribute('role','status');
+  file.onchange=async()=>{const selected=file.files?.[0];if(!selected)return;
+    try{const result=await uploadSavedFindingPackage(selected);await loadSavedLibrary();await showSavedFinding(result.id);}
+    catch(error){status.textContent=error.message;}finally{file.value='';}};
+  const list=uiNode('div');list.id='savedFindingList';
+  const prev=uiNode('button','aw-link','이전');prev.type='button';prev.id='savedFindingPrev';prev.onclick=()=>{if(savedLibraryState.page>0){savedLibraryState.page--;loadSavedLibrary();}};
+  const next=uiNode('button','aw-link','다음');next.type='button';next.id='savedFindingNext';next.onclick=()=>{savedLibraryState.page++;loadSavedLibrary();};
+  const detail=uiNode('section');detail.id='savedFindingDetail';detail.setAttribute('aria-label','보존 발견 상세');
+  form.append(search,find,file,status,list,prev,next,detail);dialog.append(head,form);document.body.append(dialog);return dialog;
+}
+async function openSavedLibrary(savedId) {
+  const dialog=ensureSavedLibrary();if(!dialog.open)dialog.showModal();
+  await loadSavedLibrary();if(savedId)await showSavedFinding(savedId);
+}
+async function loadSavedLibrary() {
+  const state=savedLibraryState,request=++state.request;
+  const list=document.getElementById('savedFindingList'),status=document.getElementById('savedFindingStatus');if(!list)return;
+  try {
+    const page=await agentApi(`/saved-findings?offset=${state.page*25}&limit=25&search=${encodeURIComponent(state.query)}`);
+    if(request!==state.request)return;
+    if(!page.items.length&&page.total>0&&state.page>0){state.page=Math.floor((page.total-1)/25);return loadSavedLibrary();}
+    list.replaceChildren();status.textContent=`별도 보존 ${page.total}개`;
+    for(const item of page.items) {
+      const row=uiNode('button','fd-row');row.type='button';
+      row.append(fdBadge(item.severity,FD_SEVERITY[item.severity]||item.severity,'sev'),
+        uiNode('span','fd-category',item.category),uiNode('span','sm-path',`${item.method} ${item.origin}${item.path}`),
+        uiNode('span','fd-verdict',FD_VERDICT[item.verdict]||item.verdict),uiNode('span','fd-status',FD_STATUS[item.status]||item.status));
+      row.onclick=()=>showSavedFinding(item.id);list.append(row);
+    }
+    if(!page.items.length)list.append(uiNode('p','aw-muted','보존한 발견이 없습니다. 작업의 발견 상세에서 증거를 별도 보존할 수 있습니다.'));
+    document.getElementById('savedFindingPrev').disabled=state.page===0;
+    document.getElementById('savedFindingNext').disabled=!page.has_more;
+  } catch(error){if(request===state.request)status.textContent=error.message;}
+}
+function savedDownload(label,url,raw=false) {
+  const link=uiNode('a','aw-link',label);link.setAttribute('href',url);link.setAttribute('download','');
+  if(raw)link.onclick=event=>{if(typeof confirm==='function'&&!confirm('내부 URL·요청·응답 값이 포함된 보존 자료를 로컬로 내려받을까요?'))event.preventDefault();};
+  return link;
+}
+async function showSavedFinding(savedId,version=null) {
+  const state=savedLibraryState,request=++state.detailRequest;
+  state.selected=savedId;state.version=version;
+  const detail=document.getElementById('savedFindingDetail');if(!detail)return;
+  detail.replaceChildren(uiNode('p','aw-muted','보존 기록을 불러오는 중…'));
+  try {
+    const query=version?'?version='+version:'';
+    const record=await agentApi('/saved-findings/'+encodeURIComponent(savedId)+query);
+    if(request!==state.detailRequest)return;
+    state.version=record.version;detail.replaceChildren();
+    const f=record.finding,base='/saved-findings/'+encodeURIComponent(savedId),downloadBase='/api/agent'+base;
+    detail.append(uiNode('h3','',`${f.category} · ${f.method} ${f.origin}${f.path}`),
+      uiNode('p','aw-muted',`보존 버전 ${record.version} / ${record.current_version} · ${FD_VERDICT[f.verdict]||f.verdict} · 원본 실행 ${record.source_run_id}`));
+    const versions=uiNode('select');versions.setAttribute('aria-label','증거 버전');
+    for(const value of record.versions){const option=uiNode('option','',`보존 버전 ${value.version}`);option.value=value.version;option.selected=value.version===record.version;versions.append(option);}
+    versions.onchange=()=>showSavedFinding(savedId,Number(versions.value));detail.append(versions);
+    const report=uiNode('a','aw-link','보존 보고서');report.setAttribute('href',downloadBase+'/report?version='+record.version);report.setAttribute('target','_blank');report.setAttribute('rel','noopener');
+    detail.append(report,savedDownload('증거 ZIP (요약)',downloadBase+'/evidence.zip?version='+record.version),
+      savedDownload('보존 관측 ZIP',downloadBase+'/evidence.zip?raw=true&version='+record.version,true),
+      savedDownload('전체 버전 복원 패키지',downloadBase+'/archive.zip',true));
+    const patch=async data=>{try{await agentApi(base,{expected_revision:record.revision,...data},'PATCH');await showSavedFinding(savedId,record.version);loadSavedLibrary();}
+      catch(error){if(state.selected===savedId)document.getElementById('savedFindingStatus').textContent=error.message;}};
+    detail.append(fdSelect('분류 상태 (보존 발견 전체)',f.status,Object.entries(FD_STATUS),status=>patch({status})),
+      fdSelect('심각도',f.severity,Object.entries(FD_SEVERITY),severity=>patch({severity})));
+    const note=uiNode('textarea');note.value=f.note||'';note.maxLength=2000;note.setAttribute('aria-label','보존 발견 메모');
+    const save=uiNode('button','aw-link','메모 저장');save.type='button';save.onclick=()=>patch({note:note.value});detail.append(note,save);
+    for(const item of record.evidence.filter(e=>e.kind==='observation')) {
+      const body=uiNode('details'),heading=uiNode('summary','',`보존한 관측 열기 · ${item.event_id.slice(0,8)}`);body.append(heading);
+      body.ontoggle=async()=>{if(!body.open||body.dataset.loaded)return;body.dataset.loaded='loading';
+        try{const event=await agentApi(base+'/evidence/'+encodeURIComponent(item.id)+'?version='+record.version);
+          if(state.selected!==savedId||state.version!==record.version||request!==state.detailRequest)return;
+          body.append(uiNode('pre','',JSON.stringify(event.data,null,2)));body.dataset.loaded='yes';}
+        catch(error){body.dataset.loaded='';body.append(uiNode('p','aw-muted',error.message));}};
+      detail.append(body);
+    }
+    const remove=uiNode('button','aw-link danger','보존 발견과 증거 삭제');remove.type='button';
+    remove.onclick=async()=>{if(typeof confirm==='function'&&!confirm('별도 보존한 이 발견의 모든 증거 버전을 영구 삭제할까요? 원본 실행과 다른 보존 발견은 삭제하지 않습니다.'))return;
+      try{await agentApi(base+'?expected_revision='+record.revision,undefined,'DELETE');state.detailRequest++;state.selected=null;detail.replaceChildren();await loadSavedLibrary();}
+      catch(error){document.getElementById('savedFindingStatus').textContent=error.message;}};detail.append(remove);
+    if(FD_VULN.has(f.category)||f.category==='auth') {
+      const bodyInput=uiNode('textarea');bodyInput.setAttribute('aria-label','재검증 본문 다시 입력');bodyInput.placeholder='원본 본문을 자동 복사하지 않습니다. 필요한 경우 다시 입력하세요.';bodyInput.maxLength=100000;
+      if(record.source.body_reentry_required)detail.append(bodyInput);
+      const write=!['GET','HEAD'].includes(f.method);
+      const retest=uiNode('button','aw-link',write?'쓰기 요청을 허용하고 새 실행으로 재검증':'새 세션으로 재검증');retest.type='button';
+      retest.onclick=async()=>{if(record.source.body_reentry_required&&!bodyInput.value){document.getElementById('savedFindingStatus').textContent='재검증할 요청 본문을 다시 입력하세요.';return;}
+        if(typeof confirm==='function'&&!confirm(`${f.method} ${f.origin}${f.path}에 실제 요청을 보냅니다. 과거 인증 헤더는 재사용하지 않습니다. 새 실행으로 재검증할까요?`))return;
+        const input={version:record.version,allow_write_methods:write};if(record.source.body_reentry_required)input.request_body=bodyInput.value;
+        try{const run=await agentApi(base+'/retest',input);document.getElementById('savedFindingDialog').close();if(typeof switchView==='function')switchView('agent');if(typeof selectRun==='function')selectRun(run.id);}
+        catch(error){document.getElementById('savedFindingStatus').textContent=error.message;}};detail.append(retest);
+    }
+    const history=uiNode('button','aw-link','재검증 이력 보기'),historyRows=uiNode('div');history.type='button';
+    history.onclick=async()=>{try{const page=await agentApi(base+'/retests');if(request!==state.detailRequest)return;historyRows.replaceChildren();
+      for(const item of page.items){const row=uiNode('p','',item.evidence_available?`새 실행 ${item.run_id.slice(0,8)} · ${item.verdict?FD_VERDICT[item.verdict]||item.verdict:'판정 미기록'}`:'재검증 실행 기록 없음 · 현재 판정 미확인');historyRows.append(row);}}
+      catch(error){historyRows.replaceChildren(uiNode('p','aw-muted',error.message));}};detail.append(history,historyRows);
+  } catch(error){if(request===state.detailRequest)detail.replaceChildren(uiNode('p','aw-muted',error.message));}
 }

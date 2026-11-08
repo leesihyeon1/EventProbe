@@ -143,13 +143,15 @@ function saveAgentFilters() {
 function restoreAgentFilters() {
   try {
     const saved=JSON.parse(localStorage.getItem('ep-agent-filters')||'{}');
-    if(['','running','paused','interrupted','completed','limited'].includes(saved.state)) agentEl('agentFilter').value=saved.state;
+    if(['','queued','running','paused','interrupted','completed','limited'].includes(saved.state)) agentEl('agentFilter').value=saved.state;
     if(typeof saved.category==='string'&&saved.category.length<=40) agentEl('agentCategory').value=saved.category;
     _showArchived=saved.archived===true;
     agentEl('agentArchivedToggle').setAttribute('aria-pressed',String(_showArchived));
   } catch(e) {}
 }
 function initAgentWorkspace() {
+  const queueOption=uiNode('option','','실행 대기');queueOption.value='queued';
+  agentEl('agentFilter').append(queueOption);
   restoreAgentFilters();
   agentEl('agentNewButton').onclick=openAgentNew;
   ['agentSourceRequest','agentSourceDomain'].forEach(id=>agentEl(id).onchange=syncAgentSource);
@@ -204,10 +206,10 @@ function renderAgentList(result) {
   workspaceSelectedIds.clear();
   const server=result && !Array.isArray(result);
   if(result) workspaceRuns=server?result.runs:result;
-  const counts=server?result.state_counts||{}:Object.fromEntries(['running','paused','interrupted','completed','limited'].map(state=>[state,workspaceRuns.filter(r=>r.state===state).length]));
+  const counts=server?result.state_counts||{}:Object.fromEntries(['queued','running','paused','interrupted','completed','limited'].map(state=>[state,workspaceRuns.filter(r=>r.state===state).length]));
   const scopeTotal=server?result.scope_total:workspaceRuns.length;
   const metrics=agentEl('agentMetrics');metrics.replaceChildren();
-  const stats=[['전체 작업',scopeTotal,'Layers',''],['실행 중',counts.running||0,'Activity','running'],['일시정지 / 중단',(counts.paused||0)+(counts.interrupted||0),'Pause','paused'],['종료',(counts.completed||0)+(counts.limited||0),'CircleCheck','']];
+  const stats=[['전체 작업',scopeTotal,'Layers',''],['실행 중',counts.running||0,'Activity','running'],['실행 대기',counts.queued||0,'Clock','queued'],['일시정지 / 중단',(counts.paused||0)+(counts.interrupted||0),'Pause','paused'],['종료',(counts.completed||0)+(counts.limited||0),'CircleCheck','']];
   for (const [label,count,icon,tone] of stats) {const d=uiNode('div','aw-metric');d.dataset.tone=tone;const l=uiNode('span');l.append(epIcon(icon),document.createTextNode(label));d.append(l,uiNode('strong','',String(count)));metrics.append(d);}
   const filtered=server?workspaceRuns:filteredAgentRuns(workspaceRuns,agentEl('agentSearch').value,agentEl('agentFilter').value,agentEl('agentCategory').value);
   const total=server?result.total:filtered.length;
@@ -223,7 +225,7 @@ function renderAgentList(result) {
     const check=uiNode('input');check.type='checkbox';check.setAttribute('aria-label',`작업 ${run.id.slice(0,8)} 선택`);
     check.onchange=()=>{if(check.checked)workspaceSelectedIds.add(run.id);else workspaceSelectedIds.delete(run.id);
       archiveBulk.disabled=!workspaceSelectedIds.size;
-      stopBulk.disabled=_showArchived||!workspaceRuns.some(item=>workspaceSelectedIds.has(item.id)&&item.state==='running');};
+      stopBulk.disabled=_showArchived||!workspaceRuns.some(item=>workspaceSelectedIds.has(item.id)&&['running','queued'].includes(item.state));};
     selection.append(check);task.append(title);
     if(run.category) task.append(uiNode('span','aw-plan-chip',run.category));
     const status=uiNode('td'),badge=uiNode('span','aw-badge',AGENT_STATE_LABELS[run.state]||run.state);badge.dataset.state=run.state;status.append(badge);
@@ -329,29 +331,35 @@ function renderAgentRunHeader(run) {
   const data=run.data,spec=data.spec;
   agentEl('agentRunTitle').textContent=data.name||spec.goal;
   const badge=agentEl('agentRunBadge');badge.textContent=AGENT_STATE_LABELS[run.state]||run.state;badge.dataset.state=run.state;
+  if(run.state==='queued' && run.queue_position) badge.textContent+=` · ${run.queue_position}번째`;
   const revoked=spec.approved_plan_revoked_at!=null;
   const nextStep=!revoked && data.spec?.mode==='plan' && data.plan_checkpoint?.phase!=='done' && data.plan_checkpoint?.current
     ? ` · 계획 단계 ${data.plan_checkpoint.current}` : '';
   agentEl('agentStatus').textContent=(data.category?`${data.category} · `:'')+
     (data.name?`${spec.goal} · `:'')+(data.retest_of?'발견 재검증 실행 · ':'')+
     (data.reason||'실행 기록 수집 중')+nextStep;
-  agentEl('agentStop').disabled=run.state!=='running';
+  agentEl('agentStop').disabled=!['running','queued'].includes(run.state);
   const reviewPhase=data.plan_checkpoint?.phase;
   agentEl('agentResume').disabled=revoked||['approval_required','denied'].includes(reviewPhase)||!['paused','interrupted'].includes(run.state);
   agentEl('agentExport').disabled=false;
   agentEl('agentApproveStep').disabled=agentEl('agentDenyStep').disabled=reviewPhase!=='approval_required'||run.state!=='paused';
   const hold=agentEl('agentHoldPlan');
   if(hold) hold.disabled=!(spec.mode==='plan' && !revoked && run.state==='running' && (run.has_plan_event||run.events?.some(e=>e.kind==='plan')));
-  const archive=agentEl('agentArchiveDownload'); if(archive) archive.disabled=run.state==='running';
+  const archive=agentEl('agentArchiveDownload'); if(archive) archive.disabled=['running','queued'].includes(run.state);
   const skip=agentEl('agentSkipPlan');
   if(skip) skip.disabled=!(run.data?.spec?.mode==='plan' && !revoked && reviewPhase!=='denied' && ['paused','interrupted'].includes(run.state)
     && (run.has_plan_event||run.events?.some(e=>e.kind==='plan')) && run.data?.plan_checkpoint?.phase!=='done');
   const revoke=agentEl('agentRevokePlan');
-  if(revoke) revoke.disabled=!((spec.approved_plan||data.has_approved_plan) && !revoked && ['running','paused','interrupted'].includes(run.state));
+  if(revoke) revoke.disabled=!((spec.approved_plan||data.has_approved_plan) && !revoked && ['running','paused','interrupted','queued'].includes(run.state));
   const stats=agentEl('agentSummary');stats.replaceChildren();
   for(const [label,value] of [['단계',`${data.steps} / ${spec.max_steps}`],['HTTP 요청',`${data.requests} / ${spec.max_requests}`],['AI 호출',`${data.ai_calls} / ${spec.max_ai_calls}`],['경과 시간',`${Math.round(data.elapsed)}초`],['발견 경로',data.endpoints_count??Object.keys(data.endpoints||{}).length]]) {const s=uiNode('div','aw-run-stat');s.append(uiNode('span','',label),uiNode('strong','',String(value)));stats.append(s);}
   if(run.tool_summary) for(const [label,value] of [['응답 관측',run.tool_summary.http_observed],['요청 오류',run.tool_summary.http_error],['결과 미확인',run.tool_summary.http_unresolved]]) {
     const s=uiNode('div','aw-run-stat');s.append(uiNode('span','',label),uiNode('strong','',String(value)));stats.append(s);
+  }
+  if(run.latest_model_call) {
+    const call=run.latest_model_call;
+    const info=uiNode('div','aw-run-stat');info.append(uiNode('span','','최근 사용 모델'),uiNode('strong','',call.model));stats.append(info);
+    const usage=uiNode('div','aw-run-stat');usage.append(uiNode('span','','최근 AI 토큰'),uiNode('strong','',call.actual_tokens==null?'미제공':String(call.actual_tokens)));stats.append(usage);
   }
   const latestPlanner=[...(data.planner_attempts||[])].reverse().find(item=>item.model);
   for(const [label,value] of [['절차 SHA-256',data.procedure_sha256?.agent?.slice(0,12)],
@@ -359,6 +367,7 @@ function renderAgentRunHeader(run) {
     if(!value) continue;
     const s=uiNode('div','aw-run-stat');s.append(uiNode('span','',label),uiNode('strong','',String(value)));stats.append(s);
   }
+  if(typeof renderModelCallHistory==='function') renderModelCallHistory(run);
   if(run.event_count!==undefined) agentEl('agentEventCount').textContent=`${run.event_count}개 이벤트`;
 }
 function renderAgentWorkspace(run) {

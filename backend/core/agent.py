@@ -22,6 +22,10 @@ from core.ai_privacy import sanitize_headers
 from core.analyzer import analyze_response
 from core.agent_models import Action, RunSpec, IncidentEvent, origin
 from core.agent_store import get_store, uid
+from core.agent_runtime_store import RequestBudgetExceeded
+from core.agent_runtime_lock import RuntimeLock
+from core.model_routing import ModelRouter, ModelUnavailable, validate_chain, prepaid_model_attempt
+from core.model_store import ModelCallBudgetExceeded
 from core.agent_outcome import build_conclusion
 from core.agent_intent import requested_categories
 from core.agent_incidents import build_asset_trace, build_incident_trace
@@ -777,8 +781,13 @@ class AgentManager:
         self.cookies = {}
         self.session_ids = {}
         self.form_tokens = {}
+        self._deleting = set()
+        self._shutting_down = False
+        self._runtime_lock = RuntimeLock(self.store.path)
+        self.model_router = ModelRouter(self.store)
 
-    def create(self, spec, retest_of=None, owner='', incident=None):
+    def create(self, spec, retest_of=None, owner='', incident=None, saved_retest=None):
+        validate_chain(self.store, spec.model_profile_ids)
         if spec.approved_plan is not None and spec.policy_version != active_policy_version():
             raise ValueError('승인 계획의 정책 버전이 현재 서버 정책과 다릅니다. 계획을 다시 생성·검토하세요.')
         data = {'spec': safe_spec(spec), 'requests': 0, 'ai_calls': 0, 'steps': 0, 'elapsed': 0,
@@ -790,7 +799,12 @@ class AgentManager:
             data['retest_of'] = retest_of
         if incident:                       # 사건(SIEM/SOAR) 재검증으로 생성된 실행임을 표시(리뷰 P2/N4)
             data['incident'] = incident
-        run_id = self.store.create(data)
+        if saved_retest is not None:
+            run_id = self.store.create_saved_retest(data, saved_retest['id'], saved_retest['version'],
+                                                    saved_retest.get('owner_filter'))
+        else:
+            run_id = self.store.create(data)
+        self.store.set_run_model_chain(run_id, spec.model_profile_ids, expected_revision=0)
         self.specs[run_id] = spec
         self.start(run_id)
         return run_id
@@ -819,6 +833,10 @@ class AgentManager:
         run['conclusion'] = build_conclusion(run['data'], run['events'], run['state'])
         run['findings'] = build_findings(run_id, run['data'], run['events'])
         run['recon'] = agent_recon.snapshot(run['data'], run['events'], run['state'])
+        run['queue_position'] = self.store.queue_position(run_id)
+        run['model_chain'] = self.store.run_model_chain(run_id)
+        calls = self.store.model_call_page(run_id, limit=1)
+        run['latest_model_call'] = calls['items'][0] if calls['items'] else None
         run['requires_session'] = run_id not in self.specs and run['data']['needs_credentials']
         return run
 
@@ -980,7 +998,7 @@ class AgentManager:
         if not 1 <= len(reason) <= 500:
             raise ValueError('철회 이유는 1~500자로 입력하세요.')
         run = self.store.get(run_id)
-        if run['state'] not in ('running', 'paused', 'interrupted'):
+        if run['state'] not in ('running', 'paused', 'interrupted', 'queued'):
             raise ValueError('실행 중이거나 중단된 계획 작업만 철회할 수 있습니다.')
         spec = self.specs.get(run_id) or RunSpec.model_validate(run['data']['spec'])
         if spec.approved_plan is None:
@@ -991,6 +1009,7 @@ class AgentManager:
         revoked_at = time.time()
         spec.approved_plan_revoked_at = revoked_at
         self.specs[run_id] = spec
+        self.store.cancel_queued(run_id)
         if run_id in self.tasks and not self.tasks[run_id].done():
             await self.stop(run_id)
         run = self.store.get(run_id)
@@ -1005,6 +1024,7 @@ class AgentManager:
         data['conclusion'] = build_conclusion(data, self.store.events(run_id), final_state)
         self.store.event(run_id, 'conclusion', data['conclusion'])
         self.store.update(run_id, data, final_state)
+        self._drain_queue()
         return self.snapshot(run_id)
 
     def retest_finding(self, run_id, finding_id, request_headers=None, actor_headers=None, owner=''):
@@ -1143,6 +1163,8 @@ class AgentManager:
         return build_asset_trace(asset_id, [self.incident_trace(iid) for iid in ids])
 
     def start(self, run_id, request_headers=None, actor_headers=None, acknowledge_writes=False):
+        if run_id in self._deleting:
+            raise ValueError('삭제 중인 작업은 실행할 수 없습니다.')
         if run_id in self.tasks and not self.tasks[run_id].done():
             raise ValueError('이미 실행 중입니다.')
         run = self.store.get(run_id)
@@ -1178,8 +1200,13 @@ class AgentManager:
             spec.request.headers.update(request_headers or {})
             for actor in spec.actors:
                 actor.headers.update((actor_headers or {}).get(actor.id, {}))
-        if not self.store.claim(run_id):
-            raise ValueError('일시정지/중단된 실행만 재개할 수 있습니다.')
+        if self._shutting_down:
+            raise ValueError('서버가 종료 중입니다.')
+        chain = self.store.run_model_chain(run_id)
+        validate_chain(self.store, chain['profile_ids'])
+        if chain['revision'] == 0:
+            self.store.set_run_model_chain(run_id, chain['profile_ids'], expected_revision=0)
+        self.store.enqueue(run_id)
         if restored_session:
             self.specs[run_id] = spec
             self.store.event(run_id, 'session', {'message': '새 세션으로 재개; 이전 응답은 과거 증거로만 사용합니다.'})
@@ -1187,9 +1214,75 @@ class AgentManager:
             self.store.event(run_id, 'resume_ack', {
                 'ambiguous_writes': len(pending),
                 'note': '사용자가 처리 여부 불명확한 쓰기의 재전송 위험을 확인하고 재개했습니다.'})
-        self.tasks[run_id] = asyncio.create_task(self._run(run_id))
+        self._drain_queue()
+
+    def concurrency_limit(self):
+        try:
+            return max(1, min(16, int(os.getenv('AGENT_MAX_CONCURRENT_RUNS', '2'))))
+        except ValueError:
+            return 2
+
+    def _drain_queue(self):
+        if self._shutting_down:
+            return
+        while True:
+            run_id = self.store.admit_next(self.concurrency_limit(), self.specs)
+            if run_id is None:
+                break
+            try:
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(self._run(run_id))
+            except Exception:
+                run = self.store.get(run_id)
+                self.store.update(run_id, run['data'], 'interrupted')
+                raise
+            self.tasks[run_id] = task
+            task.add_done_callback(lambda finished, rid=run_id: self._runtime_finished(rid, finished))
+
+    def _runtime_finished(self, run_id, task):
+        # Cancellation before _run's try/finally must not retain an admission slot.
+        try:
+            if task.cancelled() or task.exception() is not None:
+                run = self.store.get(run_id)
+                if run['state'] == 'running':
+                    run['data']['reason'] = '실행이 중단됐습니다. 상태를 확인한 뒤 재개하세요.'
+                    self.store.update(run_id, run['data'], 'interrupted')
+        except KeyError:
+            pass
+        finally:
+            if not self._shutting_down:
+                self._drain_queue()
+
+    def restore_queue(self):
+        """Only unstarted, credential-free jobs can resume automatically after boot."""
+        for run_id in self.store.queued_runs():
+            run = self.store.get(run_id)
+            data = run['data']
+            try:
+                if data.get('needs_credentials') or any(
+                        e['kind'] in ('request_started', 'browser_request')
+                        for e in self.store.events(run_id)):
+                    raise ValueError('대기 작업의 실행 세션을 다시 제공하고 명시적으로 재개하세요.')
+                spec = RunSpec.model_validate(data['spec'])
+                if spec.approved_plan is not None:
+                    if spec.policy_version != active_policy_version():
+                        raise ValueError('승인된 정책 버전이 변경됐습니다.')
+                    _check_plan_approval(spec)
+                validate_chain(self.store, self.store.run_model_chain(run_id)['profile_ids'])
+                self.specs[run_id] = spec
+            except (ValueError, KeyError) as exc:
+                self.store.cancel_queued(run_id)
+                data['reason'] = str(exc)
+                data['stop_code'] = 'queue_session_required'
+                self.store.update(run_id, data, 'paused')
+                self.store.event(run_id, 'queue_recovery', {'requires_resume': True})
+        self._drain_queue()
 
     async def stop(self, run_id):
+        if self.store.cancel_queued(run_id):
+            self.store.event(run_id, 'queue_cancelled', {'reason': '사용자가 실행 대기를 중단했습니다.'})
+            self._drain_queue()
+            return self.snapshot(run_id)
         task = self.tasks.get(run_id)
         if task and not task.done():
             task.cancel()
@@ -1199,30 +1292,40 @@ class AgentManager:
                 pass
             # Cancellation may happen before the task enters its try/finally.
             run = self.store.get(run_id)
-            if run['state'] == 'running':
+            if run['state'] in ('running', 'interrupted'):
                 run['data']['reason'] = '실행을 시작하기 전에 중단했습니다.'
                 self.store.update(run_id, run['data'], 'paused')
         return self.snapshot(run_id)
 
     async def delete(self, run_id):
-        """실행 중이면 중단한 뒤 run 과 증거를 영구 삭제하고 메모리 상태도 비운다(리뷰 F6).
-        KeyError 면 존재하지 않는 run."""
-        self.store.get(run_id)                 # 없으면 KeyError → 404
-        task = self.tasks.get(run_id)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self.store.delete(run_id)
-        for d in (self.tasks, self.specs, self.cookies, self.session_ids, self.form_tokens):
-            d.pop(run_id, None)
+        """Block readmission before stopping and removing the run and its evidence."""
+        self.store.get(run_id)
+        if run_id in self._deleting:
+            raise ValueError('이미 삭제 중인 작업입니다.')
+        self._deleting.add(run_id)
+        try:
+            task = self.tasks.get(run_id)
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self.store.delete(run_id)
+            for collection in (self.tasks, self.specs, self.cookies, self.session_ids, self.form_tokens):
+                collection.pop(run_id, None)
+        finally:
+            self._deleting.discard(run_id)
+            self._drain_queue()
         return {'deleted': True, 'id': run_id}
 
     async def shutdown(self):
-        for run_id in list(self.tasks):
-            await self.stop(run_id)
+        self._shutting_down = True
+        try:
+            for run_id in list(self.tasks):
+                await self.stop(run_id)
+        finally:
+            self._runtime_lock.release()
 
     def _record_discovery(self, run_id, data, request, observation, step_id, spec=None):
         """Keep local provenance; discovery never sends requests or planner feedback."""
@@ -1307,10 +1410,14 @@ class AgentManager:
                     time.monotonic() >= deadline or not permit(method, url)):
                 return None
             request = {'method': method, 'url': url, 'params': {}, 'headers': {}, 'body': ''}
-            request_id = self.store.event(run_id, 'browser_request', {
-                'request': map_request(request), 'resource_type': resource_type})
+            request_id = uid()
+            try:
+                data['requests'] = self.store.reserve_requests(run_id, request_id)
+            except (RequestBudgetExceeded, ValueError):
+                return None
+            self.store.event(run_id, 'browser_request', {
+                'request': map_request(request), 'resource_type': resource_type}, event_id=request_id)
             reserved += 1
-            data['requests'] += 1
             save()
             return request_id
 
@@ -1336,9 +1443,13 @@ class AgentManager:
                 # Compatibility for older capture adapters; production reserves before transport.
                 if data['requests'] >= spec.max_requests:
                     continue
-                request_id = self.store.event(run_id, 'browser_request', {
-                    'request': map_request(request), 'resource_type': item['resource_type']})
-                data['requests'] += 1
+                request_id = uid()
+                try:
+                    data['requests'] = self.store.reserve_requests(run_id, request_id)
+                except RequestBudgetExceeded:
+                    continue
+                self.store.event(run_id, 'browser_request', {
+                    'request': map_request(request), 'resource_type': item['resource_type']}, event_id=request_id)
                 save()
             if item.get('status') is not None:
                 self.store.event(run_id, 'browser_response', {
@@ -1439,7 +1550,8 @@ class AgentManager:
             code, transient = '', False
             try:
                 with fail_after(max(.01, deadline - time.monotonic())):
-                    action = Action.model_validate(await self.planner(ctx))
+                    with prepaid_model_attempt():
+                        action = Action.model_validate(await self.planner(ctx))
             except PlannerServiceError as exc:
                 if not exc.retryable:
                     raise
@@ -1743,7 +1855,8 @@ class AgentManager:
                                        PLAN_SYSTEM if is_default_planner else '')
             self.store.update(run_id, data, 'running')
             with fail_after(max(.01, deadline - time.monotonic())):
-                plan = await generate_plan(spec)
+                with prepaid_model_attempt():
+                    plan = await generate_plan(spec)
             _finish_planner_attempt(attempt, 'accepted')
             data['plan_fingerprint'] = plan_mod.plan_fingerprint(plan)
             self.store.event(run_id, 'plan', {**plan.model_dump(),
@@ -1838,6 +1951,10 @@ class AgentManager:
         return state
 
     async def _run(self, run_id):
+        with self.model_router.bind(run_id):
+            await self._execute_run(run_id)
+
+    async def _execute_run(self, run_id):
         spec = self.specs[run_id]
         _register_target_canaries(spec)   # 대상 호스트를 반출 금지 백스톱으로 등록(리뷰 F2)
         data = self.store.get(run_id)['data']
@@ -1869,11 +1986,15 @@ class AgentManager:
             req = json.loads(json.dumps(req))
             token_key = (run_id, actor, urlsplit(req['url']).path)
             req['body'] = refresh_body(req.get('body', ''), self.form_tokens.get(token_key, {}))
-            data['requests'] += 1
-            save()  # Reserve before I/O, including failures/cancellation.
-            request_id = self.store.event(run_id, 'request_started', {
+            save()
+            request_id = uid()
+            try:
+                data['requests'] = self.store.reserve_requests(run_id, request_id)
+            except RequestBudgetExceeded as exc:
+                raise LimitReached(str(exc)) from exc
+            self.store.event(run_id, 'request_started', {
                 'actor_id': actor, 'session_id': self.session_ids[run_id][actor],
-                'request': {**req, 'headers': sanitize_headers(req.get('headers'))}}, sid)
+                'request': {**req, 'headers': sanitize_headers(req.get('headers'))}}, sid, request_id)
             tick = time.monotonic()
             status, headers, chunks, size, truncated = 0, {}, [], 0, False
             try:
@@ -2147,7 +2268,7 @@ class AgentManager:
                 if not plan_mode:
                     state, data['reason'] = 'limited', '단계 한도에 도달했습니다.'
                     data['stop_code'] = 'step_budget'
-        except LimitReached as exc:
+        except (LimitReached, ModelCallBudgetExceeded) as exc:
             state, data['reason'] = 'limited', str(exc)
             data['stop_code'] = 'budget'
         except VerificationInputRequired as exc:
@@ -2162,6 +2283,9 @@ class AgentManager:
         except TimeoutError:
             state, data['reason'] = 'limited', '실행 시간 한도에 도달했습니다.'
             data['stop_code'] = 'time_budget'
+        except ModelUnavailable as exc:
+            state, data['reason'] = 'paused', str(exc)
+            data['stop_code'] = 'model_unavailable'
         except Exception as exc:
             state, data['reason'] = 'paused', str(exc)[:300] if isinstance(exc, ValueError) else type(exc).__name__
             data['stop_code'] = 'error'

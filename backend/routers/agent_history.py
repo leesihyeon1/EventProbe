@@ -119,7 +119,11 @@ def run_status(run_id: str, request: Request):
                             "MAX(CASE WHEN kind='oob_pending' THEN 1 ELSE 0 END) AS pending, "
                             "MAX(CASE WHEN kind='plan' THEN 1 ELSE 0 END) AS has_plan "
                             'FROM events WHERE run_id=?', (run_id,)).fetchone()
-    return {'id': run_id, 'state': status['state'], 'updated': status['updated'],
+    calls = manager.store.model_call_page(run_id, limit=1)
+    return {'id': run_id, 'state': status['state'],
+            'model_chain': manager.store.run_model_chain(run_id),
+            'latest_model_call': calls['items'][0] if calls['items'] else None, 'updated': status['updated'],
+            'queue_position': manager.store.queue_position(run_id),
             'event_count': counts['n'], 'has_pending_oob': bool(counts['pending']),
             'has_plan_event': bool(counts['has_plan']),
             'data': {'spec': {key: status[key] for key in

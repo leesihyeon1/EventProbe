@@ -7,7 +7,8 @@ import httpx
 
 from core.agent import AgentManager
 from core.agent_findings import (STATUSES, SEVERITIES, build_findings, build_report_html,
-                                 finding_id, valid_patch)
+                                 finding_id, score_severity, valid_patch)
+from core.categories import BASE_SEVERITY
 from core.agent_store import Store
 
 SEED = {'url': 'https://app.test/items?id=1', 'method': 'GET'}
@@ -45,7 +46,7 @@ def test_findings_merge_by_endpoint_actor_and_escalate_verdict():
     assert set(f['evidence_ids']) == {'o1', 'o2'}    # evidence accumulates
     assert len(f['verification_ids']) == 2
     assert f['method'] == 'GET' and f['path'] == '/items' and f['query_keys'] == ['id']
-    assert f['severity'] == 'high'                   # default for confirmed
+    assert f['severity'] == 'medium'                 # confirmed xss base (class-weighted)
 
 
 def test_label_without_linked_evidence_is_inconclusive():
@@ -82,6 +83,54 @@ def test_triage_updates_apply_append_only_with_history():
     assert f['severity'] == 'critical' and f['status'] == 'resolved' and f['note'] == '패치 적용'
     assert len(f['history']) == 2                     # every change kept, originals untouched
     assert [e for e in events if e['kind'] == 'verification'][0]['data']['status'] == 'confirmed'
+
+
+def test_severity_is_class_weighted_for_confirmed_findings():
+    # The class sets the confirmed-case base: a DB-compromise bug outranks an open redirect.
+    assert score_severity('sqli', 'confirmed') == 'critical'
+    assert score_severity('xss', 'confirmed') == 'medium'
+    assert score_severity('redirect', 'confirmed') == 'low'
+    assert score_severity('auth', 'confirmed') == 'critical'
+
+
+def test_inconclusive_is_always_info_regardless_of_class():
+    # 3-state guard: an unconfirmed finding is never elevated by its class.
+    assert score_severity('sqli', 'inconclusive') == 'info'
+    assert score_severity('cmdi', 'inconclusive', incomplete_evidence=True) == 'info'
+    assert score_severity('sqli', 'bogus') == 'info'       # unknown verdict is not confirmed
+
+
+def test_suspicion_and_incomplete_evidence_each_drop_one_level():
+    assert score_severity('sqli', 'suspicious') == 'high'           # critical - 1
+    assert score_severity('sqli', 'confirmed', incomplete_evidence=True) == 'high'
+    assert score_severity('sqli', 'suspicious', incomplete_evidence=True) == 'medium'
+
+
+def test_confirmed_or_suspicious_never_falls_below_low():
+    # redirect base is 'low'; dropping it must floor at 'low', not slide into info.
+    assert score_severity('redirect', 'suspicious') == 'low'
+    assert score_severity('redirect', 'confirmed', incomplete_evidence=True) == 'low'
+    assert score_severity('redirect', 'suspicious', incomplete_evidence=True) == 'low'
+
+
+def test_unknown_class_uses_conservative_default():
+    # A category with no registry entry (e.g. the generic 'verification') is not overrated.
+    assert score_severity('verification', 'confirmed') == 'low'
+    assert score_severity('', 'confirmed') == 'low'
+
+
+def test_every_registered_class_has_a_valid_base_severity():
+    assert BASE_SEVERITY and all(sev in SEVERITIES for sev in BASE_SEVERITY.values())
+
+
+def test_build_findings_applies_class_weighted_severity():
+    events = _events(
+        ('action', 's1', {'kind': 'probe', 'category': 'sqli', 'endpoint_id': 'seed', 'actor_id': 'owner'}),
+        ('observation', 's1', {'_id': 'o1'}),
+        ('verification', 's1', {'status': 'confirmed', 'evidence_ids': ['o1']}),
+    )
+    f = build_findings('run1', _run_data(), events)[0]
+    assert f['verdict'] == 'confirmed' and f['severity'] == 'critical' and f['default_severity'] == 'critical'
 
 
 def test_invalid_patch_values_are_rejected():

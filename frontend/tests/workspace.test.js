@@ -20,7 +20,7 @@ function setup() {
   const context=vm.createContext({
     document:{createElement:tag=>new Element(tag),createTextNode:text=>new ElementText(text)},
     window:{addEventListener(){}},agentEl:get,epIcon:name=>new Element('icon-'+name),
-    AGENT_STATE_LABELS:{running:'running',completed:'completed',paused:'paused',limited:'limited'},
+    AGENT_STATE_LABELS:{queued:'실행 대기',running:'running',completed:'completed',paused:'paused',limited:'limited'},
     selectRun(){},deleteRun(){},archiveRun(){},unarchiveRun(){},pollAgent(){},resetPlanPreview(){},agentRunId:null,_showArchived:false,console,Date,Set,Map,
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/js/workspace.js'),'utf8'),context);
@@ -405,4 +405,37 @@ test('sitemap receives only the existing run snapshot, and switching tasks clear
   assert.equal(resets,1);
   assert.equal(vm.runInContext('_awRun',context),null);
   assert.equal(get('agentRunTitle').textContent,'작업 불러오는 중');
+});
+
+
+test('queued runs show their position and allow stop but not resume',()=>{
+  const {context,get}=setup();
+  context.renderAgentRunHeader({id:'q',state:'queued',queue_position:3,
+    data:{spec:{goal:'synthetic',max_steps:8,max_requests:24,max_ai_calls:8},
+      steps:0,requests:0,ai_calls:0,elapsed:0,endpoints:{}}});
+  assert.match(get('agentRunBadge').textContent,/실행 대기.*3번째/);
+  assert.equal(get('agentStop').disabled,false);
+  assert.equal(get('agentResume').disabled,true);
+  assert.equal(get('agentArchiveDownload').disabled,true);
+});
+
+test('queue metrics and filters keep waiting jobs separate from active jobs',()=>{
+  const {context,get}=setup();
+  context.renderAgentList([{id:'q',state:'queued',created:1,goal:'waiting'},
+    {id:'a',state:'running',created:1,goal:'active'}]);
+  const queued=get('agentMetrics').children.find(n=>n.dataset.tone==='queued');
+  assert(queued);
+  assert.equal(queued.children[1].textContent,'1');
+  const rows=context.filteredAgentRuns([{state:'queued'},{state:'running'}],'','queued');
+  assert.equal(rows.length,1);
+});
+
+
+test('actual fallback model and missing token usage remain explicit',()=>{
+  const {context,get}=setup();
+  context.renderAgentRunHeader({id:'r',state:'completed',latest_model_call:{model:'synthetic-backup',actual_tokens:null},
+    data:{spec:{goal:'g',max_steps:2,max_requests:4,max_ai_calls:2},steps:2,requests:1,ai_calls:2,elapsed:1,endpoints:{}}});
+  const text=allNodes(get('agentSummary')).map(n=>n.textContent).join(' ');
+  assert.match(text,/synthetic-backup/);
+  assert.match(text,/미제공/);
 });

@@ -113,6 +113,7 @@ function collectObjects() {
 function initAgentView() {
   if (agentInited) return;
   agentInited = true;
+  initModelProfilesUI();
   agentEl('agentStart').onclick = startAgent;
   agentEl('agentStop').onclick = () => agentControl('stop');
   const holdPlanButton = agentEl('agentHoldPlan');
@@ -736,7 +737,7 @@ function renderDeletions(records) {
 }
 
 const AGENT_STATE_LABELS = {
-  running: '실행 중', paused: '일시정지', interrupted: '중단됨', completed: '종료', limited: '한도',
+  queued: '실행 대기', running: '실행 중', paused: '일시정지', interrupted: '중단됨', completed: '종료', limited: '한도',
 };
 
 async function loadAgentList() {
@@ -828,7 +829,7 @@ function selectRun(id) {
 }
 
 async function deleteRun(id) {
-  if (!confirm('이 검증 작업과 저장된 증거를 영구 삭제할까요? 되돌릴 수 없습니다.')) return;
+  if (!confirm('이 검증 작업과 연결된 실행 증거를 영구 삭제할까요? 별도 보존한 발견은 남으며 보존 목록에서 따로 삭제할 수 있습니다.')) return;
   try {
     await _asJson(await fetch('/api/agent/runs/' + id, { method: 'DELETE' }), '에이전트');
     if (agentRunId === id) {   // 선택 중이던 작업이면 상세 패널 비우기
@@ -866,6 +867,7 @@ function _collectSpec() {
     target_scope: domain ? 'same_origin' : (agentEl('agentTargetScope')?.value || 'request_only'),
     actors: domain ? [{id:'current',label:'새 세션',headers:{}}] : collectActors(), objects: domain ? [] : collectObjects(),
     max_steps: Number(agentEl('agentSteps').value), max_requests: Number(agentEl('agentRequests').value),
+    ...modelChainSpecFields(),
     max_ai_calls: Number(agentEl('agentAiCalls').value), max_seconds: Number(agentEl('agentSeconds').value),
     allow_write_methods: agentEl('agentWrite').checked, share_response_context: share,
     policy_version: 1,
@@ -903,7 +905,7 @@ async function previewPlan() {
   const btn = agentEl('agentPlanPreviewBtn'); btn.disabled = true;
   agentEl('agentFormError').hidden = true;
   try {
-    const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.checkValidity());
+    const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.dataset?.modelProfileField && !e.checkValidity());
     if (invalid) { invalid.reportValidity(); return; }
     const { plan, fingerprint, policy_version } = await agentApi('/plan', _collectSpec());
     _approvedPlan = plan;   // 이 계획을 실행에 고정한다
@@ -975,7 +977,7 @@ async function startAgent() {
   agentBusy = true;
   agentEl('agentStart').disabled = true;
   try {
-    const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.checkValidity());
+    const invalid = [...agentEl('agentNew').querySelectorAll('input,textarea')].find(e => !e.dataset?.modelProfileField && !e.checkValidity());
     if (invalid) { invalid.reportValidity(); return; }
     const spec = _collectSpec();
     // 계획 모드에서 승인한 미리보기가 있으면 그 계획을 고정해 실행한다(재생성 없음, 리뷰 P3).
@@ -1082,7 +1084,7 @@ async function pollAgent() {
       // Keep a page boundary until the reader asks for more; only poll at the tail.
       if(typeof historyState==='undefined' || historyState.runId!==id || !historyState.hasMore)
         await loadHistoryPage();
-      if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+      if(['running','queued'].includes(status.state) || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
       else loadAgentList();
       return;
     }
@@ -1090,11 +1092,12 @@ async function pollAgent() {
       if(_awRun?.id===id && _awRun.view===mode) {
         const status=await agentApi('/history/runs/'+encodeURIComponent(id)+'/status');
         if(id!==agentRunId || mode!==agentDetailMode) return;
+        if(status.state==='queued') renderAgentRunHeader(status);
         if(status.updated===_awRun.updated && status.event_count===_awRun.event_count
             && status.state===_awRun.state) {
           if(mode==='timeline' && (typeof timelineState==='undefined' || timelineState.runId!==id || !timelineState.hasMore))
             await loadTimelinePage();
-          if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+          if(['running','queued'].includes(status.state) || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
           else loadAgentList();
           return;
         }
@@ -1106,7 +1109,7 @@ async function pollAgent() {
       renderAgentConclusion(view.conclusion);
       if(mode==='timeline' && (typeof timelineState==='undefined' || timelineState.runId!==id || !timelineState.hasMore))
         await loadTimelinePage();
-      if(view.state==='running' || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+      if(['running','queued'].includes(view.state) || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
       else loadAgentList();
       return;
     }
@@ -1114,10 +1117,11 @@ async function pollAgent() {
       if(_awRun?.id===id) {
         const status=await agentApi('/history/runs/'+encodeURIComponent(id)+'/status');
         if(id!==agentRunId || mode!==agentDetailMode) return;
+        if(status.state==='queued') renderAgentRunHeader(status);
         if(status.updated===_awRun.updated &&
             status.event_count===(_awRun.event_count??_awRun.events?.length)
             && status.state===_awRun.state) {
-          if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+          if(['running','queued'].includes(status.state) || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
           else loadAgentList();
           return;
         }
@@ -1128,7 +1132,7 @@ async function pollAgent() {
       renderAgentRunHeader(_awRun);
       renderAgentConclusion(view.conclusion);
       renderAgentFindings(_awRun);
-      if(view.state==='running' || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+      if(['running','queued'].includes(view.state) || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
       else loadAgentList();
       return;
     }
@@ -1136,10 +1140,11 @@ async function pollAgent() {
       if(_awRun?.id===id) {
         const status=await agentApi('/history/runs/'+encodeURIComponent(id)+'/status');
         if(id!==agentRunId || mode!==agentDetailMode) return;
+        if(status.state==='queued') renderAgentRunHeader(status);
         if(status.updated===_awRun.updated &&
             status.event_count===(_awRun.event_count??_awRun.events?.length)
             && status.state===_awRun.state) {
-          if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+          if(['running','queued'].includes(status.state) || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
           else loadAgentList();
           return;
         }
@@ -1150,7 +1155,7 @@ async function pollAgent() {
       renderAgentRunHeader(view);
       renderAgentConclusion(view.conclusion);
       syncDetailMode();
-      if(view.state==='running' || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+      if(['running','queued'].includes(view.state) || view.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
       else loadAgentList();
       return;
     }
@@ -1161,7 +1166,7 @@ async function pollAgent() {
       if(id!==agentRunId || mode!==agentDetailMode) return;
       if(status.updated===_awRun.updated && status.event_count===_awRun.events.length
           && status.state===_awRun.state) {
-        if(status.state==='running' || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
+        if(['running','queued'].includes(status.state) || status.has_pending_oob) agentTimer=setTimeout(pollAgent,2000);
         else loadAgentList();
         return;
       }
@@ -1169,7 +1174,7 @@ async function pollAgent() {
     const run = await agentApi('/runs/' + id);
     if (id !== agentRunId || mode!==agentDetailMode) return;
     renderAgentWorkspace(run);
-    if (run.state === 'running' || run.events.some(e => e.kind === 'oob_pending')) agentTimer = setTimeout(pollAgent, 2000);
+    if (['running','queued'].includes(run.state) || run.events.some(e => e.kind === 'oob_pending')) agentTimer = setTimeout(pollAgent, 2000);
     else loadAgentList();
   } catch (e) { if(id===agentRunId && mode===agentDetailMode) agentEl('agentStatus').textContent = e.message; }
 }
@@ -1184,3 +1189,162 @@ async function exportAgent() {
 }
 
 // URL 해시로 특정 작업에 바로 진입 가능(리뷰: UI 상태를 URL 로 접근).
+
+
+
+
+async function uploadSavedFindingPackage(file) {
+  if(!file||file.size>25*1024*1024)throw new Error('보존 패키지는 25 MiB 이하 ZIP이어야 합니다.');
+  return _asJson(await fetch('/api/agent/saved-findings/import',{
+    method:'POST',headers:{'Content-Type':'application/zip'},body:await file.arrayBuffer()}),'보존 발견 가져오기');
+}
+
+
+/* Task model profiles: metadata and server key references only. */
+let _agentModelChain = [];
+let _agentModelProfiles = [];
+let _editingModelProfile = null;
+function modelChainSpecFields() {
+  return _agentModelChain.length?{model_profile_ids:[..._agentModelChain]}:{};
+}
+function setAgentModelChain(ids) {
+  if(!Array.isArray(ids) || ids.length>8 || new Set(ids).size!==ids.length ||
+      ids.some(id=>typeof id!=='string'||!id||id.length>100)) throw new Error('모델은 중복 없이 최대 8개 선택하세요.');
+  _agentModelChain=[...ids];
+  resetPlanPreview();
+  renderAgentModelChain();
+}
+function renderAgentModelChain() {
+  const list=document.getElementById('agentModelOrder');if(!list)return;
+  list.replaceChildren();
+  if(!_agentModelChain.length){const p=document.createElement('p');p.textContent='기존 환경 설정을 사용합니다.';list.append(p);return;}
+  _agentModelChain.forEach((id,index)=>{
+    const row=document.createElement('div');row.className='agent-row-grid';
+    const text=document.createElement('span');text.textContent=`${index+1}. ${_agentModelProfiles.find(p=>p.id===id)?.name||id}`;
+    const controls=document.createElement('div');
+    for(const [label,delta] of [['위로',-1],['아래로',1],['제외',0]]) {
+      const button=document.createElement('button');button.type='button';button.className='aw-link';button.textContent=label;
+      button.disabled=delta!==0&&(index+delta<0||index+delta>=_agentModelChain.length);
+      button.onclick=()=>{const ids=[..._agentModelChain];if(delta===0)ids.splice(index,1);
+        else [ids[index],ids[index+delta]]=[ids[index+delta],ids[index]];setAgentModelChain(ids);};controls.append(button);
+    }
+    row.append(text,controls);list.append(row);
+  });
+}
+async function refreshModelProfilesUI() {
+  const status=document.getElementById('agentModelsStatus');if(!status)return;
+  try {
+    const data=await agentApi('/model-profiles');_agentModelProfiles=data.profiles;
+    const select=document.getElementById('agentModelSelect');select.replaceChildren();
+    for(const profile of _agentModelProfiles) {
+      const option=document.createElement('option');option.value=profile.id;
+      option.textContent=`${profile.name} · ${profile.model}${profile.key_configured?'':' · 키 설정 필요'}${profile.enabled?'':' · 비활성'}`;
+      option.disabled=!profile.enabled;select.append(option);
+    }
+    const records=document.getElementById('agentModelsList');records.replaceChildren();
+    for(const profile of _agentModelProfiles.filter(p=>p.id!=='default')) {
+      const row=document.createElement('div');row.className='agent-row-grid';
+      const label=document.createElement('span');label.textContent=`${profile.name} · ${profile.health?.cooldown_until>Date.now()/1000?'복구 대기':'사용 가능'}`;
+      const edit=document.createElement('button');edit.type='button';edit.className='aw-link';edit.textContent='편집';
+      edit.onclick=()=>{_editingModelProfile=profile;fillModelProfileForm(profile);};
+      const reset=document.createElement('button');reset.type='button';reset.className='aw-link';reset.textContent='연결 상태 초기화';
+      reset.onclick=async()=>{try{await agentApi(`/model-profiles/${encodeURIComponent(profile.id)}/health/reset`,{});await refreshModelProfilesUI();}
+        catch(error){status.textContent=error.message;}};
+      row.append(label,edit,reset);records.append(row);
+    }
+    status.textContent='장애 전환도 AI 호출 한도에 포함됩니다. 내부·외부 모델을 한 순서에 혼합할 수 없습니다.';
+    renderAgentModelChain();
+  } catch(error){status.textContent=error.message;}
+}
+const MODEL_FORM_DEFAULTS={name:'',model:'',base_url:'',key_env:'AI_API_KEY',enabled:true,
+  timeout_seconds:120,min_interval_seconds:0,max_concurrent_calls:1,failure_threshold:2,cooldown_seconds:30};
+function fillModelProfileForm(profile=MODEL_FORM_DEFAULTS) {
+  for(const key of Object.keys(MODEL_FORM_DEFAULTS)) {
+    const input=document.getElementById('modelProfile_'+key);if(!input)continue;
+    if(key==='enabled')input.checked=profile[key];else input.value=profile[key];
+  }
+  const button=document.getElementById('agentModelSave');if(button)button.textContent=_editingModelProfile?'변경 저장':'모델 등록';
+}
+async function saveModelProfileUI() {
+  const status=document.getElementById('agentModelsStatus'),body={};
+  for(const [key,value] of Object.entries(MODEL_FORM_DEFAULTS)) {
+    const input=document.getElementById('modelProfile_'+key);
+    body[key]=key==='enabled'?input.checked:typeof value==='number'?Number(input.value):input.value.trim();
+  }
+  try {
+    if(_editingModelProfile)await agentApi(`/model-profiles/${encodeURIComponent(_editingModelProfile.id)}`,
+      {expected_revision:_editingModelProfile.revision,profile:body},'PUT');
+    else await agentApi('/model-profiles',body);
+    _editingModelProfile=null;fillModelProfileForm();await refreshModelProfilesUI();
+  } catch(error){status.textContent=error.message;}
+}
+function initModelProfilesUI() {
+  if(document.getElementById('agentModelControls'))return;
+  const form=agentEl('agentNew')?.querySelector('.aw-form');if(!form)return;
+  const panel=document.createElement('details');panel.id='agentModelControls';panel.className='aw-policy-details';
+  const title=document.createElement('summary');title.textContent='검증 작업용 모델과 장애 전환';panel.append(title);
+  const explanation=document.createElement('p');explanation.className='aw-muted';
+  explanation.textContent='선택한 순서로 모델 연결을 시도합니다. 키 값은 입력하거나 저장하지 않으며 서버에 등록된 키 설정 이름을 참조합니다.';
+  const select=document.createElement('select');select.id='agentModelSelect';select.setAttribute('aria-label','추가할 모델');
+  const add=document.createElement('button');add.type='button';add.className='aw-link';add.textContent='선택 모델 추가';
+  add.onclick=()=>{try{setAgentModelChain([..._agentModelChain,select.value]);}catch(error){status.textContent=error.message;}};
+  const clear=document.createElement('button');clear.type='button';clear.className='aw-link';clear.textContent='기존 환경 설정 사용';clear.onclick=()=>setAgentModelChain([]);
+  const refresh=document.createElement('button');refresh.type='button';refresh.className='aw-link';refresh.textContent='목록 새로고침';refresh.onclick=refreshModelProfilesUI;
+  const order=document.createElement('div');order.id='agentModelOrder';
+  const status=document.createElement('p');status.id='agentModelsStatus';status.className='aw-muted';status.setAttribute('role','status');
+  const editor=document.createElement('details');const editorTitle=document.createElement('summary');editorTitle.textContent='모델 설정 관리';editor.append(editorTitle);
+  const labels={name:'표시 이름',model:'모델 이름',base_url:'모델 서버 기본 주소',key_env:'서버 키 설정 이름',enabled:'사용',
+    timeout_seconds:'응답 제한 시간(초)',min_interval_seconds:'최소 호출 간격(초)',max_concurrent_calls:'동시 모델 호출 수',failure_threshold:'복구 대기 전 실패 횟수',cooldown_seconds:'복구 대기 시간(초)'};
+  for(const [key,value] of Object.entries(MODEL_FORM_DEFAULTS)) {
+    const label=document.createElement('label');label.textContent=labels[key];
+    const input=document.createElement('input');input.id='modelProfile_'+key;input.type=key==='enabled'?'checkbox':typeof value==='number'?'number':'text';
+    input.autocomplete='off';input.dataset.modelProfileField='true';input.setAttribute('aria-label',labels[key]);
+    if(key==='min_interval_seconds'){input.min='0';input.step='0.1';}label.append(input);editor.append(label);
+  }
+  const save=document.createElement('button');save.id='agentModelSave';save.type='button';save.className='aw-link';save.textContent='모델 등록';save.onclick=saveModelProfileUI;
+  const fresh=document.createElement('button');fresh.type='button';fresh.className='aw-link';fresh.textContent='새 모델 입력';fresh.onclick=()=>{_editingModelProfile=null;fillModelProfileForm();};
+  const records=document.createElement('div');records.id='agentModelsList';editor.append(save,fresh,records);
+  panel.append(explanation,select,add,clear,refresh,order,status,editor);form.append(panel);
+  fillModelProfileForm();refreshModelProfilesUI();
+}
+
+
+let _modelHistoryRequest=0;
+function renderModelCallHistory(run) {
+  const summary=document.getElementById('agentSummary');if(!summary?.parentElement)return;
+  let panel=document.getElementById('agentModelHistory');
+  if(!panel) {
+    panel=document.createElement('details');panel.id='agentModelHistory';panel.className='aw-policy-details';
+    const heading=document.createElement('summary');heading.textContent='모델 호출 기록';
+    const refresh=document.createElement('button');refresh.type='button';refresh.className='aw-link';refresh.textContent='기록 새로고침';
+    const rows=document.createElement('div');rows.id='agentModelHistoryRows';
+    refresh.onclick=()=>loadModelCallHistory(panel.dataset.run);
+    panel.ontoggle=()=>{if(panel.open)loadModelCallHistory(panel.dataset.run);};
+    panel.append(heading,refresh,rows);summary.parentElement.append(panel);
+  }
+  if(panel.dataset.run!==run.id) {
+    _modelHistoryRequest++;panel.open=false;panel.dataset.run=run.id;
+    document.getElementById('agentModelHistoryRows').replaceChildren();
+  }
+  panel.hidden=!run.latest_model_call;
+}
+async function loadModelCallHistory(runId) {
+  const request=++_modelHistoryRequest;
+  const rows=document.getElementById('agentModelHistoryRows');
+  if(!rows||!runId)return;
+  rows.textContent='모델 호출 기록을 불러오는 중…';
+  try {
+    const page=await agentApi(`/runs/${encodeURIComponent(runId)}/model-calls?limit=50`);
+    if(request!==_modelHistoryRequest||document.getElementById('agentModelHistory')?.dataset.run!==runId)return;
+    rows.replaceChildren();
+    for(const call of page.items) {
+      const row=document.createElement('p');
+      const tokens=call.actual_tokens==null?'토큰 미제공':`${call.actual_tokens} 토큰`;
+      const states={started:'호출 중',completed:'응답 수신',error:'실패',interrupted:'중단·결과 미확인',cancelled:'취소',blocked:'반출 차단'};
+      const errors={quota:'할당량 부족',auth:'인증 실패',rate_limited:'호출 제한',temporary:'일시 장애',transport:'연결 오류',invalid_request:'요청 거절',permission:'접근 거부',redirect:'주소 변경 거절',egress_blocked:'반출 정책 차단',process_interrupted:'서버 재시작',cancelled:'취소',internal_error:'내부 처리 오류',unexpected_status:'응답 상태 오류'};
+      const latency=call.latency_ms==null?'지연 미확인':`${Math.round(call.latency_ms)}ms`;
+      row.textContent=`${call.model} · ${states[call.status]||call.status}${call.error_code?' · '+(errors[call.error_code]||call.error_code):''} · ${latency} · ${tokens}`;
+      rows.append(row);
+    }
+  } catch(error) {if(request===_modelHistoryRequest)rows.textContent=error.message;}
+}

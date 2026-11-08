@@ -105,11 +105,17 @@ def _guard(manager, run_id, request):
 
 @router.on_event('startup')
 async def recover_runs():
-    store = get_manager().store
-    store.recover()
-    # 보존 정책(리뷰 F6): AGENT_RETENTION_DAYS 가 설정돼 있으면 기간 초과 run/증거를 정리.
-    # 기본 0(무제한 보관) — 기존 동작 유지. 자동 삭제는 명시적으로 켠다.
-    store.prune(os.getenv('AGENT_RETENTION_DAYS', '0'))
+    manager = get_manager()
+    # Lock before recovery: another server must never interrupt a live engine.
+    manager._runtime_lock.acquire()
+    manager._shutting_down = False
+    try:
+        manager.store.recover()
+        manager.store.prune(os.getenv('AGENT_RETENTION_DAYS', '0'))
+        manager.restore_queue()
+    except BaseException:
+        await manager.shutdown()
+        raise
 
 
 @router.on_event('shutdown')
@@ -134,7 +140,8 @@ async def batch_runs(body: BatchRuns, request: Request):
             _guard(manager, run_id, request)
             if body.action == 'stop':
                 task = manager.tasks.get(run_id)
-                if manager.store.get(run_id)['state'] != 'running' or task is None or task.done():
+                if manager.store.get(run_id)['state'] != 'queued' and (
+                        manager.store.get(run_id)['state'] != 'running' or task is None or task.done()):
                     raise ValueError('실행 중인 작업에서만 중단할 수 있습니다.')
                 await manager.stop(run_id)
             else:
@@ -258,8 +265,6 @@ async def run_template(template_id: str, req: ResumeRequest, request: Request):
     """템플릿을 새 실행으로 복제한다(리뷰 N1). 자격증명은 실행 시 재주입한다."""
     manager = get_manager()
     owner = _template_owner(request)
-    if sum(not task.done() for task in manager.tasks.values()) >= 2:
-        raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
     try:
         return manager.run_template(template_id, req.request_headers, req.actor_headers, owner=owner or _principal(request))
     except KeyError:
@@ -339,8 +344,6 @@ async def verify_incident(incident_id: str, req: IncidentVerify, request: Reques
     """사건을 새 실행으로 재검증하고 읽기 전용으로 연결한다(리뷰 P2/N4). AI 호출 없이 고정 실행."""
     manager = get_manager()
     _incident_guard(manager, incident_id, request)
-    if sum(not task.done() for task in manager.tasks.values()) >= 2:
-        raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
     try:
         return manager.verify_incident(incident_id, req.request_headers, req.actor_headers,
                                        access=req.access.model_dump() if req.access else None,
@@ -362,11 +365,18 @@ async def preview_plan(spec: RunSpec):
     """비식별 입력으로 조건부 검증 계획을 1회 생성·검증해 돌려준다(실행하지 않음, 리뷰 Stage 3).
     실행 중 분기는 로컬에서 처리되며 응답은 외부로 나가지 않는다."""
     try:
-        plan = await generate_plan(spec)
+        if spec.model_profile_ids:
+            manager = get_manager()
+            with manager.model_router.bind(profile_ids=spec.model_profile_ids, preview_budget=spec.max_ai_calls):
+                plan = await generate_plan(spec)
+        else:
+            plan = await generate_plan(spec)
         # fingerprint 로 승인본을 실행에 고정할 수 있다(리뷰 P3). 같은 계획을 approved_plan 으로
         # 보내 run 을 만들면 재생성 없이 그대로 실행되고, plan 이벤트의 fingerprint 로 대조한다.
         return {'plan': plan.model_dump(), 'fingerprint': plan_fingerprint(plan),
                 'policy_version': active_policy_version()}
+    except KeyError:
+        raise HTTPException(404, '모델 프로파일을 찾을 수 없습니다.')
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -388,10 +398,10 @@ def review_preview_plan(body: PlanReviewInput):
 @router.post('/runs', status_code=201)
 async def create_run(spec: RunSpec, request: Request):
     manager = get_manager()
-    if sum(not task.done() for task in manager.tasks.values()) >= 2:
-        raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
     try:
         run_id = manager.create(spec, owner=_principal(request))
+    except KeyError:
+        raise HTTPException(404, '모델 프로파일을 찾을 수 없습니다.')
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     return manager.snapshot(run_id)
@@ -578,8 +588,6 @@ async def retest_finding(run_id: str, finding_id: str, req: ResumeRequest, reque
     """발견을 새 실행으로 재검증한다(리뷰 P2). 원본 증거 불변, 자격증명은 재주입."""
     manager = get_manager()
     _guard(manager, run_id, request)
-    if sum(not task.done() for task in manager.tasks.values()) >= 2:
-        raise HTTPException(409, '동시에 최대 두 개 실행할 수 있습니다.')
     try:
         return manager.retest_finding(run_id, finding_id, req.request_headers, req.actor_headers,
                                       owner=_principal(request))
@@ -622,8 +630,6 @@ async def resume_run(run_id: str, req: ResumeRequest, request: Request):
     manager = get_manager()
     _guard(manager, run_id, request)
     try:
-        if sum(not task.done() for task in manager.tasks.values()) >= 2:
-            raise ValueError('동시에 최대 두 개 실행할 수 있습니다.')
         manager.start(run_id, req.request_headers, req.actor_headers,
                       acknowledge_writes=req.acknowledge_writes)
         return manager.snapshot(run_id)
@@ -631,3 +637,23 @@ async def resume_run(run_id: str, req: ResumeRequest, request: Request):
         raise HTTPException(404, '실행 기록을 찾을 수 없습니다.')
     except ValueError as exc:
         raise HTTPException(409, str(exc))
+
+
+@router.get('/capabilities')
+def runtime_capabilities():
+    manager = get_manager()
+    return {'version': 1, 'runtime': 'single_process',
+            'durable_fifo': True, 'atomic_request_reservations': True,
+            'max_concurrent_runs': manager.concurrency_limit(),
+            'workers_per_run': 1, 'mcp_registry': False, 'model_failover': True,
+            'model_profile_formats': ['openai-chat'], 'persistent_model_call_ledger': True,
+            'independent_evidence_store': True, 'evidence_retention': 'explicit',
+            'evidence_storage': 'sqlite-content-addressed'}
+
+
+from routers.model_profiles import router as model_profile_router
+router.include_router(model_profile_router)
+
+
+from routers.saved_findings import router as saved_findings_router
+router.include_router(saved_findings_router)

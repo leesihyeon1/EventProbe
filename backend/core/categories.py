@@ -9,6 +9,11 @@
   family   : 후속 승격 계열 매칭 키워드(없으면 None)  → followup._FAMILY_KEYWORDS (순서 보존)
   ai       : AI 분류(classify) 화이트리스트 포함 여부 → ai_analyzer._KNOWN_ATTACK_TYPES
   known    : AI 생성 카테고리 정규화 화이트리스트     → ai_analyzer._KNOWN_CATS
+  sev      : 이 클래스가 '확증'됐을 때의 기준 심각도  → agent_findings.BASE_SEVERITY
+
+sev 는 확증(confirmed) 전제의 기준값이다. 실제 심각도는 판정으로 낮춘다(의심=-1,
+판정불가=info 고정으로 클래스와 무관하게 절대 상향하지 않음). 자세한 규칙은
+agent_findings.score_severity 참조. 값은 info/low/medium/high/critical 중 하나.
 
 이 모듈은 core 의존이 없다(순수 데이터) — 어느 모듈에서든 안전하게 import.
 """
@@ -17,61 +22,64 @@
 _R: dict = {
     "sqli":     {"desc": "SQL injection database query error-based union blind order by",
                  "confirm": True,  "family": ("sql", "union", "블라인드", "sqli", "구문 오류", "quotation"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "critical"},
     "xss":      {"desc": "cross-site scripting XSS javascript injection reflected DOM",
                  "confirm": True,  "family": ("반사", "reflect", "xss", "스크립트", "script"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "medium"},
     "lfi":      {"desc": "local file inclusion path traversal directory traversal file read",
                  "confirm": True,  "family": ("파일 읽기", "passwd", "lfi", "traversal", "경로 조작", "디렉터리"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "high"},
     "cmdi":     {"desc": "OS command injection remote code execution shell",
                  "confirm": True,  "family": ("명령", "command", "cmd", "rce", "명령 실행"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "critical"},
     "ssti":     {"desc": "server-side template injection expression evaluation",
                  "confirm": True,  "family": ("템플릿", "ssti", "7*7", "=49", "template"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "critical"},
     "ssrf":     {"desc": "server-side request forgery internal metadata endpoint",
                  "confirm": False, "family": ("메타데이터", "ssrf", "내부/", "internal", "metadata", "169.254"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "high"},
     "redirect": {"desc": "open redirect location header",
                  "confirm": True,  "family": ("리다이렉트", "redirect", "open redirect"),
-                 "ai": True,  "known": True},
+                 "ai": True,  "known": True,  "sev": "low"},
     "xxe":      {"desc": "XML external entity injection",
                  "confirm": False, "family": ("xxe", "xml external", "외부 엔티티"),
-                 "ai": True,  "known": False},
+                 "ai": True,  "known": False, "sev": "high"},
     "nosql":    {"desc": "NoSQL injection MongoDB operator",
                  "confirm": True,  "family": ("nosql", "mongo"),
-                 "ai": True,  "known": True},
-    "crlf":     {"desc": "", "confirm": False, "family": ("crlf", "http 응답 분할"), "ai": True, "known": False},
-    "ssi":      {"desc": "", "confirm": False, "family": ("ssi",), "ai": True, "known": False},
-    "xpath":    {"desc": "", "confirm": False, "family": ("xpath",), "ai": True, "known": False},
+                 "ai": True,  "known": True,  "sev": "high"},
+    "crlf":     {"desc": "", "confirm": False, "family": ("crlf", "http 응답 분할"), "ai": True, "known": False, "sev": "medium"},
+    "ssi":      {"desc": "", "confirm": False, "family": ("ssi",), "ai": True, "known": False, "sev": "medium"},
+    "xpath":    {"desc": "", "confirm": False, "family": ("xpath",), "ai": True, "known": False, "sev": "medium"},
     # family 없음(승격 계열 아님)
     "idor":     {"desc": "access control IDOR authorization insecure direct object reference",
-                 "confirm": True,  "family": None, "ai": True, "known": True},
+                 "confirm": True,  "family": None, "ai": True, "known": True,  "sev": "high"},
     "jwt":      {"desc": "JSON web token JWT algorithm confusion signature",
-                 "confirm": False, "family": None, "ai": True, "known": False},
+                 "confirm": False, "family": None, "ai": True, "known": False, "sev": "high"},
     "xmlrpc":   {"desc": "XML-RPC pingback multicall wordpress",
-                 "confirm": False, "family": None, "ai": True, "known": False},
+                 "confirm": False, "family": None, "ai": True, "known": False, "sev": "medium"},
     "csrf":     {"desc": "cross-site request forgery CSRF token",
-                 "confirm": False, "family": None, "ai": True, "known": False},
+                 "confirm": False, "family": None, "ai": True, "known": False, "sev": "medium"},
     # confirm 전용 유사 카테고리(payload 카테고리라기보다 오라클 대상)
-    "business": {"desc": "", "confirm": True,  "family": None, "ai": False, "known": False},
-    "ldap":     {"desc": "", "confirm": True,  "family": None, "ai": True,  "known": False},
-    "auth":     {"desc": "", "confirm": True,  "family": None, "ai": False, "known": False},
+    "business": {"desc": "", "confirm": True,  "family": None, "ai": False, "known": False, "sev": "high"},
+    "ldap":     {"desc": "", "confirm": True,  "family": None, "ai": True,  "known": False, "sev": "high"},
+    "auth":     {"desc": "", "confirm": True,  "family": None, "ai": False, "known": False, "sev": "critical"},
     # AI 분류 전용(확증/후속 없음)
-    "cors":       {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "graphql":    {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "upload":     {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "deserial":   {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "prototype":  {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "log4shell":  {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "shellshock": {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "header":     {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
-    "cache":      {"desc": "", "confirm": False, "family": None, "ai": True, "known": False},
+    "cors":       {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "medium"},
+    "graphql":    {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "medium"},
+    "upload":     {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "high"},
+    "deserial":   {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "critical"},
+    "prototype":  {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "high"},
+    "log4shell":  {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "critical"},
+    "shellshock": {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "critical"},
+    "header":     {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "medium"},
+    "cache":      {"desc": "", "confirm": False, "family": None, "ai": True, "known": False, "sev": "medium"},
     # 특수(실제 페이로드 카테고리 아님)
-    "authbypass": {"desc": "", "confirm": False, "family": None, "ai": False, "known": True},
-    "other":      {"desc": "", "confirm": False, "family": None, "ai": True,  "known": True},
+    "authbypass": {"desc": "", "confirm": False, "family": None, "ai": False, "known": True,  "sev": "critical"},
+    "other":      {"desc": "", "confirm": False, "family": None, "ai": True,  "known": True,  "sev": "low"},
 }
+
+# 미등록/일반(verification 등) 카테고리의 보수적 기준값. 모르는 클래스를 과대평가하지 않는다.
+DEFAULT_BASE_SEVERITY = "low"
 
 # ── 소비처별 파생 뷰 ──────────────────────────────────────────
 DESCRIPTIONS = {k: v["desc"] for k, v in _R.items() if v["desc"]}          # api._CATEGORY_DESC
@@ -79,3 +87,4 @@ CONFIRMABLE = {k for k, v in _R.items() if v["confirm"]}                   # con
 FAMILY_KEYWORDS = [(v["family"], k) for k, v in _R.items() if v["family"]] # followup._FAMILY_KEYWORDS
 AI_CLASSIFY_TYPES = [k for k, v in _R.items() if v["ai"]]                  # ai._KNOWN_ATTACK_TYPES
 KNOWN_CATS = {k for k, v in _R.items() if v["known"]}                      # ai._KNOWN_CATS
+BASE_SEVERITY = {k: v["sev"] for k, v in _R.items()}                       # agent_findings.BASE_SEVERITY

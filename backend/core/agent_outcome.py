@@ -65,7 +65,9 @@ def build_conclusion(data, events, state):
     if missing:
         text = '요청한 검사 미실행: ' + ', '.join(missing) + '. ' + text
     next_steps = []
-    if state == 'running':
+    if state == 'queued':
+        next_steps.append('실행 대기 중입니다. 정원이 확보되면 시작하며, 대기 중에는 대상 요청을 보내지 않습니다.')
+    elif state == 'running':
         next_steps.append('실행 중인 관측 결과이며 최종 결론이 아닙니다.')
     elif state == 'limited':
         next_steps.append('미완료 검증의 필요 예산과 허용 범위를 검토한 뒤 새 작업으로 이어가세요.')

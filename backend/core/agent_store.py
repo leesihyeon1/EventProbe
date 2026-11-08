@@ -8,6 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.agent_archive import build_archive, read_archive
+from core.agent_runtime_store import RuntimeStore, RunConflict
+from core.model_store import ModelStore
+from core.saved_evidence import SavedEvidenceStore
 from core.agent_assets import asset_shape, reindex_run
 from core.agent_indexes import (FINDING_KINDS, TRAFFIC_KINDS, index_traffic_event,
                                 reindex_findings, reindex_run as reindex_lookup_run)
@@ -29,7 +32,7 @@ def _credential_free_template_spec(spec):
     return data
 
 
-class Store:
+class Store(RuntimeStore, ModelStore, SavedEvidenceStore):
     def __init__(self, path=None):
         self.path = Path(path or os.getenv('AGENT_DB_PATH') or
                          Path(__file__).resolve().parents[1] / 'data' / 'agent' / 'runs.sqlite3')
@@ -149,6 +152,17 @@ class Store:
                             db.execute(f'UPDATE {table} SET spec=? WHERE rowid=?',
                                        (json.dumps(clean, ensure_ascii=False), row['rowid']))
                 db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('template_headers_v1')")
+            if db.execute("SELECT 1 FROM store_migrations WHERE name='finding_severity_v2'").fetchone() is None:
+                # Class-weighted severity replaced the verdict-only default. Re-derive
+                # stored severities; manual triage lives in finding_update events, so
+                # reindex_findings folds overrides back in and never loses them.
+                for row in db.execute('SELECT id FROM runs').fetchall():
+                    reindex_findings(db, row['id'])
+                db.execute("INSERT OR IGNORE INTO store_migrations VALUES ('finding_severity_v2')")
+
+        self.init_runtime_schema()
+        self.init_model_schema()
+        self.init_saved_evidence_schema()
 
     @contextmanager
     def connect(self):
@@ -170,7 +184,7 @@ class Store:
 
     def get(self, run_id):
         with self.connect() as db:
-            row = db.execute('SELECT * FROM runs WHERE id=?', (run_id,)).fetchone()
+            row = db.execute('SELECT r.*,v.revision FROM runs r LEFT JOIN run_revisions v ON v.run_id=r.id WHERE r.id=?', (run_id,)).fetchone()
         if row is None:
             raise KeyError(run_id)
         return {**dict(row), 'data': json.loads(row['data'])}
@@ -256,12 +270,38 @@ class Store:
         return {'id': run['id'], 'state': run['state'], 'archived': True,
                 'event_count': len(events)}
 
-    def update(self, run_id, data, state=None):
-        state = state or self.get(run_id)['state']
+    def update(self, run_id, data, state=None, *, expected_revision=None):
+        """Keep existing writers compatible; allow explicit compare-and-swap updates.
+
+        Once transport has reserved requests, a stale snapshot cannot lower that
+        durable count. Intent-level parallel writers are not enabled yet.
+        """
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT r.state,r.data,v.revision FROM runs r '
+                             'JOIN run_revisions v ON v.run_id=r.id WHERE r.id=?',
+                             (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if expected_revision is not None and row['revision'] != expected_revision:
+                raise RunConflict('작업이 변경됐습니다. 최신 상태를 다시 조회하세요.')
+            saved = dict(data)
+            current = json.loads(row['data'])
+            if db.execute('SELECT 1 FROM request_reservations WHERE run_id=? LIMIT 1',
+                          (run_id,)).fetchone():
+                saved['requests'] = max(int(saved.get('requests') or 0),
+                                        int(current.get('requests') or 0))
+            if db.execute('SELECT 1 FROM model_calls WHERE run_id=? LIMIT 1', (run_id,)).fetchone():
+                saved['ai_calls'] = max(int(saved.get('ai_calls') or 0), int(current.get('ai_calls') or 0))
+                data['ai_calls'] = saved['ai_calls']
+            chain = db.execute('SELECT profile_ids FROM run_model_chains WHERE run_id=?', (run_id,)).fetchone()
+            if chain is not None:
+                saved['spec'] = {**(saved.get('spec') or {}), 'model_profile_ids': json.loads(chain['profile_ids'])}
+                data['spec'] = saved['spec']
             db.execute('UPDATE runs SET updated=?,state=?,data=? WHERE id=?',
-                       (time.time(), state, json.dumps(data, ensure_ascii=False), run_id))
-            reindex_run(db, run_id, data)
+                       (time.time(), state or row['state'], json.dumps(saved, ensure_ascii=False), run_id))
+            reindex_run(db, run_id, saved)
+            return row['revision'] + 1
 
     def set_run_metadata(self, run_id, name, category):
         """Edit display fields atomically without overwriting evidence or an active run."""
@@ -291,7 +331,7 @@ class Store:
         with self.connect() as db:
             changed = db.execute(
                 "UPDATE runs SET updated=?,data=json_set(data,'$.archived',json(?)) "
-                "WHERE id=? AND (?=0 OR state!='running')",
+                "WHERE id=? AND (?=0 OR state NOT IN ('running','queued'))",
                 (time.time(), 'true' if archived else 'false', run_id, int(bool(archived))),
             ).rowcount
             if not changed:
@@ -301,6 +341,9 @@ class Store:
 
     def recover(self):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE model_calls SET status='interrupted',finished=?,error_code='process_interrupted' "
+                       "WHERE status='started'", (time.time(),))
             db.execute("UPDATE runs SET state='interrupted' WHERE state='running'")
 
     def list(self, include_archived=False, owner=None):
@@ -870,7 +913,7 @@ class Store:
             return 0
         cutoff = time.time() - days * 86400
         with self.connect() as db:
-            rows = db.execute('SELECT id,created,state,data FROM runs WHERE updated < ?', (cutoff,)).fetchall()
+            rows = db.execute("SELECT id,created,state,data FROM runs WHERE updated < ? AND state NOT IN ('running','queued')", (cutoff,)).fetchall()
             for r in rows:
                 n = db.execute('SELECT COUNT(*) AS c FROM events WHERE run_id=?', (r['id'],)).fetchone()['c']
                 self._audit_deletion(db, r['id'], r, n, 'retention')

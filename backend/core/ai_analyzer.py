@@ -26,12 +26,31 @@ from core import prompts as _prompts
 from core import ai_egress
 from core import public_shape as _public_shape
 from core.ai_privacy import sanitize_headers
+from core.model_routing import ACTIVE_MODEL
 
 # 설정은 호출 시점에 읽는다(lazy) — .env 가 import 순서와 무관하게 반영되도록.
 # AI_* 를 우선 보고 없으면 NVIDIA_* 로 폴백해, 제공자(로컬/클라우드)를 env 만으로 바꾼다.
-def _api_key():  return (os.getenv("AI_API_KEY") or os.getenv("NVIDIA_API_KEY", "")).strip()
-def _model():    return (os.getenv("AI_MODEL") or os.getenv("NVIDIA_MODEL") or "meta/llama-3.2-11b-vision-instruct").strip()
-def _base_url(): return (os.getenv("AI_BASE_URL") or os.getenv("NVIDIA_BASE_URL") or "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+def _legacy_api_key():  return (os.getenv("AI_API_KEY") or os.getenv("NVIDIA_API_KEY", "")).strip()
+def _legacy_model():    return (os.getenv("AI_MODEL") or os.getenv("NVIDIA_MODEL") or "meta/llama-3.2-11b-vision-instruct").strip()
+def _legacy_base_url(): return (os.getenv("AI_BASE_URL") or os.getenv("NVIDIA_BASE_URL") or "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
+def _api_key():
+    route = ACTIVE_MODEL.get()
+    if route is not None:
+        from core.model_profiles import resolve_key
+        return resolve_key(route.current()) if route.enabled() else ''
+    return _legacy_api_key()
+
+
+def _model():
+    route = ACTIVE_MODEL.get()
+    return route.current()['model'] if route is not None else _legacy_model()
+
+
+def _base_url():
+    route = ACTIVE_MODEL.get()
+    return route.current()['base_url'] if route is not None else _legacy_base_url()
+
+
 def _timeout():
     try: return max(10.0, float(os.getenv("AI_TIMEOUT", "120")))
     except ValueError: return 120.0
@@ -54,6 +73,14 @@ _RETRY_STATUS = {404, 408, 409, 429, 500, 502, 503, 504}
 
 
 async def _post_chat(base_url: str, headers: dict, payload: dict, tries: int = 3):
+    route = ACTIVE_MODEL.get()
+    if route is not None:
+        return await route.post_chat(payload)
+    return await _post_chat_direct(base_url, headers, payload, tries=tries)
+
+
+async def _post_chat_direct(base_url: str, headers: dict, payload: dict, tries: int = 3,
+                            timeout_seconds=None):
     """chat/completions POST(+_apply_model_opts) 를 일시 오류에 한해 재시도. 마지막 응답 반환.
 
     모든 chat 계열 호출(분석·판정·후보·분류·변형 + agent.choose_action)이 이 한 지점을
@@ -62,7 +89,8 @@ async def _post_chat(base_url: str, headers: dict, payload: dict, tries: int = 3
     import time
     start, last, ok = time.monotonic(), None, False
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
+        async with httpx.AsyncClient(timeout=_timeout() if timeout_seconds is None else timeout_seconds,
+                                     follow_redirects=False) as client:
             for i in range(tries):
                 r = await client.post(f"{base_url}/chat/completions", headers=headers,
                                       json=_apply_model_opts(payload))

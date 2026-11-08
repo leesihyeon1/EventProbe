@@ -103,6 +103,7 @@ async function selectLookupRecord(kind,item,button) {
   const related=kind==='findings'?globalFindingTrafficButton(item.asset_id):globalTrafficFindingButton(item.asset_id);
   if(related)links.append(related);
   if(item.run_id)links.append(globalLookupRunButton(item.run_id,'관련 작업 열기',kind==='findings'?'findings':'history'));
+  if(kind==='findings'&&item.run_id&&typeof savedPreserveButton==='function')links.append(savedPreserveButton(item.run_id,item.id));
   panel.append(links,uiNode('p','lookup-help','같은 자산의 기록은 경로 기준으로 연결됩니다. 개별 발견의 증거와는 구분됩니다.'));
   panel.focus?.({preventScroll:true});panel.scrollIntoView?.({block:'nearest'});
   if(kind==='traffic') {
@@ -281,6 +282,7 @@ function restoreFindingFilters(rawQuery) {
 }
 
 function initGlobalLookup(kind) {
+  if(kind==='findings'&&typeof mountSavedLibraryButton==='function')mountSavedLibraryButton(agentEl('globalFindingCount')?.parentElement,'globalSavedLibrary');
   const prefix=kind==='findings'?'globalFinding':'globalTraffic';
   const state=globalLookupState[kind];
   if(state.initialized)return;

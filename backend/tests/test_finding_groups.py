@@ -114,3 +114,32 @@ def test_old_finding_index_adds_actor_column(tmp_path):
             row['name'] for row in db.execute('PRAGMA table_info(finding_index)')}
     groups = store.finding_group_page(owner='alice')
     assert groups['total'] == 1 and groups['items'][0]['actor_id'] == 'current'
+
+
+def test_stored_severity_is_class_weighted(tmp_path):
+    """The finding_index severity must match the class-weighted score, per verdict."""
+    store = Store(tmp_path / 'sev.sqlite3')
+    confirmed = _finding(store, 'alice', 'current', 'confirmed')     # sqli base critical
+    suspicious = _finding(store, 'alice', 'current', 'suspicious')   # critical - 1 = high
+    inconclusive = _finding(store, 'alice', 'current', 'inconclusive')  # 3-state: info
+    with store.connect() as db:
+        severity = {row['run_id']: row['severity'] for row in db.execute(
+            'SELECT run_id,severity FROM finding_index WHERE run_id IN (?,?,?)',
+            (confirmed, suspicious, inconclusive)).fetchall()}
+    assert severity[confirmed] == 'critical'
+    assert severity[suspicious] == 'high'
+    assert severity[inconclusive] == 'info'
+
+
+def test_severity_migration_reindexes_existing_findings(tmp_path):
+    """Re-opening a store rewrites severities left by the old verdict-only default."""
+    path = tmp_path / 'mig.sqlite3'
+    store = Store(path)
+    run_id = _finding(store, 'alice', 'current', 'confirmed')        # sqli confirmed -> critical
+    with store.connect() as db:
+        db.execute("UPDATE finding_index SET severity='high' WHERE run_id=?", (run_id,))
+        db.execute("DELETE FROM store_migrations WHERE name='finding_severity_v2'")
+    Store(path)  # re-open triggers the finding_severity_v2 reindex
+    with store.connect() as db:
+        assert db.execute('SELECT severity FROM finding_index WHERE run_id=?',
+                          (run_id,)).fetchone()['severity'] == 'critical'

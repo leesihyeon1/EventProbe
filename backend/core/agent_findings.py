@@ -11,14 +11,33 @@ import hashlib
 import html
 from urllib.parse import parse_qsl, urlsplit
 
+from core.categories import BASE_SEVERITY, DEFAULT_BASE_SEVERITY
+
 # Finding lifecycle (user-editable) is distinct from the derived evidence verdict.
 STATUSES = ('open', 'triaged', 'resolved', 'false_positive', 'ignored')
 SEVERITIES = ('info', 'low', 'medium', 'high', 'critical')
 _VERDICTS = ('inconclusive', 'suspicious', 'confirmed')
 _VERDICT_RANK = {v: i for i, v in enumerate(_VERDICTS)}
 _SEVERITY_RANK = {s: i for i, s in enumerate(SEVERITIES)}
-# Conservative default; a label without linked evidence can only be inconclusive.
-_DEFAULT_SEVERITY = {'confirmed': 'high', 'suspicious': 'medium', 'inconclusive': 'info'}
+
+
+def score_severity(category, verdict, incomplete_evidence=False):
+    """Auto severity: the vuln class's confirmed-case base, lowered by confidence.
+
+    The class sets how bad the bug is *if real*; the verdict decides how much of
+    that to grant. 3-state guard: an inconclusive (or unknown) finding is always
+    'info' — the class never raises an unconfirmed finding, so 판정불가 is neither
+    inflated toward danger nor relabeled safe. 'suspicious' and incomplete evidence
+    each drop one level, and a confirmed/suspicious finding never falls below 'low'.
+    """
+    if verdict not in ('confirmed', 'suspicious'):
+        return 'info'
+    rank = _SEVERITY_RANK[BASE_SEVERITY.get((category or '').lower(), DEFAULT_BASE_SEVERITY)]
+    if verdict == 'suspicious':
+        rank -= 1
+    if incomplete_evidence:
+        rank -= 1
+    return SEVERITIES[max(_SEVERITY_RANK['low'], rank)]
 
 _STATUS_KO = {'open': '미처리', 'triaged': '분류됨', 'resolved': '해결',
               'false_positive': '오탐', 'ignored': '무시'}
@@ -95,7 +114,8 @@ def build_findings(run_id, data, events):
         finding['asset_id'] = incident.get('asset_id', '')
         finding['traffic_id'] = incident.get('traffic_id', '')
         finding['method'] = (request.get('method') or 'GET').upper()
-        default_severity = _DEFAULT_SEVERITY[finding['verdict']]
+        default_severity = score_severity(
+            finding['category'], finding['verdict'], finding['incomplete_evidence'])
         finding['default_severity'] = default_severity
         finding['severity'] = default_severity
         finding['status'] = 'open'
@@ -150,6 +170,9 @@ def build_report_html(run):
     if findings is None:
         findings = build_findings(run.get('id', ''), data, run.get('events', []) or [])
     goal = spec.get('goal', '') or '(목표 미기재)'
+    evidence_location = ('보존한 시점의 증거는 독립 보존 발견의 증거 목록에서 확인하세요.'
+                         if run.get('state') == 'saved_snapshot' else
+                         '원본 증거는 작업 상세의 로컬 타임라인에서 확인하세요.')
     counts = conclusion.get('counts', {}) or {}
     rows = []
     for f in findings:
@@ -229,6 +252,6 @@ def build_report_html(run):
   <ul>{next_steps or '<li class="empty">추가 조치 없음</li>'}</ul>
   <footer>
     {_h(conclusion.get('scope_note', '작업 종료는 전체 대상의 안전을 의미하지 않습니다.'))}<br>
-    로컬 생성 보고서입니다. 외부 AI 및 대상 요청을 수행하지 않았습니다. 원본 증거는 작업 상세의 로컬 타임라인에서 확인하세요.
+    로컬 생성 보고서입니다. 외부 AI 및 대상 요청을 수행하지 않았습니다. {_h(evidence_location)}
   </footer>
 </body></html>'''
