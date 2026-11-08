@@ -404,11 +404,61 @@ function globalLookupRow(kind,item) {
   row.append(actions);return row;
 }
 
+function groupCanonicalBadge(item) {
+  // The whole group's human disposition, kept distinct from the per-run verdict counts.
+  if(!item.canonical_status)return null;
+  const parts=[lookupStatuses[item.canonical_status]||item.canonical_status];
+  if(item.canonical_severity)parts.push(lookupSeverities[item.canonical_severity]||item.canonical_severity);
+  return lookupBadge(item.canonical_status,`통합 분류: ${parts.join(' · ')}`);
+}
+
+function groupTriagePanel(item,refreshBadge,pageSeq) {
+  // One canonical triage for the whole structural group. Never touches per-run verdicts;
+  // the member list below keeps showing each run's own evidence verdict unchanged.
+  const panel=uiNode('div','lookup-triage');
+  function draw() {
+    panel.replaceChildren();
+    panel.append(uiNode('h5','','통합 분류 (그룹 전체)'));
+    const status=uiNode('select');
+    for(const [value,text] of Object.entries(lookupStatuses)){const o=uiNode('option','',text);o.value=value;if(value===(item.canonical_status||'open'))o.selected=true;status.append(o);}
+    const severity=uiNode('select');
+    const auto=uiNode('option','','(자동)');auto.value='';severity.append(auto);
+    for(const [value,text] of Object.entries(lookupSeverities)){const o=uiNode('option','',text);o.value=value;if(value===item.canonical_severity)o.selected=true;severity.append(o);}
+    const statusField=uiNode('label','lookup-triage-field');statusField.append(uiNode('span','','상태'),status);
+    const sevField=uiNode('label','lookup-triage-field');sevField.append(uiNode('span','','심각도'),severity);
+    const controls=uiNode('div','lookup-triage-controls');controls.append(statusField,sevField);
+    const note=uiNode('input');note.type='text';note.value=item.canonical_note||'';note.placeholder='메모 (로컬 저장)';note.setAttribute('aria-label','그룹 분류 메모');
+    const save=uiNode('button','aw-link','분류 저장');save.type='button';
+    const msg=uiNode('span','aw-muted',item.canonical_revision?`개정 ${item.canonical_revision}`:'미분류');
+    save.onclick=async()=>{
+      const patch={asset_id:item.asset_id,category:item.category,actor_id:item.actor_id,
+        input_shape_id:item.input_shape_id,expected_revision:item.canonical_revision||0,
+        status:status.value,note:note.value};
+      if(severity.value)patch.severity=severity.value;
+      save.disabled=true;msg.textContent='저장 중…';
+      try {
+        const updated=await agentApi('/history/findings/groups/triage',patch,'PUT');
+        if(pageSeq!==globalLookupState.findings.seq)return;
+        item.canonical_status=updated.status;item.canonical_severity=updated.severity;
+        item.canonical_note=updated.note;item.canonical_revision=updated.revision;
+        refreshBadge();draw();
+      } catch(error) {if(pageSeq===globalLookupState.findings.seq){save.disabled=false;msg.textContent=error.message;}}
+    };
+    const noteRow=uiNode('div','lookup-triage-note');noteRow.append(note,save,msg);
+    panel.append(controls,noteRow);
+  }
+  draw();
+  return panel;
+}
+
 function globalFindingGroupRow(item,filters,pageSeq) {
   const row=uiNode('article','lookup-row');
   const top=uiNode('div','lookup-row-top');
   top.append(uiNode('strong','',`${item.method} ${item.origin}${item.path} · ${item.category}`),
     uiNode('span','aw-muted',`행위자 ${item.actor_id||'기본'} · 작업 ${item.run_count}개 · 확증 ${item.confirmed_count} · 의심 ${item.suspicious_count} · 미확정 ${item.inconclusive_count}`));
+  const badgeSlot=uiNode('span','lookup-canonical');
+  function refreshBadge(){badgeSlot.replaceChildren();const badge=groupCanonicalBadge(item);if(badge)badgeSlot.append(badge);}
+  refreshBadge();top.append(badgeSlot);
   row.append(top);
   const assetButton=globalLookupAssetButton(item.asset_id,'findings');
   if(assetButton)top.append(assetButton);
@@ -416,6 +466,7 @@ function globalFindingGroupRow(item,filters,pageSeq) {
   if(trafficButton)top.append(trafficButton);
   const detail=uiNode('details','lookup-evidence');
   detail.append(uiNode('summary','','작업별 판정 보기'));
+  detail.append(groupTriagePanel(item,refreshBadge,pageSeq));
   const body=uiNode('div','lookup-rows'),footer=uiNode('div','lookup-actions');
   detail.append(body,footer);
   let offset=0,loading=false;

@@ -277,10 +277,46 @@ test('grouped findings keep per-run verdicts and fetch members on disclosure',as
   assert.match(group.children[0].children[1].textContent,/확증 1 · 의심 1/);
   const detail=group.children[1];detail.open=true;await detail.ontoggle();
   assert.match(urls[1],/history\/findings\/groups\/members\?/);
-  assert.equal(detail.children[1].children.length,1);
-  assert.match(detail.children[1].children[0].children[0].children[1].textContent,/확증/);
+  // detail children: [summary, triage panel, members body, footer] — body moved to index 2.
+  assert.equal(detail.children[2].children.length,1);
+  assert.match(detail.children[2].children[0].children[0].children[1].textContent,/확증/);
   get('globalFindingGroup').checked=false;
   context.agentApi=previousApi;
+});
+
+test('group canonical triage PUTs the group key and surfaces the disposition badge',async()=>{
+  get('globalFindingGroup').checked=true;
+  const sent=[];const previousApi=context.agentApi;
+  context.agentApi=async(url,data,method)=>{sent.push({url,data,method});
+    if(url.includes('/groups/triage'))return {exists:true,status:data.status,
+      severity:data.severity||'critical',note:data.note,revision:(data.expected_revision||0)+1};
+    if(url.includes('/groups/members'))return {items:[],total:0,has_more:false};
+    return {items:[{asset_id:'a'.repeat(64),input_shape_id:'b'.repeat(64),category:'sqli',
+      actor_id:'current',method:'GET',origin:'https://example.test',path:'/item',run_count:2,
+      finding_count:2,confirmed_count:1,suspicious_count:1,inconclusive_count:0,
+      canonical_status:null,canonical_severity:null,canonical_note:'',canonical_revision:null}],
+      total:1,has_more:false};
+  };
+  await context.openGlobalLookup('findings');
+  const group=get('globalFindingRows').children[0];
+  const top=group.children[0],detail=group.children[1];
+  const badgeSlot=top.children.find(child=>child.className==='lookup-canonical');
+  const noBadgeBefore=badgeSlot.children.length;             // untriaged: no canonical badge yet
+  const panel=detail.children[1];                            // lookup-triage: [h5, controls, noteRow]
+  panel.children[1].children[0].children[1].value='false_positive';   // status select
+  await panel.children[2].children[1].onclick();            // 분류 저장 button
+  const badge=top.children.find(child=>child.className==='lookup-canonical').children[0];
+  const put=sent.find(call=>call.method==='PUT');
+  get('globalFindingGroup').checked=false;
+  context.agentApi=previousApi;                              // restore before asserting (shared context)
+  assert.equal(noBadgeBefore,0);
+  assert.ok(put&&/history\/findings\/groups\/triage/.test(put.url));
+  assert.equal(put.data.asset_id,'a'.repeat(64));
+  assert.equal(put.data.input_shape_id,'b'.repeat(64));
+  assert.equal(put.data.category,'sqli');
+  assert.equal(put.data.status,'false_positive');
+  assert.equal(put.data.expected_revision,0);               // create: expect no prior revision
+  assert.ok(badge&&/통합 분류/.test(badge.textContent));     // disposition badge now shown
 });
 
 test('form view shows types and states without displaying saved values',()=>{

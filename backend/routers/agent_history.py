@@ -3,8 +3,11 @@
 import json
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.agent import get_manager, owner_scope_enabled
+from core.agent_findings import SEVERITIES, STATUSES
+from core.agent_runtime_store import RunConflict
 from routers.agent import _guard, _principal
 
 
@@ -96,6 +99,55 @@ def finding_group_members(request: Request, asset_id: str = Query(..., min_lengt
     return get_manager().store.finding_group_members(
         asset_id, category, actor_id, input_shape_id, verdict=verdict, status=status,
         archived=archived, owner=owner, offset=offset, limit=limit)
+
+
+@router.get('/findings/groups/triage')
+def finding_group_triage(request: Request,
+                         asset_id: str = Query(..., min_length=64, max_length=64),
+                         category: str = Query(..., max_length=100),
+                         actor_id: str = Query('', max_length=100),
+                         input_shape_id: str = Query(..., min_length=64, max_length=64)):
+    """Read one structural group's workspace-scoped canonical triage + change history."""
+    owner = _principal(request) if owner_scope_enabled() else None
+    return get_manager().store.finding_group_triage(
+        asset_id, category, actor_id, input_shape_id, owner=owner)
+
+
+class GroupTriageBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    asset_id: str = Field(min_length=64, max_length=64)
+    category: str = Field(max_length=100)
+    actor_id: str = Field(default='', max_length=100)
+    input_shape_id: str = Field(min_length=64, max_length=64)
+    expected_revision: int = Field(ge=0)
+    status: str | None = Field(default=None, max_length=20)
+    severity: str | None = Field(default=None, max_length=20)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@router.put('/findings/groups/triage')
+def set_finding_group_triage(body: GroupTriageBody, request: Request):
+    """Set the canonical triage for a whole structural group under optimistic concurrency.
+    Does not touch per-run verdicts/evidence; applies across every run of the group."""
+    if body.status is not None and body.status not in STATUSES:
+        raise HTTPException(422, '지원하지 않는 상태입니다.')
+    if body.severity is not None and body.severity not in SEVERITIES:
+        raise HTTPException(422, '지원하지 않는 심각도입니다.')
+    owner = _principal(request) if owner_scope_enabled() else None
+    patch = body.model_dump(exclude={'asset_id', 'category', 'actor_id', 'input_shape_id',
+                                     'expected_revision'}, exclude_none=True)
+    try:
+        return get_manager().store.set_finding_group_triage(
+            body.asset_id, body.category, body.actor_id, body.input_shape_id,
+            patch, body.expected_revision, actor=(owner or ''), owner=owner)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
+    except KeyError:
+        raise HTTPException(404, '발견 그룹을 찾을 수 없습니다.')
+    except RunConflict as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.get('/diagnostics')

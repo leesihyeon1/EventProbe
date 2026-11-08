@@ -11,6 +11,7 @@ from core.agent_archive import build_archive, read_archive
 from core.agent_runtime_store import RuntimeStore, RunConflict
 from core.model_store import ModelStore
 from core.saved_evidence import SavedEvidenceStore
+from core.finding_group_triage import FindingGroupTriageStore
 from core.agent_assets import asset_shape, reindex_run
 from core.agent_indexes import (FINDING_KINDS, TRAFFIC_KINDS, index_traffic_event,
                                 reindex_findings, reindex_run as reindex_lookup_run)
@@ -32,7 +33,7 @@ def _credential_free_template_spec(spec):
     return data
 
 
-class Store(RuntimeStore, ModelStore, SavedEvidenceStore):
+class Store(RuntimeStore, ModelStore, SavedEvidenceStore, FindingGroupTriageStore):
     def __init__(self, path=None):
         self.path = Path(path or os.getenv('AGENT_DB_PATH') or
                          Path(__file__).resolve().parents[1] / 'data' / 'agent' / 'runs.sqlite3')
@@ -163,6 +164,7 @@ class Store(RuntimeStore, ModelStore, SavedEvidenceStore):
         self.init_runtime_schema()
         self.init_model_schema()
         self.init_saved_evidence_schema()
+        self.init_finding_group_schema()
 
     @contextmanager
     def connect(self):
@@ -544,18 +546,28 @@ class Store(RuntimeStore, ModelStore, SavedEvidenceStore):
         where = ' AND '.join(clauses)
         source = 'FROM finding_index x JOIN runs r ON r.id=x.run_id WHERE ' + where
         group = ' GROUP BY x.asset_id,x.category,x.actor_id,x.input_shape_id'
+        # Canonical group triage is workspace-scoped: match the caller's own owner row
+        # exactly ('' when scope is off) so two workspaces never see each other's disposition.
+        owner_val = '' if owner is None else owner
+        grouped = (
+            'SELECT x.asset_id,x.category,x.actor_id,x.input_shape_id,MAX(x.method) AS method,'
+            'MAX(x.origin) AS origin,MAX(x.path) AS path,MAX(x.updated) AS updated,'
+            'COUNT(*) AS finding_count,COUNT(DISTINCT x.run_id) AS run_count,'
+            "SUM(x.verdict='confirmed') AS confirmed_count,"
+            "SUM(x.verdict='suspicious') AS suspicious_count,"
+            "SUM(x.verdict='inconclusive') AS inconclusive_count "
+            + source + group)
         with self.connect() as db:
             total = db.execute('SELECT COUNT(*) FROM (SELECT 1 ' + source + group + ')',
                                params).fetchone()[0]
             rows = db.execute(
-                'SELECT x.asset_id,x.category,x.actor_id,x.input_shape_id,MAX(x.method) AS method,'
-                'MAX(x.origin) AS origin,MAX(x.path) AS path,MAX(x.updated) AS updated,'
-                'COUNT(*) AS finding_count,COUNT(DISTINCT x.run_id) AS run_count,'
-                "SUM(x.verdict='confirmed') AS confirmed_count,"
-                "SUM(x.verdict='suspicious') AS suspicious_count,"
-                "SUM(x.verdict='inconclusive') AS inconclusive_count "
-                + source + group + ' ORDER BY updated DESC,x.asset_id,x.category,x.actor_id,x.input_shape_id '
-                'LIMIT ? OFFSET ?', (*params, limit, offset),
+                'SELECT g.*,t.status AS canonical_status,t.severity AS canonical_severity,'
+                't.note AS canonical_note,t.revision AS canonical_revision '
+                'FROM (' + grouped + ') g '
+                'LEFT JOIN finding_group_triage t ON t.asset_id=g.asset_id AND t.category=g.category '
+                'AND t.actor_id=g.actor_id AND t.input_shape_id=g.input_shape_id AND t.owner=? '
+                'ORDER BY g.updated DESC,g.asset_id,g.category,g.actor_id,g.input_shape_id '
+                'LIMIT ? OFFSET ?', (*params, owner_val, limit, offset),
             ).fetchall()
         items = [dict(row) for row in rows]
         return {'items': items, 'total': total, 'offset': offset, 'limit': limit,
