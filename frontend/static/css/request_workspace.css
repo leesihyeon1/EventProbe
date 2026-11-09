@@ -1,0 +1,94 @@
+/* Request test workspace: use the same page and card rhythm as the other workspaces. */
+body:not([data-view="request"]) .request-workspace-heading { display:none; }
+body[data-view="request"] .main-content { background:var(--bg-secondary); }
+
+.request-workspace-heading { flex:none; padding:24px 28px 0; }
+.request-workspace-heading h1 { margin:0; color:var(--text-primary); font-size:24px; line-height:1.3; font-weight:700; }
+.request-workspace-heading p { margin:6px 0 0; color:var(--text-secondary); font-size:12px; }
+
+body[data-view="request"] .url-bar {
+  display:flex; flex-direction:column; align-items:stretch; gap:0; flex:none;
+  margin:18px 28px 12px; padding:0; border:1px solid var(--border);
+  border-radius:var(--radius-lg); background:var(--bg-primary);
+}
+.request-target-row,.request-options-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:12px 16px; }
+.request-target-row .url-input { flex:1 1 280px; min-width:160px; }
+.request-target-row .method-select { color:var(--text-primary); font-weight:600; }
+.request-target-row .btn-primary { min-width:104px; }
+.request-options-row { padding-top:8px; padding-bottom:8px; border-top:1px solid var(--border); gap:18px; }
+.request-options-row .defhdr-toggle { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--text-secondary); cursor:pointer; }
+.request-options-row .icon-button:first-of-type { margin-left:auto; }
+
+body[data-view="request"] .view-area { padding:0 28px 24px; background:var(--bg-secondary); }
+body[data-view="request"] .request-panel,
+body[data-view="request"] .response-area { border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--bg-primary); }
+.request-section-title { display:flex; align-items:baseline; flex-wrap:wrap; gap:10px; padding:12px 16px 0; }
+.request-section-title strong { color:var(--text-primary); font-size:13px; }
+.request-section-title span { color:var(--text-muted); font-size:11px; }
+body[data-view="request"] .tab-bar { padding:6px 12px 0; gap:2px; border-bottom:1px solid var(--border); }
+body[data-view="request"] .tab {
+  appearance:none; background:transparent; border:0; border-bottom:2px solid transparent;
+  border-radius:0; font:inherit; font-size:12px; color:var(--text-secondary);
+  padding:8px 12px; cursor:pointer; white-space:nowrap;
+}
+body[data-view="request"] .tab:hover { color:var(--text-primary); }
+body[data-view="request"] .tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+body[data-view="request"] .tab-content { background:var(--bg-primary); }
+body[data-view="request"] .row-divider { height:14px; background:transparent; border:0; }
+body[data-view="request"] .response-panel,
+body[data-view="request"] .analysis-panel { background:var(--bg-primary); }
+body[data-view="request"] .panel-header {
+  min-height:46px; background:var(--bg-primary); color:var(--text-primary);
+  font-size:13px; font-weight:650; letter-spacing:0; text-transform:none;
+}
+body[data-view="request"] .pane-divider { width:6px; background:var(--bg-secondary); }
+
+@media(max-width:1100px) {
+  .request-target-row .url-input { flex-basis:100%; order:-1; }
+  .request-target-row #methodCustom,.request-target-row #httpVersionCustom { order:0; }
+}
+@media(max-width:800px) {
+  .request-workspace-heading { padding:20px 16px 0; }
+  .request-workspace-heading h1 { font-size:21px; }
+  body[data-view="request"] .url-bar { margin:14px 16px 12px; }
+  .request-target-row,.request-options-row { padding-left:12px; padding-right:12px; }
+  .request-options-row .icon-button:first-of-type { margin-left:0; }
+  body[data-view="request"] .view-area { padding:0 16px 20px; }
+  body[data-view="request"] .analysis-panel { border-top:1px solid var(--border); }
+}
+/* Compact request workspace; allow page scrolling when panels exceed the viewport. */
+body[data-view="request"] .main-content { overflow-y:auto; container-type:inline-size; container-name:request-workspace; }
+body[data-view="request"].request-tools-collapsed .app-body > .sidebar { display:none; }
+.request-tools-heading { display:flex; align-items:center; justify-content:space-between; padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; flex:none; }
+.request-workspace-heading { display:flex; align-items:center; gap:14px; padding:10px 16px 0; }
+.request-workspace-heading h1 { font-size:16px; }
+body[data-view="request"] .url-bar { display:block; margin:10px 16px; }
+.request-target-row { padding:10px 12px; }
+.request-target-row .url-input { flex:1 1 220px; order:0; min-width:120px; }
+.request-options-row { padding:4px 12px; gap:12px; }
+body[data-view="request"] .view-area { flex:1 0 auto; overflow:visible; padding:0 16px 12px; }
+body[data-view="request"] .view[data-view="request"] { overflow:visible; min-height:480px; }
+body[data-view="request"] .request-panel { height:170px; min-height:110px; max-height:45dvh; }
+body[data-view="request"] .response-area { min-height:300px; }
+body[data-view="request"] .panel-header { min-height:38px; flex-wrap:wrap; gap:6px; }
+body[data-view="request"] .panel-header > div { flex-wrap:wrap; }
+body[data-view="request"] .tab-bar { flex-shrink:0; overflow-x:auto; padding-top:0; }
+body[data-view="request"] .tab { padding:7px 10px; flex-shrink:0; }
+body[data-view="request"] .analysis-panel { width:32%; min-width:220px; }
+body[data-view="request"] .row-divider { height:10px; }
+@container request-workspace (max-width:760px) {
+  .request-target-row #urlInput { order:-1; flex-basis:100%; }
+  #responseArea { flex-direction:column; overflow:visible; }
+  #responsePanel { min-height:280px; }
+  #analysisPanel { width:100% !important; max-width:none; min-height:220px; border-top:1px solid var(--border); }
+  #paneDivider { display:none; }
+}
+@media(max-width:800px) {
+  body[data-view="request"] .main-content { min-height:0; overflow:visible; }
+  body[data-view="request"] .sidebar { max-height:260px; }
+  body[data-view="request"] .view[data-view="request"] { flex:none; }
+  body[data-view="request"] .request-panel { max-height:none; }
+  .request-workspace-heading { padding:10px 12px 0; gap:10px; }
+  body[data-view="request"] .url-bar { margin:10px 12px; }
+  body[data-view="request"] .view-area { padding:0 12px 12px; }
+}

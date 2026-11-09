@@ -546,8 +546,8 @@ async function loadGlobalLookup(kind) {
     if(!result.items.length) {
       const filtered=!!state.assetId||[...query.entries()].some(([key,value])=>!['offset','limit'].includes(key)&&value&&value!=='false');
       lookupEmpty(container,grouped?'묶을 수 있는 발견이 없습니다.':filtered?'조건에 맞는 기록이 없습니다.':'아직 저장된 기록이 없습니다.',
-        grouped?'주소 구조가 없는 발견은 묶음 선택을 해제해 확인하세요.':filtered?'검색어나 기간, 조회 범위를 조정해 보세요.':kind==='findings'?'검증 작업에서 보안 발견이 기록되면 여기에 표시됩니다.':'요청 / 분석 또는 검증 작업에서 저장한 요청 이력이 여기에 표시됩니다.',
-        filtered||grouped?()=>resetGlobalLookup(kind):()=>switchView(kind==='findings'?'agent':'request'),filtered||grouped?'필터 초기화':kind==='findings'?'검증 작업 보기':'요청 / 분석 열기');
+        grouped?'주소 구조가 없는 발견은 묶음 선택을 해제해 확인하세요.':filtered?'검색어나 기간, 조회 범위를 조정해 보세요.':kind==='findings'?'검증 작업에서 보안 발견이 기록되면 여기에 표시됩니다.':'요청 테스트 또는 검증 작업에서 저장한 요청 이력이 여기에 표시됩니다.',
+        filtered||grouped?()=>resetGlobalLookup(kind):()=>switchView(kind==='findings'?'agent':'request'),filtered||grouped?'필터 초기화':kind==='findings'?'검증 작업 보기':'요청 테스트 열기');
     }
     count.textContent=`조회 결과 ${result.total}개${grouped?' 묶음':''} · ${state.page+1} / ${Math.max(1,Math.ceil(result.total/50))}페이지`;
     agentEl(prefix+'Prev').disabled=state.page===0;

@@ -13,13 +13,14 @@
   <link rel="stylesheet" href="/static/css/agent_history.css">
   <link rel="stylesheet" href="/static/css/global_lookup.css">
 <link rel="stylesheet" href="/static/css/triage.css">
+  <link rel="stylesheet" href="/static/css/request_workspace.css">
 </head>
 <body data-view="request">
 <aside class="workspace-nav" id="workspaceNav" aria-label="주 메뉴">
   <a class="workspace-brand" href="#request"><span class="brand-mark" data-icon="ShieldCheck"></span><span>EventProbe</span></a>
   <span class="nav-section-label">워크스페이스</span>
   <nav class="workspace-links">
-    <button class="topbar-tab active" data-view="request" onclick="switchView('request')"><span data-icon="SquareTerminal"></span><span>요청 / 분석</span></button>
+    <button class="topbar-tab active" data-view="request" onclick="switchView('request')"><span data-icon="SquareTerminal"></span><span>요청 테스트</span></button>
     <button class="topbar-tab" data-view="agent" onclick="switchView('agent')"><span data-icon="Crosshair"></span><span>자율 검증</span></button>
     <button class="topbar-tab" data-view="assets" onclick="switchView('assets')"><span data-icon="Layers"></span><span>자산·경로</span></button>
     <button class="topbar-tab" data-view="findings" onclick="switchView('findings')"><span data-icon="ListChecks"></span><span>보안 발견</span></button>
@@ -35,7 +36,7 @@
 <!-- ══════════════════════════════════ TOPBAR ══════════════════════════════════ -->
 <div class="topbar">
   <button class="icon-button" id="navToggle" aria-label="주 메뉴 접기" aria-expanded="true" aria-controls="workspaceNav" title="주 메뉴 접기"><span data-icon="PanelLeft"></span></button>
-  <div class="workspace-breadcrumb"><span>워크스페이스</span><span data-icon="ChevronRight"></span><strong id="workspaceTitle">요청 / 분석</strong></div>
+  <div class="workspace-breadcrumb"><span>워크스페이스</span><span data-icon="ChevronRight"></span><strong id="workspaceTitle">요청 테스트</strong></div>
   <div class="topbar-actions">
     <button class="icon-button" id="themeToggle" aria-label="어두운 테마" title="어두운 테마"><span data-icon="Moon"></span></button>
   </div>
@@ -45,7 +46,8 @@
 <div class="app-body">
 
   <!-- ── Sidebar ── -->
-  <div class="sidebar">
+  <div class="sidebar" id="requestToolsPanel">
+    <div class="request-tools-heading"><strong>요청 도구</strong><button type="button" class="icon-button" onclick="setRequestToolsOpen(false)" aria-label="페이로드 패널 접기" title="페이로드 패널 접기">‹</button></div>
 
     <!-- 사이드바 탭 전환 -->
     <div class="sidebar-tab-bar" role="tablist">
@@ -136,8 +138,14 @@
   <!-- ── Main Content ── -->
   <div class="main-content">
 
+    <header class="request-workspace-heading">
+      <button type="button" id="requestToolsToggle" class="btn btn-secondary" aria-controls="requestToolsPanel" aria-expanded="true" onclick="toggleRequestTools()">페이로드 패널 접기</button>
+      <h1>요청 테스트</h1>
+    </header>
+
     <!-- ── URL Bar ── -->
     <div class="url-bar">
+      <div class="request-target-row">
       <select id="methodSelect" class="method-select" onchange="onMethodChange()" title="HTTP 메서드. '직접 입력…' 선택 시 임의/비표준 메서드(PROPFIND·FOO 등)를 그대로 보낼 수 있습니다.">
         <option>GET</option>
         <option>POST</option>
@@ -161,9 +169,13 @@
       <input id="httpVersionCustom" class="url-input" type="text" placeholder="예: HTTP/1.1 (변형)" style="display:none;max-width:150px;flex:0 0 auto" title="비정상/커스텀 버전 문자열 그대로 전송">
       <input id="urlInput" class="url-input" type="text" aria-label="대상 요청 URL" placeholder="https://target.example.com/api/endpoint">
       <button class="btn btn-secondary" onclick="openImportModal()" title="Raw HTTP / cURL / wget 붙여넣기"><span data-icon="Clipboard"></span>가져오기</button>
+      <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()"><span data-icon="Send"></span>요청 보내기</button>
+      <button id="abortBtn" class="btn btn-secondary" onclick="abortSend()" title="전송 중인 요청을 중단합니다(타임아웃·지연 시)" style="display:none;white-space:nowrap;border-color:rgba(248,81,73,.4);color:var(--danger)">⨯ 중단</button>
+      </div>
+      <div class="request-options-row">
       <label class="defhdr-toggle" title="켜면 빠진 헤더를 브라우저 기본값으로 보충(사용자 지정 헤더는 유지). 붙여넣기 시 자동으로 꺼집니다.">
         <input type="checkbox" id="useDefaultsChk" checked>
-        <span>기본헤더</span>
+        <span>기본 헤더 추가</span>
       </label>
       <label class="defhdr-toggle" title="끄면(기본) 서버가 준 3xx 응답을 그대로 봅니다 — 오픈 리다이렉트 탐지에 필요. 켜면 최종 목적지까지 따라가고, 거쳐간 홉을 함께 표시합니다.">
         <input type="checkbox" id="followRedirChk">
@@ -171,8 +183,7 @@
       </label>
       <button class="icon-button" onclick="openHeaderProfileModal()" aria-label="기본 헤더 프로파일 편집" title="기본 헤더 프로파일 편집"><span data-icon="Settings2"></span></button>
       <button class="icon-button" onclick="clearRequest()" aria-label="요청·응답 초기화" title="요청·응답 초기화"><span data-icon="RotateCcw"></span></button>
-      <button id="sendBtn" class="btn btn-primary" onclick="sendRequest()"><span data-icon="Send"></span>전송</button>
-      <button id="abortBtn" class="btn btn-secondary" onclick="abortSend()" title="전송 중인 요청을 중단합니다(타임아웃·지연 시)" style="display:none;white-space:nowrap;border-color:rgba(248,81,73,.4);color:var(--danger)">⨯ 중단</button>
+      </div>
     </div>
 
     <!-- ── Inject Bar ── -->
@@ -210,15 +221,15 @@
     <!-- ── View Area ── -->
     <div class="view-area">
 
-      <!-- ═══ VIEW: 요청/분석 ═══ -->
+      <!-- ═══ VIEW: 요청 테스트 ═══ -->
       <div class="view active" data-view="request">
 
         <!-- 요청 탭 -->
         <div class="request-panel" id="requestPanel">
           <div class="tab-bar">
-            <div class="tab req-tab active" data-tab="params" onclick="switchReqTab('params')">Query Params</div>
-            <div class="tab req-tab" data-tab="headers" onclick="switchReqTab('headers')">Headers</div>
-            <div class="tab req-tab" data-tab="body" onclick="switchReqTab('body')">Body</div>
+            <button type="button" class="tab req-tab active" data-tab="params" onclick="switchReqTab('params')">쿼리</button>
+            <button type="button" class="tab req-tab" data-tab="headers" onclick="switchReqTab('headers')">요청 헤더</button>
+            <button type="button" class="tab req-tab" data-tab="body" onclick="switchReqTab('body')">요청 본문</button>
           </div>
 
           <div class="tab-content req-tab-content active" data-tab="params">
@@ -228,8 +239,8 @@
           <div class="tab-content req-tab-content" data-tab="headers">
             <!-- Headers 모드 전환 토글 -->
             <div class="headers-mode-bar">
-              <button class="hdr-mode-btn active" id="hdrModeKv" onclick="switchHeaderMode('kv')">Key-Value</button>
-              <button class="hdr-mode-btn" id="hdrModeRaw" onclick="switchHeaderMode('raw')">Raw</button>
+              <button class="hdr-mode-btn active" id="hdrModeKv" onclick="switchHeaderMode('kv')">항목별</button>
+              <button class="hdr-mode-btn" id="hdrModeRaw" onclick="switchHeaderMode('raw')">원문</button>
               <span id="hdrSyncHint" style="font-size:10px;color:var(--text-muted);margin-left:auto">전환 시 자동 변환</span>
             </div>
             <!-- Key-Value 편집기 -->
@@ -275,20 +286,20 @@
               </div>
             </div>
             <div class="tab-bar" style="background:var(--bg-primary)">
-              <div class="tab res-tab active" data-tab="body" onclick="switchResTab('body')">Response Body</div>
-              <div class="tab res-tab" data-tab="res-headers" onclick="switchResTab('res-headers')">Response Headers</div>
-              <div class="tab res-tab" data-tab="req-summary" onclick="switchResTab('req-summary')">Request</div>
-              <div class="tab res-tab" data-tab="diff" onclick="switchResTab('diff')" id="diffTab">
-                Diff <span id="diffBadge" style="display:none;font-size:9px;background:var(--accent-dark);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">●</span>
-              </div>
-              <div class="tab res-tab" data-tab="oob" onclick="switchResTab('oob')" id="oobTab">
+              <button type="button" class="tab res-tab active" data-tab="body" onclick="switchResTab('body')">응답 본문</button>
+              <button type="button" class="tab res-tab" data-tab="res-headers" onclick="switchResTab('res-headers')">응답 헤더</button>
+              <button type="button" class="tab res-tab" data-tab="req-summary" onclick="switchResTab('req-summary')">보낸 요청</button>
+              <button type="button" class="tab res-tab" data-tab="diff" onclick="switchResTab('diff')" id="diffTab">
+                응답 비교 <span id="diffBadge" style="display:none;font-size:9px;background:var(--accent-dark);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">●</span>
+              </button>
+              <button type="button" class="tab res-tab" data-tab="oob" onclick="switchResTab('oob')" id="oobTab">
                 OOB 콜백 <span id="oobBadge" style="display:none;font-size:9px;background:var(--danger);color:#fff;border-radius:8px;padding:1px 5px;margin-left:3px">0</span>
-              </div>
+              </button>
             </div>
             <!-- 응답 검색 바 -->
             <div class="res-search-bar" style="display:flex;gap:6px;align-items:center;padding:5px 8px;background:var(--bg-primary);border-bottom:1px solid var(--border)">
               <span style="font-size:12px">🔎</span>
-              <input id="resSearchInput" class="form-input" placeholder="응답에서 검색 (Body/Headers)…" spellcheck="false"
+              <input id="resSearchInput" class="form-input" aria-label="응답에서 검색" placeholder="응답 본문·헤더 검색" spellcheck="false"
                      style="flex:1;padding:3px 8px;font-size:12px" oninput="resSearch(true)"
                      onkeydown="if(event.key==='Enter'){event.preventDefault();resSearchNav(event.shiftKey?-1:1)}">
               <span id="resSearchCount" style="font-size:11px;color:var(--text-muted);white-space:nowrap;min-width:34px;text-align:right">-</span>

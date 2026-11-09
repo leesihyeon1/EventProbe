@@ -2,7 +2,7 @@
 let workspaceRuns = [], workspacePage = 0;
 const workspaceSelectedIds = new Set();
 const workspacePageSize = 10;
-const WORKSPACE_TITLES = {triage:'이벤트 분석',agent:'자율 검증', assets:'자산·경로', findings:'보안 발견', traffic:'요청 기록', settings:'설정 · 감사', bulk:'일괄 테스트', request:'요청 / 분석', results:'일괄 테스트 결과', report:'검증 리포트'};
+const WORKSPACE_TITLES = {triage:'이벤트 분석',agent:'자율 검증', assets:'자산·경로', findings:'보안 발견', traffic:'요청 기록', settings:'설정 · 감사', bulk:'일괄 테스트', request:'요청 테스트', results:'일괄 테스트 결과', report:'검증 리포트'};
 function uiNode(tag, cls, text) {
   const el = document.createElement(tag); if (cls) el.className = cls;
   if (text !== undefined) el.textContent = text; return el;
@@ -31,6 +31,16 @@ function updateNavToggle() {
   const expanded=matchMedia('(max-width:800px)').matches ? document.body.classList.contains('mobile-nav-open') : !document.body.classList.contains('nav-collapsed');
   const b=agentEl('navToggle'); b.setAttribute('aria-expanded',String(expanded));
   b.title=expanded?'주 메뉴 접기':'주 메뉴 펼치기'; b.setAttribute('aria-label',b.title);
+}
+function setRequestToolsOpen(open) {
+  document.body.classList.toggle('request-tools-collapsed', !open);
+  const button=document.getElementById('requestToolsToggle');
+  button.setAttribute('aria-expanded',String(open));
+  button.textContent=open?'페이로드 패널 접기':'페이로드 패널 펼치기';
+  try { localStorage.setItem('ep-request-tools-open',String(open)); } catch(e) {}
+}
+function toggleRequestTools() {
+  setRequestToolsOpen(document.body.classList.contains('request-tools-collapsed'));
 }
 function applyWorkspaceTheme(theme) {
   document.documentElement.dataset.theme=theme;
@@ -407,6 +417,9 @@ function restoreWorkspaceRoute() {
   switchView(match?.[1]||'request');
 }
 window.addEventListener('DOMContentLoaded',()=>{
+  let toolsOpen=false;
+  try { toolsOpen=localStorage.getItem('ep-request-tools-open')==='true'; } catch(e) {}
+  setRequestToolsOpen(toolsOpen);
   hydrateIcons();
   let theme='light';try{theme=localStorage.getItem('ep-theme')||'light';}catch(e){}
   applyWorkspaceTheme(theme==='dark'?'dark':'light');

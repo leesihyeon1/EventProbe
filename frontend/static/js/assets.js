@@ -162,7 +162,7 @@ function drawAssets() {
   agentEl('assetItemPrev').disabled=!assets.global||assets.itemPage===0;
   agentEl('assetItemNext').disabled=!assets.global||(assets.itemPage+1)*50>=assets.total;
   const graph=agentEl('assetGraph');graph.replaceChildren();
-  if(!rows.length){graph.append(uiNode('p','sm-empty','표시할 경로가 없습니다. 검색·기간을 확인하거나 요청 / 분석에서 기록을 생성해 주세요.'),assetControl('필터 초기화',resetAssetFilters));agentEl('assetDetail').replaceChildren();agentEl('assetOpen').disabled=true;return;}
+  if(!rows.length){graph.append(uiNode('p','sm-empty','표시할 경로가 없습니다. 검색·기간을 확인하거나 요청 테스트에서 기록을 생성해 주세요.'),assetControl('필터 초기화',resetAssetFilters));agentEl('assetDetail').replaceChildren();agentEl('assetOpen').disabled=true;return;}
   if(!rows.some(r=>r.key===assets.selected))assets.selected=rows[0].key;
   if(agentEl('assetLayoutMode').value!=='tree') {
     const groups=new Map();
