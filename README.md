@@ -28,6 +28,8 @@ EventProbe는 WAF/IDS/IPS 보안 장비의 이벤트 탐지 여부를 검증하�
 
 ## 빠른 시작
 
+ARTEX 브랜치에서 PR과 자동 검사를 사용하는 개발 절차는 [ARTEX 개발 흐름](docs/development-workflow.md)을 참고하세요.
+
 ```bash
 # 1. 클론
 git clone https://github.com/leesihyeon1/EventProbe.git
