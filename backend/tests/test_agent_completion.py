@@ -86,6 +86,19 @@ def test_provider_auth_failure_does_not_retry(tmp_path):
     assert run['conclusion']['completion'] == 'partial'
 
 
+def test_provider_function_404_pauses_once_with_actionable_reason(tmp_path):
+    response = httpx.Response(404, json={'detail':
+        "Function 'synthetic-function-id': Not found for account 'synthetic-account-id'"})
+    async def choose(ctx):
+        raise PlannerServiceError(404, response)
+    run = execute(tmp_path, choose)
+    assert run['state'] == 'paused'
+    assert run['data']['ai_calls'] == 1
+    assert run['data']['requests'] == 1
+    assert 'API 키·계정 권한' in run['data']['reason']
+    assert 'synthetic-function-id' not in json.dumps(run)
+
+
 def test_missing_basis_can_be_repaired(tmp_path):
     calls = []
     async def choose(ctx):

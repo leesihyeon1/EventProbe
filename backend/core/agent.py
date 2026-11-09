@@ -24,7 +24,7 @@ from core.agent_models import Action, RunSpec, IncidentEvent, origin
 from core.agent_store import get_store, uid
 from core.agent_runtime_store import RequestBudgetExceeded
 from core.agent_runtime_lock import RuntimeLock
-from core.model_routing import ModelRouter, ModelUnavailable, validate_chain, prepaid_model_attempt
+from core.model_routing import ModelRouter, ModelUnavailable, validate_chain, prepaid_model_attempt, provider_function_missing
 from core.model_store import ModelCallBudgetExceeded
 from core.agent_outcome import build_conclusion
 from core.agent_intent import requested_categories
@@ -86,8 +86,12 @@ class PlannerOutputError(ValueError):
 
 
 class PlannerServiceError(ValueError):
-    def __init__(self, status):
-        super().__init__(f'AI HTTP {status}; 기록을 유지하고 일시정지했습니다.')
+    def __init__(self, status, response=None):
+        unavailable = response is not None and provider_function_missing(response)
+        message = ('모델 제공자가 이 API 계정의 실행 함수를 찾지 못했습니다(HTTP 404). '
+                   'API 키·계정 권한과 제공자 상태를 확인한 뒤 재개하세요.' if unavailable else
+                   f'AI HTTP {status}; 기록을 유지하고 일시정지했습니다.')
+        super().__init__(message)
         self.retryable = status in (408, 429, 500, 502, 503, 504)
 
 
@@ -521,7 +525,7 @@ async def _default_plan_planner(ctx: dict) -> dict:
     r = await ai._post_chat(ai._base_url(), {'Authorization': 'Bearer ' + key,
                             'Content-Type': 'application/json'}, payload, tries=1)
     if r.status_code != 200:
-        raise ValueError(f'AI HTTP {r.status_code}; 계획 생성 실패.')
+        raise PlannerServiceError(r.status_code, r)
     return ai._extract_json(r.json()['choices'][0]['message']['content'])
 
 
@@ -763,7 +767,7 @@ async def choose_action(context):
     r = await ai._post_chat(ai._base_url(), {'Authorization': 'Bearer ' + ai._api_key(),
                             'Content-Type': 'application/json'}, payload, tries=1)
     if r.status_code != 200:
-        raise PlannerServiceError(r.status_code)
+        raise PlannerServiceError(r.status_code, r)
     try:
         action = Action.model_validate(ai._extract_json(r.json()['choices'][0]['message']['content']))
         return action.model_copy(update={'basis': [aliases.get(ref, ref) for ref in action.basis]})
@@ -1769,7 +1773,7 @@ class AgentManager:
             cplan = confirmation_plan(action, req)
             if not cplan:
                 return plan_mod.StepResult(verdict='inconclusive', status_code=status0)
-            rounds, evidence = [], [baseline]
+            rounds, round_oracles, evidence = [], [], [baseline]
             for round_index in range(2):
                 observations, oracle = [], []
                 for probe in confirmation_plan(action, req, round_index):
@@ -1784,15 +1788,19 @@ class AgentManager:
                     decision = confirm.decide('auth', oracle, protected_marker=spec.protected_marker)
                 else:
                     decision = confirm.decide(action.category, oracle)
-                if any(o['response']['truncated'] or o['response']['status'] in (401, 403, 429, 503)
+                invalid = any(o['response']['truncated'] or o['response']['status'] in (401, 403, 429, 503)
                        or any(w.get('severity') == 'block' for w in
-                              (o['analysis'].get('validity') or {}).get('warnings', [])) for o in observations):
+                              (o['analysis'].get('validity') or {}).get('warnings', [])) for o in observations)
+                if invalid:
                     decision['techniques'] = []
                     decision['observations'] = []
                 rounds.append(decision)
+                round_oracles.append([] if invalid else oracle)
                 evidence += observations
             common = {t['name'] for t in rounds[0]['techniques']} & {t['name'] for t in rounds[1]['techniques']}
             common = {name for name in common if 'DB 에러 유발' not in name}
+            if action.category == 'sqli' and action.confirmation_profile in ('sql_string', 'sql_numeric', 'sql_comment'):
+                common.update(t['name'] for t in agent_sql.repeated_boolean_evidence(round_oracles))
             suspicious_rounds = [any(o.get('level') == 'suspicious' for o in r.get('observations', [])) for r in rounds]
             suspicious = any(suspicious_rounds) if action.confirmation_profile == 'full' else all(suspicious_rounds)
             verdict = {'status': 'confirmed' if common else 'suspicious' if suspicious else 'inconclusive',
@@ -2214,7 +2222,7 @@ class AgentManager:
                             raise ValueError('이 유형은 차등 확증을 지원하지 않습니다.')
                         if data['requests'] + 2 * len(plan) > spec.max_requests:
                             raise LimitReached('차등 확증 두 회차를 수행할 요청 예산이 부족합니다.')
-                        rounds, evidence = [], [baseline]
+                        rounds, round_oracles, evidence = [], [], [baseline]
                         for round_index in range(2):
                             observations, oracle = [], []
                             for probe in confirmation_plan(action, req, round_index):
@@ -2230,16 +2238,20 @@ class AgentManager:
                             else:
                                 decision = confirm.decide(action.category, oracle)
                             # Drop apparent confirmations when a probe was blocked/truncated or its prerequisites failed.
-                            if any(o['response']['truncated'] or o['response']['status'] in (401,403,429,503)
+                            invalid = any(o['response']['truncated'] or o['response']['status'] in (401,403,429,503)
                                    or any(w.get('severity') == 'block' for w in
-                                          (o['analysis'].get('validity') or {}).get('warnings', [])) for o in observations):
+                                          (o['analysis'].get('validity') or {}).get('warnings', [])) for o in observations)
+                            if invalid:
                                 decision['techniques'] = []
                                 decision['observations'] = []
                             rounds.append(decision)
+                            round_oracles.append([] if invalid else oracle)
                             evidence += observations
                         common = {t['name'] for t in rounds[0]['techniques']} & {t['name'] for t in rounds[1]['techniques']}
                         # DB error text by itself remains a signal, even when reproducible.
                         common = {name for name in common if 'DB 에러 유발' not in name}
+                        if action.category == 'sqli' and action.confirmation_profile in ('sql_string', 'sql_numeric', 'sql_comment'):
+                            common.update(t['name'] for t in agent_sql.repeated_boolean_evidence(round_oracles))
                         suspicious_rounds = [any(o.get('level') == 'suspicious' for o in r.get('observations', [])) for r in rounds]
                         suspicious = any(suspicious_rounds) if action.confirmation_profile == 'full' else all(suspicious_rounds)
                         verdict = {'status': 'confirmed' if common else 'suspicious' if suspicious else 'inconclusive',

@@ -345,9 +345,12 @@ function renderAgentRunHeader(run) {
   const revoked=spec.approved_plan_revoked_at!=null;
   const nextStep=!revoked && data.spec?.mode==='plan' && data.plan_checkpoint?.phase!=='done' && data.plan_checkpoint?.current
     ? ` · 계획 단계 ${data.plan_checkpoint.current}` : '';
+  const reason = data.reason?.startsWith('AI HTTP 404;') && run.latest_model_call?.http_status===404
+    ? 'AI 호출 404: 모델 제공자가 실행 요청을 처리하지 못했습니다. API 키·계정 권한과 제공자 상태를 확인한 뒤 재개하세요.'
+    : data.reason;
   agentEl('agentStatus').textContent=(data.category?`${data.category} · `:'')+
     (data.name?`${spec.goal} · `:'')+(data.retest_of?'발견 재검증 실행 · ':'')+
-    (data.reason||'실행 기록 수집 중')+nextStep;
+    (reason||'실행 기록 수집 중')+nextStep;
   agentEl('agentStop').disabled=!['running','queued'].includes(run.state);
   const reviewPhase=data.plan_checkpoint?.phase;
   agentEl('agentResume').disabled=revoked||['approval_required','denied'].includes(reviewPhase)||!['paused','interrupted'].includes(run.state);

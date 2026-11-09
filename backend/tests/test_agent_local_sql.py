@@ -49,8 +49,39 @@ def test_local_query_finishes_without_model(tmp_path, monkeypatch, parameterized
     assert run['state'] == 'completed', run['data'].get('reason')
     assert run['data']['ai_calls'] == 0
     assert run['data']['requests'] <= 24
-    assert run['conclusion']['verdict'] == ('inconclusive' if parameterized else 'suspicious')
-    assert run['conclusion']['counts']['confirmed'] == 0
+    assert run['conclusion']['verdict'] == ('inconclusive' if parameterized else 'confirmed')
+    confirmed = run['conclusion']['counts']['confirmed']
+    if parameterized:
+        assert confirmed == 0
+    else:
+        assert confirmed >= 1
+
+
+@pytest.mark.parametrize('parameterized', [False, True])
+def test_category_filter_boolean_sql_injection_is_confirmed(tmp_path, monkeypatch, parameterized):
+    """A category filter lab accepts quote/OR/comment and returns extra rows."""
+    with sqlite3.connect(':memory:') as db:
+        db.execute('CREATE TABLE products (category TEXT, name TEXT)')
+        db.executemany('INSERT INTO products VALUES (?,?)', [
+            ('Food & Drink', 'Tea'), ('Food & Drink', 'Coffee'),
+            ('Clothing', 'Jacket'), ('Gifts', 'Notebook')])
+        def handler(request):
+            value = request.url.params['category']
+            try:
+                if parameterized:
+                    rows = db.execute('SELECT name FROM products WHERE category=?', (value,)).fetchall()
+                else:
+                    rows = db.execute(f"SELECT name FROM products WHERE category='{value}'").fetchall()
+            except sqlite3.Error:
+                return httpx.Response(500, text='query error')
+            body = '<html><main>' + ''.join('<article>' + row[0] * 30 + '</article>' for row in rows) + '</main></html>'
+            return httpx.Response(200, text=body)
+        run = execute(tmp_path, monkeypatch, handler,
+                      request={'url': 'https://fixture.test/filter?category=Food+%26+Drink'})
+    confirms = [e['data'] for e in run['events'] if e['kind'] == 'action' and e['data']['kind'] == 'confirm']
+    assert confirms and confirms[0]['param'] == 'category'
+    assert run['conclusion']['verdict'] == ('inconclusive' if parameterized else 'confirmed')
+    assert run['data']['requests'] <= 24
 
 
 @pytest.mark.parametrize('parameterized', [False, True])

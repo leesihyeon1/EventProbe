@@ -18,7 +18,7 @@ from core.model_store import ModelCallBudgetExceeded
 
 ACTIVE_MODEL = ContextVar('eventprobe_model_route', default=None)
 PREPAID_MODEL_ATTEMPT = ContextVar('eventprobe_prepaid_model_attempt', default=False)
-FAILOVER_CODES = {'quota', 'auth', 'rate_limited', 'temporary', 'transport'}
+FAILOVER_CODES = {'quota', 'auth', 'rate_limited', 'temporary', 'transport', 'provider_unavailable'}
 
 
 class ModelUnavailable(ValueError):
@@ -187,6 +187,8 @@ class BoundModel:
 
 def classify_failure(response):
     status = response.status_code
+    if provider_function_missing(response):
+        return 'provider_unavailable'
     if status == 402:
         return 'quota'
     if status == 401:
@@ -209,6 +211,14 @@ def classify_failure(response):
     if 400 <= status < 500:
         return 'invalid_request'
     return 'unexpected_status'
+
+
+def provider_function_missing(response):
+    """Identify the NVIDIA account/function 404 without retaining its IDs."""
+    if response.status_code != 404:
+        return False
+    detail = response.text[:2000].lower()
+    return 'function ' in detail and 'not found for account' in detail
 
 
 def actual_usage(response):

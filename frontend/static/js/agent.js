@@ -1341,7 +1341,7 @@ async function loadModelCallHistory(runId) {
       const row=document.createElement('p');
       const tokens=call.actual_tokens==null?'토큰 미제공':`${call.actual_tokens} 토큰`;
       const states={started:'호출 중',completed:'응답 수신',error:'실패',interrupted:'중단·결과 미확인',cancelled:'취소',blocked:'반출 차단'};
-      const errors={quota:'할당량 부족',auth:'인증 실패',rate_limited:'호출 제한',temporary:'일시 장애',transport:'연결 오류',invalid_request:'요청 거절',permission:'접근 거부',redirect:'주소 변경 거절',egress_blocked:'반출 정책 차단',process_interrupted:'서버 재시작',cancelled:'취소',internal_error:'내부 처리 오류',unexpected_status:'응답 상태 오류'};
+      const errors={quota:'할당량 부족',auth:'인증 실패',rate_limited:'호출 제한',temporary:'일시 장애',provider_unavailable:'제공자 실행 불가',transport:'연결 오류',invalid_request:'요청 거절',permission:'접근 거부',redirect:'주소 변경 거절',egress_blocked:'반출 정책 차단',process_interrupted:'서버 재시작',cancelled:'취소',internal_error:'내부 처리 오류',unexpected_status:'응답 상태 오류'};
       const latency=call.latency_ms==null?'지연 미확인':`${Math.round(call.latency_ms)}ms`;
       row.textContent=`${call.model} · ${states[call.status]||call.status}${call.error_code?' · '+(errors[call.error_code]||call.error_code):''} · ${latency} · ${tokens}`;
       rows.append(row);

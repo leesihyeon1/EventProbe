@@ -2,6 +2,7 @@
 import html
 import json
 import re
+from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, quote, quote_plus
 
 
@@ -56,3 +57,42 @@ def without_reflection(body, value):
                                 quote(value, safe=''), quote_plus(value)}, key=len, reverse=True):
             body = body.replace(spelling, '[input]')
     return body
+
+
+def repeated_boolean_evidence(round_oracles):
+    """Confirm a SQL predicate only when two independent, reversed pairs agree.
+
+    The injected value is removed from each response before this check. A
+    status change, reflected input, or a single length difference is not proof.
+    """
+    if len(round_oracles) != 2:
+        return []
+    pairs = []
+    for oracle in round_oracles:
+        by = {item['role']: item for item in oracle}
+        if not all(role in by for role in ('baseline', 'bool_true', 'bool_false')):
+            return []
+        base, true, false = (by[role] for role in ('baseline', 'bool_true', 'bool_false'))
+        if any(item.get('status') != 200 for item in (base, true, false)):
+            return []
+        bodies = [item.get('body') or '' for item in (base, true, false)]
+        if not bodies[0]:
+            return []
+        base_len, true_len, false_len = map(len, bodies)
+        gap = max(40, round(base_len * .08))
+        true_similarity = SequenceMatcher(None, bodies[0][:32000], bodies[1][:32000]).quick_ratio()
+        false_similarity = SequenceMatcher(None, bodies[0][:32000], bodies[2][:32000]).quick_ratio()
+        baseline_preserved = (abs(true_len - base_len) <= max(64, round(base_len * .08))
+                              and base_len - false_len >= gap
+                              and true_similarity >= .90
+                              and true_similarity - false_similarity >= .06)
+        expanded = true_len - base_len >= gap and base_len - false_len >= gap
+        if not (baseline_preserved or expanded):
+            return []
+        pairs.append((true_len, false_len, base_len))
+    for index in (0, 1):
+        lengths = [pair[index] for pair in pairs]
+        if abs(lengths[0] - lengths[1]) > max(64, round(max(lengths) * .05)):
+            return []
+    return [{'name': '반복 불린 기반 SQLi (참/거짓 대조)',
+             'evidence': '서로 다른 조건값 2회에서 참 응답은 정상 결과를 유지하거나 확장하고, 거짓 응답은 반복해서 결과가 감소함'}]

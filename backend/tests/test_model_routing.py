@@ -12,7 +12,7 @@ from core.agent_models import RunSpec
 from core.agent_runtime_store import RunConflict
 from core.agent_store import Store
 from core.model_profiles import ModelProfile
-from core.model_routing import ACTIVE_MODEL, ModelRouter, ModelUnavailable, validate_chain
+from core.model_routing import ACTIVE_MODEL, ModelRouter, ModelUnavailable, validate_chain, classify_failure
 from core.model_store import ModelCallBudgetExceeded
 
 
@@ -97,6 +97,13 @@ def test_failover_accounts_each_attempt_and_preserves_real_usage(tmp_path, monke
     assert {x['model'] for x in calls} == {'primary', 'backup'}
     assert calls[0]['actual_tokens'] == 7
     assert 'synthetic-key-never-persist' not in json.dumps(calls)
+
+
+def test_provider_account_function_404_is_classified_without_persisting_identifiers():
+    response = httpx.Response(404, json={'detail':
+        "Function 'synthetic-function-id': Not found for account 'synthetic-account-id'"})
+    assert classify_failure(response) == 'provider_unavailable'
+    assert classify_failure(httpx.Response(404, text='temporary missing route')) == 'temporary'
 
 
 def test_failover_cannot_exceed_task_ai_budget(tmp_path, monkeypatch):
