@@ -25,10 +25,10 @@ GitHub에서 `codex/작업-이름` → `harden/artex-port-2026-11-08` PR을 엽�
 
 `.github/workflows/artex-ci.yml`은 ARTEX 대상 PR, ARTEX에 대한 푸시, 수동 실행에서 동작합니다.
 
-- **Backend tests and syntax**: Python 구문 검사 및 백엔드 전체 테스트
+- **Backend tests and syntax**: Python 구문 검사, Ruff의 오류 중심 정적 검사 및 백엔드 전체 테스트
 - **Frontend tests and syntax**: JavaScript 구문 검사 및 프런트엔드 전체 테스트
 - **CodeQL (python / javascript-typescript)**: Python 및 JavaScript 보안 코드 검사
 
-실제 병합 차단을 적용하려면 GitHub 저장소의 **Settings → Rules → Rulesets**에서 ARTEX 브랜치에 대한 규칙을 추가하고, PR 요구 및 위 검사들의 통과를 요구해야 합니다. 검사가 첫 실행을 마쳐야 선택 목록에 나타날 수 있습니다. 직접 푸시를 막고 싶다면 관리자 우회도 제한합니다. 이 설정은 저장소 권한을 가진 관리자가 확인해야 합니다.
+실제 병합 차단을 적용하려면 GitHub 저장소의 **Settings → Rules → Rulesets**에서 ARTEX 브랜치에 대한 규칙을 추가하고, PR 요구 및 위 검사들의 통과를 요구해야 합니다. 검사가 첫 실행을 마쳐야 선택 목록에 나타날 수 있습니다. 직접 푸시를 막고 싶다면 관리자 우회도 제한합니다.
 
 테스트는 외부 서버를 스캔하지 않으며 API 키를 주입하지 않습니다. 민감한 로그나 `.env`는 커밋하지 않습니다.
